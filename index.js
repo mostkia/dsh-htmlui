@@ -992,6 +992,21 @@ export function apply(ctx, config) {
     additionalProperties: false,
   };
 
+  function renderTemplateAck(value) {
+    if (value.ok !== true) {
+      return ['[html-ui-template]', 'status=failed', `op=${value.op}`, `error=${value.error ?? 'unknown'}`, value.hint ?? '']
+        .filter((line) => line.length > 0)
+        .join('\n');
+    }
+    const lines = ['[html-ui-template]', 'status=ok', `op=${value.op}`];
+    if (value.name !== undefined) lines.push(`name=${value.name}`);
+    if (value.bytes !== undefined) lines.push(`bytes=${value.bytes}`);
+    if (value.count !== undefined) lines.push(`count=${value.count}`);
+    if (value.summary !== undefined) lines.push(`list=${value.summary}`);
+    lines.push('next=html_ui op=render template=<name>');
+    return lines.join('\n');
+  }
+
   function renderAck(value) {
     if (value.ok !== true) {
       return [`[html-ui]`, `status=failed`, `op=${value.op}`, `error=${value.error ?? 'unknown'}`, value.hint ?? '']
@@ -1213,20 +1228,11 @@ export function apply(ctx, config) {
         required: ['ok', 'op'],
         additionalProperties: false,
       },
-      render: (_args, value) => {
-        if (value.ok !== true) {
-          return ['[html-ui-template]', 'status=failed', `op=${value.op}`, `error=${value.error ?? 'unknown'}`, value.hint ?? '']
-            .filter((line) => line.length > 0)
-            .join('\n');
-        }
-        const lines = ['[html-ui-template]', 'status=ok', `op=${value.op}`];
-        if (value.name !== undefined) lines.push(`name=${value.name}`);
-        if (value.bytes !== undefined) lines.push(`bytes=${value.bytes}`);
-        if (value.count !== undefined) lines.push(`count=${value.count}`);
-        if (value.summary !== undefined) lines.push(`list=${value.summary}`);
-        lines.push('next=html_ui op=render template=<name>');
-        return lines.join('\n');
-      },
+      // The harness uses this return value as the result's content blocks, so it must
+      // be an array of blocks — not a string. Returning a string made every call to
+      // this tool fail with "content.some is not a function", which no test caught
+      // because they call `execute` and never `render`.
+      render: (_args, value) => [{ type: 'text', text: renderTemplateAck(value) }],
       presentationMeta: (_args, value) =>
         lossless({
           htmlui: value.ok === true,

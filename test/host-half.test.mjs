@@ -1041,6 +1041,38 @@ test('a composed document over the cap is refused before it is stored', async ()
   assert.equal(readdirSync(join(process.env.DSH_HTMLUI_ROOT, 'ui')).length, before, 'nothing is stored');
 });
 
+test('every tool renders content blocks, not a bare string', () => {
+  // The harness takes `output.render`'s return value as the result's `content` and
+  // calls `.some()` on it. A tool that returned a string therefore failed every single
+  // call — the template tool did, and no test noticed because they only call execute.
+  const samples = {
+    html_ui: [
+      { ok: true, op: 'render', uiId: 'ui-aaaa0001', title: 'T', placement: 'inline', size: '', bytes: 10, revision: 1 },
+      { ok: false, op: 'render', error: 'nope' },
+      { ok: true, op: 'list', count: 1, summary: 'ui-aaaa0001 inline T' },
+    ],
+    html_ui_template: [
+      { ok: true, op: 'save', name: 'x', bytes: 10 },
+      { ok: false, op: 'show', error: 'unknown template: x' },
+      { ok: true, op: 'list', count: 1, summary: 'x' },
+    ],
+  };
+  for (const definition of [tool('html_ui'), tool('html_ui_template')]) {
+    const values = samples[definition.name];
+    assert.ok(Array.isArray(values), `no samples for ${definition.name}`);
+    for (const value of values) {
+      const blocks = definition.output.render({}, value);
+      assert.ok(Array.isArray(blocks), `${definition.name} must render an array of content blocks`);
+      assert.ok(blocks.length > 0, `${definition.name} must render at least one block`);
+      for (const block of blocks) {
+        assert.equal(block.type, 'text');
+        assert.equal(typeof block.text, 'string');
+        assert.ok(block.text.length > 0, `${definition.name} rendered an empty block`);
+      }
+    }
+  }
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.
