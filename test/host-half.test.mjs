@@ -1184,8 +1184,13 @@ test('a project at a higher security level serves its own files, and only then',
       body: JSON.stringify({ uiId, sessionId: 'session-sec' }),
     });
     const url = JSON.parse(ticket.text).url;
-    const match = /[?&]t=([^&]+)/u.exec(url);
-    return { token: match[1], url, file: (name) => `/plugins/@mostkia/dsh-htmlui/files/${uiId}/${name}?t=${match[1]}` };
+    if (typeof url !== 'string') throw new Error(`ticket said: ${ticket.text}`);
+    // The capability is in the path for a project that serves files, and in the query for
+    // the plain document route. The helper reads whichever this interface uses.
+    const pathMatch = /\/files\/[^/]+\/([^/]+)\//u.exec(url);
+    const queryMatch = /[?&]t=([^&]+)/u.exec(url);
+    const capability = pathMatch === null ? queryMatch[1] : pathMatch[1];
+    return { token: capability, url, file: (name) => `/plugins/@mostkia/dsh-htmlui/files/${uiId}/${capability}/${name}` };
   };
   const getRoute = (url) => callRoute(route(), { method: 'GET', url, headers: { host: '127.0.0.1:3080' } });
 
@@ -1211,11 +1216,19 @@ test('a project at a higher security level serves its own files, and only then',
   assert.match(document.text, /<p>site<\/p>/u);
 
   // Escaping the project folder is refused rather than read.
-  const escaped = await getRoute(`/plugins/@mostkia/dsh-htmlui/files/${rendered.uiId}/../../../settings.json?t=${ticket.token}`);
+  const escaped = await getRoute(`/plugins/@mostkia/dsh-htmlui/files/${rendered.uiId}/${ticket.token}/../../../settings.json`);
   assert.ok(escaped.status === 403 || escaped.status === 404, `a path outside the project is not served (${escaped.status})`);
 
-  const wrongToken = await getRoute(`/plugins/@mostkia/dsh-htmlui/files/${rendered.uiId}/app.js?t=nope`);
+  const wrongToken = await getRoute(`/plugins/@mostkia/dsh-htmlui/files/${rendered.uiId}/nope/app.js`);
   assert.equal(wrongToken.status, 403, 'and the capability token is still required');
+
+  // A nested relative reference — `css/style.css` — carries the token from the document's
+  // own URL, because a subresource request has no query string to put it in.
+  mkdirSync(join(own, 'site', 'css'), { recursive: true });
+  writeFileSync(join(own, 'site', 'css', 'style.css'), 'body{color:red}', 'utf8');
+  const nested = await getRoute(ticket.file('css/style.css'));
+  assert.equal(nested.status, 200, `a nested relative path resolves: ${nested.text.slice(0, 60)}`);
+  assert.match(nested.text, /color:red/u);
   clearTemplatesDir();
 });
 

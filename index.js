@@ -1133,13 +1133,19 @@ export function apply(ctx, config) {
   function documentUrl(uiId, theme, revision, security) {
     const suffix = theme === 'dark' || theme === 'light' ? `&theme=${theme}` : '';
     const rev = Number.isFinite(revision) ? `&r=${revision}` : '';
-    const query = `t=${tokenFor(uiId)}${rev}${suffix}`;
     // A project that may serve its own files gets a directory-shaped URL, so every
-    // relative reference in the document (`./app.js`, `./img/logo.png`) resolves beside
-    // it instead of landing under the plugin's own route and 404-ing.
-    return security === undefined || security === 'strict'
-      ? `${ROUTE_PREFIX}/ui/${uiId}?${query}`
-      : `${ROUTE_PREFIX}/files/${uiId}/index.html?${query}`;
+    // relative reference in the document (`./app.js`, `./img/logo.png`, `css/style.css`)
+    // resolves beside it instead of landing under the plugin's own route and 404-ing.
+    //
+    // The capability token rides in the *path*, not the query, because a relative
+    // subresource request carries no query string of its own: with the token in the
+    // query, every stylesheet and script the project references arrived unauthorised and
+    // was answered 403. In the path, each of those URLs is generated from this one and
+    // therefore carries the token automatically, and the capability check is unchanged.
+    if (security === undefined || security === 'strict') {
+      return `${ROUTE_PREFIX}/ui/${uiId}?t=${tokenFor(uiId)}${rev}${suffix}`;
+    }
+    return `${ROUTE_PREFIX}/files/${uiId}/${tokenFor(uiId)}/index.html?${rev}${suffix}`.replace('?&', '?').replace(/\?$/u, '');
   }
 
   function recordSummary(meta) {
@@ -1950,9 +1956,13 @@ export function apply(ctx, config) {
     const rest = url.pathname.slice(`${ROUTE_PREFIX}/files/`.length);
     const parts = rest.split('/').filter((part) => part.length > 0);
     const uiId = parts.shift();
+    // The capability arrives as the first path segment — that is how a relative
+    // subresource reference carries it, because such a request has no query string of its
+    // own — or as the query, when the frame itself was opened. Both are checked the same.
+    const pathToken = parts.length > 0 && tokenMatches(uiId, parts[0]) ? parts.shift() : undefined;
+    const capability = pathToken ?? url.searchParams.get('t') ?? '';
     const wanted = parts.length === 0 ? 'index.html' : parts.join('/');
-    const token = url.searchParams.get('t') ?? '';
-    if (uiId === undefined || uiId.length === 0 || !tokenMatches(uiId, token)) {
+    if (uiId === undefined || uiId.length === 0 || !tokenMatches(uiId, capability)) {
       sendText(res, 403, 'forbidden');
       return;
     }
@@ -1969,7 +1979,7 @@ export function apply(ctx, config) {
     // The document itself, composed exactly as the plain route composes it: same bridge,
     // same handshake, same policy for its level.
     if (wanted === 'index.html' || wanted === '') {
-      return serveDocument(req, res, url, current, uiId, token);
+      return serveDocument(req, res, url, current, uiId, capability);
     }
     const template = typeof current.meta.template === 'string' ? store.readTemplate(current.meta.template) : undefined;
     if (template === undefined) {
