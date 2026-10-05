@@ -182,10 +182,11 @@ export const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 /**
  * Apply the host half against a fresh fake context and a throwaway data root.
+ * @param options.entry - module to activate; defaults to this repository's source.
  * @returns the context pieces, the route helpers, and a disposer.
  */
-export async function createHarness({ config = {}, services = {} } = {}) {
-  const { apply } = await import('../index.js');
+export async function createHarness({ config = {}, services = {}, entry = '../index.js' } = {}) {
+  const { apply } = await import(entry);
   const scratch = mkdtempSync(join(tmpdir(), 'dsh-htmlui-robust-'));
   const previousRoot = process.env.DSH_HTMLUI_ROOT;
   process.env.DSH_HTMLUI_ROOT = join(scratch, 'data');

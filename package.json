@@ -48,7 +48,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node test/package.test.mjs && node test/doc-contract.test.mjs && node test/host-half.test.mjs && node test/client-half.test.mjs && node test/bridge.test.mjs && node test/render-smoke.test.mjs && node test/robustness.test.mjs",
+    "test": "node test/package.test.mjs && node test/doc-contract.test.mjs && node test/host-half.test.mjs && node test/client-half.test.mjs && node test/bridge.test.mjs && node test/render-smoke.test.mjs && node test/robustness.test.mjs && node test/packed.test.mjs",
     "check": "node --check index.js && node --check client.js && node --check assets/bridge.js && npm test"
   },
   "meta": {

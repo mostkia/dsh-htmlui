@@ -6,6 +6,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `test/packed.test.mjs`: the published artifact is now tested as an artifact.
+  The suite runs `npm pack`, extracts the tarball, and activates the host half
+  from that extraction — the bridge asset, the starter template, `/health`, and
+  both tools all have to work from the shipped files. This is the failure a
+  missing `files` entry causes: the repository works and the published package
+  does not. It skips, loudly, where the environment cannot pack or extract.
 - A document can declare its own placement, size, and title, which is what makes
   a template carry its home with it:
   `<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">`

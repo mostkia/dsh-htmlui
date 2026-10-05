@@ -50,3 +50,6 @@ jobs:
 
       - name: Adversarial input
         run: node test/robustness.test.mjs
+
+      - name: Packed artifact
+        run: node test/packed.test.mjs
