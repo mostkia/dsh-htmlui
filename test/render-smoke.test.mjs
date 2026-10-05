@@ -558,7 +558,7 @@ test('a background layer is dimmed by the client, and that is what keeps the int
   const overlay = render(__internals.HtmlUiOverlay, { ctx });
   const layer = overlay.elements.find((element) => element.props?.style?.position === 'fixed' && element.props?.style?.zIndex === 1);
   assert.ok(layer !== undefined, 'the background layer is on screen');
-  assert.equal(layer.props.style.opacity, 0.4, 'and is kept translucent');
+  assert.equal(layer.props.style.opacity, 0.25, 'and is kept translucent');
   assert.equal(layer.props.style.pointerEvents, 'none', 'it takes no clicks of its own');
   assert.ok(!overlay.text.includes('Hide background'), 'and it carries no extra control');
   resetStore();

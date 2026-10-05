@@ -717,7 +717,7 @@ window.__ModuleLoader__.load({
         placementFloat: 'Floating window',
         placementFullscreen: 'Fullscreen',
         placementBackground: 'Background layer',
-        placementBackgroundHint: 'Full-screen and always on screen, in every view, at 40% opacity so the interface stays usable. Close it from the session page when you are done.',
+        placementBackgroundHint: 'Full-screen and always on screen, in every view, at 25% opacity so the interface stays readable. Close it from the session page when you are done.',
         cancel: 'Cancel',
         createMore: 'More template actions',
         buildTagHint: 'The browser half this page is running',
@@ -810,7 +810,7 @@ window.__ModuleLoader__.load({
         placementFloat: '浮动窗',
         placementFullscreen: '全屏',
         placementBackground: '背景层',
-        placementBackgroundHint: '全屏常驻：切到任何视图它都在屏幕上，为保持界面可用固定为 40% 透明度；用完请到「HTML管理」里关闭它。',
+        placementBackgroundHint: '全屏常驻：切到任何视图它都在屏幕上，为保持界面可读固定为 25% 不透明度；用完请到「HTML管理」里关闭它。',
         cancel: '取消',
         createMore: '更多模板操作',
         buildTagHint: '当前页面运行的浏览器半部版本',
@@ -2519,7 +2519,7 @@ window.__ModuleLoader__.load({
                 // interface readable and clickable while it is on screen. A document that
                 // wants to be dimmer can say so in its own CSS; one that wants to be opaque
                 // cannot be, in this mode.
-                opacity: 0.4,
+                opacity: 0.25,
                 zIndex: 1,
               },
             },
@@ -2913,7 +2913,7 @@ window.__ModuleLoader__.load({
             ? h(
                 'div',
                 { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } },
-                tr('placementBackgroundHint', 'Full-screen and always on screen, in every view, at 40% opacity so the interface stays usable. Close it from the session page when you are done.'),
+                tr('placementBackgroundHint', 'Full-screen and always on screen, in every view, at 25% opacity so the interface stays readable. Close it from the session page when you are done.'),
               )
             : null,
           state.templates.error !== null
