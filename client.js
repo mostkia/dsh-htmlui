@@ -340,6 +340,17 @@ window.__ModuleLoader__.load({
       return undefined;
     }
 
+    /**
+     * Whether a tool card still carries the current document for its id. After an
+     * `op=update` the earlier card in the transcript would otherwise keep a second
+     * live copy of the same interface on screen.
+     */
+    function isCurrentRevision(uiId, revision) {
+      const known = state.byId.get(uiId);
+      if (known === undefined) return true;
+      return (known.revision ?? 1) <= (revision ?? 1);
+    }
+
     function argsOf(block) {
       if (block === null || block === undefined || typeof block !== 'object') return undefined;
       const raw = block.arguments ?? block.args;
@@ -748,6 +759,28 @@ window.__ModuleLoader__.load({
       const placement = record.placement;
 
       if (placement === 'inline') {
+        if (!isCurrentRevision(record.uiId, record.revision)) {
+          const known = state.byId.get(record.uiId);
+          return h(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 10px',
+                border: '1px dashed var(--dsw-alias-border-l1, #ddd)',
+                borderRadius: '10px',
+                color: 'var(--dsw-alias-label-secondary, #888)',
+                fontSize: '12px',
+              },
+            },
+            h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} · 这一版已被更新，界面在下方最新卡片里`),
+            known === undefined
+              ? null
+              : h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, '关闭'),
+          );
+        }
         return h(
           'div',
           { style: { margin: '2px 0' } },
@@ -755,10 +788,7 @@ window.__ModuleLoader__.load({
             record,
             theme: state.theme,
             variant: 'inline',
-            onDismiss: (uiId) => {
-              retire(uiId);
-              postJson('/rpc', { uiId, op: 'close' });
-            },
+            onDismiss: (uiId) => dismissRecord(uiId),
           }),
         );
       }
@@ -1058,7 +1088,7 @@ window.__ModuleLoader__.load({
                 zIndex: 1,
               },
             },
-            h(HtmlUiFrame, { record, theme: state.theme, variant: 'background', onDismiss: undefined }),
+            h(HtmlUiFrame, { record, theme: state.theme, variant: 'background', onDismiss: dismiss }),
           ),
         );
       }
@@ -1197,6 +1227,7 @@ window.__ModuleLoader__.load({
         retire,
         convergeSession,
         activeFullscreen,
+        isCurrentRevision,
         dismissRecord,
         toggleCollapsed,
         openRightPane,

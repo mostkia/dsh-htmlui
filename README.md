@@ -129,7 +129,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 22 host-half assertions + 20 browser-half assertions
+npm test        # 23 host-half assertions + 21 browser-half assertions
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

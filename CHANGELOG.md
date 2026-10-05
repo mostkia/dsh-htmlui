@@ -6,6 +6,15 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- `html_ui op=update` actually refreshes the interface. The document URL now
+  carries the revision, so the frame's `src` changes and the browser reloads it;
+  before, React kept the same `src` and the surface showed the previous document
+  until a manual refresh — which defeated "update in place".
+- A tool card whose revision has been superseded stops rendering the document and
+  shows a compact line instead, so an update no longer leaves two live copies of
+  one interface in the transcript.
+- A background surface passes its dismiss handler, so a document that closes
+  itself is removed from the page too.
 - "Switch back to chat" in fullscreen mode actually switches back. The layer
   re-selected the same record on the next render, so the button appeared to do
   nothing; a dismissal is now remembered, while a newly attached interface still

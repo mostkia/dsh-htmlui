@@ -713,9 +713,16 @@ export function apply(ctx, config) {
     return safeEqual(tokenFor(uiId), token);
   }
 
-  function documentUrl(uiId, theme) {
+  /**
+   * The document URL carries the revision, so an `op=update` produces a different
+   * URL and the browser actually reloads the frame. Without it React keeps the
+   * same `src` and the interface would show the previous document until a manual
+   * refresh — which is the whole point of updating it in place.
+   */
+  function documentUrl(uiId, theme, revision) {
     const suffix = theme === 'dark' || theme === 'light' ? `&theme=${theme}` : '';
-    return `${ROUTE_PREFIX}/ui/${uiId}?t=${tokenFor(uiId)}${suffix}`;
+    const rev = Number.isFinite(revision) ? `&r=${revision}` : '';
+    return `${ROUTE_PREFIX}/ui/${uiId}?t=${tokenFor(uiId)}${rev}${suffix}`;
   }
 
   function recordSummary(meta) {
@@ -733,7 +740,7 @@ export function apply(ctx, config) {
       size: meta.size,
       sizeText: formatSize(meta.size),
       path: meta.path ?? `${ROUTE_PREFIX}/ui/${meta.id}`,
-      url: documentUrl(meta.id),
+      url: documentUrl(meta.id, undefined, meta.revision),
       revision: meta.revision ?? 1,
       bytes: meta.bytes ?? 0,
       origin: meta.origin ?? 'inline',
@@ -1190,7 +1197,7 @@ export function apply(ctx, config) {
           return;
         }
         const theme = body.theme === 'dark' ? 'dark' : body.theme === 'light' ? 'light' : undefined;
-        sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme) });
+        sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme, current.meta.revision) });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }

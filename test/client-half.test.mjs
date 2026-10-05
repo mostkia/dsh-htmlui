@@ -435,6 +435,19 @@ test('a session converges on what the host reports', () => {
   assert.equal(__internals.recordsFor('session-c').length, 2);
 });
 
+test('a superseded card stops claiming the interface', () => {
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  const record = (uiId, revision) => ({ htmlui: true, op: 'render', uiId, sessionId: 'session-r', title: uiId, placement: 'inline', revision });
+  // Before the store knows the id, the card renders (it is about to publish).
+  assert.equal(__internals.isCurrentRevision('ui-55550000', 1), true);
+  __internals.publish(__internals.recordFromMeta(record('ui-55550000', 2), undefined));
+  assert.equal(__internals.isCurrentRevision('ui-55550000', 2), true, 'the card carrying the current revision renders');
+  assert.equal(__internals.isCurrentRevision('ui-55550000', 1), false, 'the earlier card yields to it');
+  // A card that is ahead of the store must not be hidden while it catches up.
+  assert.equal(__internals.isCurrentRevision('ui-55550000', 3), true);
+});
+
 test('the fullscreen layer opens by itself and honours switching back', () => {
   const fullscreenRecord = (uiId) => ({ uiId, placement: 'fullscreen', sessionId: 'session-1' });
   __internals.state.fullscreen = null;

@@ -615,6 +615,30 @@ test('a hand-written template is just an html file in the templates directory', 
   assert.equal((await tool('html_ui').execute({ op: 'render', template: 'my-panel' }, exec())).ok, false);
 });
 
+test('the document URL changes with the revision so an update reloads the frame', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>v1</p>' }, exec('session-rev'));
+  assert.match(created.url, /[?&]r=1(?:&|$)/u, 'the first document carries its revision');
+  const ticket = async () => {
+    const entry = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      body: JSON.stringify({ uiId: created.uiId }),
+    });
+    return JSON.parse(entry.text).url;
+  };
+  const before = await ticket();
+  await tool('html_ui').execute({ op: 'update', id: created.uiId, html: '<p>v2</p>' }, exec('session-rev'));
+  const after = await ticket();
+  assert.notEqual(before, after, 'a new revision must yield a different URL');
+  assert.match(after, /[?&]r=2(?:&|$)/u);
+  // The token is unchanged: it identifies the document, not its revision.
+  assert.equal(/t=([A-Za-z0-9_-]+)/u.exec(before)[1], /t=([A-Za-z0-9_-]+)/u.exec(after)[1]);
+  // And the composed document really serves the new body.
+  const served = await callRoute(route(), { url: after, headers: { host: '127.0.0.1:3080' } });
+  assert.ok(served.text.includes('v2'));
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.
