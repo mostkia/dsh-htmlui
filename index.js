@@ -582,9 +582,15 @@ function requestMethod(req) {
 
 /**
  * Browser-origin policy. The web server ships no origin policy of its own, so
- * this route owner supplies one. Only loopback hosts are trusted: a DNS-rebound
- * page carries its own host name, so the Host header must be loopback too, and a
- * page whose Origin is a foreign host is refused whatever its Host says.
+ * this route owner supplies one. Only loopback hosts are trusted by default: a
+ * DNS-rebound page carries its own host name, so the Host header must be loopback
+ * too, and a page whose Origin is a foreign host is refused whatever its Host
+ * says.
+ *
+ * `allowedOrigins` is the operator's explicit escape hatch for a deliberately
+ * exposed deployment (`webServer.host: 0.0.0.0`, a LAN address, a reverse proxy):
+ * an origin listed there is trusted whatever the Host header says, because the
+ * operator made that decision. Nothing is trusted implicitly.
  *
  * `capability` is one of:
  *   true   the request already carries a valid capability token;
@@ -594,7 +600,7 @@ function requestMethod(req) {
  * An opaque origin (`null`, a sandboxed iframe) is accepted only where a token
  * proves the caller owns the document.
  */
-function originDecision(req, capability) {
+function originDecision(req, capability, allowedOrigins) {
   const origin = req.headers.origin;
   const host = String(req.headers.host ?? '');
   const hostName = host.split(':')[0];
@@ -612,11 +618,30 @@ function originDecision(req, capability) {
   } catch {
     return { ok: false, code: 403, message: 'unparsable origin' };
   }
+  if (allowedOrigins !== undefined && allowedOrigins.size > 0 && allowedOrigins.has(parsed.origin)) {
+    return { ok: true, opaque: false, explicit: true };
+  }
   if (!loopback(parsed.hostname) || !loopback(hostName)) {
     return { ok: false, code: 403, message: 'origin not allowed' };
   }
   if (parsed.host !== host) return { ok: false, code: 403, message: 'origin does not match host' };
   return { ok: true, opaque: false };
+}
+
+/** Normalize configured origins to the exact strings the browser will send. */
+function normalizeOrigins(value) {
+  const out = new Set();
+  if (!Array.isArray(value)) return out;
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) continue;
+    try {
+      out.add(new URL(entry.trim()).origin);
+    } catch {
+      // An unusable entry is ignored rather than failing activation; the default
+      // posture (loopback only) stays in force for it.
+    }
+  }
+  return out;
 }
 
 function readBody(req, limit) {
@@ -676,6 +701,7 @@ export function apply(ctx, config) {
     return join(base, 'htmlui');
   })();
   const maxInlineBytes = clampInt(settings.maxInlineBytes, 1024, MAX_DOCUMENT_BYTES, DEFAULT_MAX_INLINE_BYTES);
+  const allowedOrigins = normalizeOrigins(settings.allowedOrigins);
   const actionPrompt =
     typeof settings.actionPrompt === 'string' && settings.actionPrompt.trim().length > 0
       ? settings.actionPrompt.trim()
@@ -1448,7 +1474,7 @@ export function apply(ctx, config) {
       const uiIdFromPath = isDocument ? path.slice(`${ROUTE_PREFIX}/ui/`.length).split('/')[0] : '';
       const carrierDefers = path === `${ROUTE_PREFIX}/rpc` || path === `${ROUTE_PREFIX}/events`;
       const capability = isDocument ? tokenMatches(uiIdFromPath, token) : carrierDefers ? 'defer' : false;
-      const decision = originDecision(req, capability);
+      const decision = originDecision(req, capability, allowedOrigins);
       if (!decision.ok) {
         sendJson(res, decision.code, { ok: false, error: decision.message });
         return;
@@ -1462,6 +1488,7 @@ export function apply(ctx, config) {
           version: PLUGIN_VERSION,
           placements: PLACEMENTS,
           storage: { configured: typeof settings.root === 'string' && settings.root.trim().length > 0 },
+          trust: { allowedOrigins: allowedOrigins.size, loopbackOnly: allowedOrigins.size === 0 },
           counts: { uis: store.listUis().length, templates: store.listTemplates().length, sseClients: hub.size() },
         });
         return;

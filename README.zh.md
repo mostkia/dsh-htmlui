@@ -64,6 +64,16 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 载体自身的策略：只信回环 Host/Origin 配对；不透明源的 frame 必须有合法令牌；跨站票据请求直接拒绝；写操作只收 POST；每份文档一个小令牌桶，防止脚本刷爆模型。文档里不该出现任何秘密，插件也从不索取。
 
+如果 DSH 被故意暴露到回环之外（`webServer.host: 0.0.0.0`、局域网地址、反向代理），浏览器来源就会是默认策略拒绝的那个，整个插件会一律 403。把那个来源写进 `allowedOrigins` 即被信任——仅限那一个来源，别的一概不放：
+
+```yaml
+      config:
+        allowedOrigins:
+          - http://dsh.lan:3080
+```
+
+`/health` 会报出 `trust.loopbackOnly` 与已列来源数量，当前姿态不用猜。
+
 ## 配置
 
 行配置全部可选，且不需要任何本机路径：
@@ -76,6 +86,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
         root: ''              # 存储根目录，默认 $DSH_HOME/htmlui
         maxInlineBytes: 16384 # 单段内联 html/css/js 的上限
         actionPrompt: ''      # 追加在 [html-ui:action] 消息末尾的指令句
+        allowedOrigins: []    # 额外信任的浏览器来源（见「安全」）
 ```
 
 运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`templates/<name>/`（托管模板）或 `templates/<name>.html`（手写模板）、`state/<session>.json`，以及用于能力令牌的 `secret`。
@@ -94,7 +105,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 宿主半部 23 项 + 浏览器半部 21 项断言
+npm test        # 宿主半部 24 项 + 浏览器半部 21 项断言
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

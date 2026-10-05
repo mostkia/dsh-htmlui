@@ -9,6 +9,8 @@
 #         config:
 #           root: ''              # storage root; default $DSH_HOME/htmlui
 #           maxInlineBytes: 16384 # largest inline html/css/js accepted per part
+#           allowedOrigins: []    # extra trusted browser origins, e.g. for a host
+#                                 # exposed beyond loopback; empty keeps loopback-only
 #
 - insert:
     - id: dsh-htmlui

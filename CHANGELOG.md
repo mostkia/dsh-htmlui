@@ -40,6 +40,11 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `allowedOrigins` row config: a deliberately exposed deployment (a LAN address,
+  `webServer.host: 0.0.0.0`, a reverse proxy) can trust its own browser origin
+  instead of being refused wholesale by the loopback-only default. The default
+  posture is unchanged, an unusable entry is ignored, and `/health` reports the
+  active trust posture.
 - A hand-written `templates/<name>.html` file in the data root is a usable
   template: no manifest, no subdirectory, addressable as `template: "<name>"`.
   A managed template of the same name takes precedence, and removing it uncovers

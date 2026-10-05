@@ -90,6 +90,20 @@ requests are refused, mutating routes are POST-only, and each document gets a
 small token bucket so a runaway script cannot flood the model. No secrets belong
 in a document, and the plugin never asks for any.
 
+A deployment that deliberately serves DSH beyond loopback (`webServer.host:
+0.0.0.0`, a LAN address, a reverse proxy) has a browser origin the default policy
+refuses, which would leave the whole feature returning 403. List that origin in
+`allowedOrigins` and it is trusted — that origin, exactly, and nothing else:
+
+```yaml
+      config:
+        allowedOrigins:
+          - http://dsh.lan:3080
+```
+
+`/health` reports `trust.loopbackOnly` and the number of listed origins, so the
+active posture is never a guess.
+
 ## Configuration
 
 Optional row config (nothing here needs a machine-specific path):
@@ -102,6 +116,7 @@ Optional row config (nothing here needs a machine-specific path):
         root: ''              # storage root; default $DSH_HOME/htmlui
         maxInlineBytes: 16384 # largest inline html/css/js accepted per part
         actionPrompt: ''      # sentence appended to an [html-ui:action] message
+        allowedOrigins: []    # extra trusted browser origins (see Security)
 ```
 
 Runtime state lives under `$DSH_HOME/htmlui`: `ui/<id>/index.html` (the authored
@@ -129,7 +144,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 23 host-half assertions + 21 browser-half assertions
+npm test        # 24 host-half assertions + 21 browser-half assertions
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

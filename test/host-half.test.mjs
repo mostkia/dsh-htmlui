@@ -639,6 +639,48 @@ test('the document URL changes with the revision so an update reloads the frame'
   assert.ok(served.text.includes('v2'));
 });
 
+test('an explicitly allowed origin works on an exposed deployment', async () => {
+  // The default posture refuses a non-loopback page; an operator who exposes the
+  // server on purpose lists its origin, and only that origin, instead.
+  const server = createFakeServer();
+  const tools = { registered: [], register(definition) { this.registered.push(definition); return () => {}; } };
+  const systemPrompt = { sections: [], section(entry) { this.sections.push(entry); return () => {}; }, getSectionOrder() { return 10; } };
+  const context = createContext({ webServer: server, tools, systemPrompt, sessionController: createFakeSessionController() });
+  apply(context.ctx, { allowedOrigins: ['http://dsh.lan:3080', 'not a url'] });
+  const route = server.routes[0];
+
+  const refused = await callRoute(route, {
+    url: '/plugins/@mostkia/dsh-htmlui/health',
+    headers: { host: '127.0.0.1:3080', origin: 'http://evil.example' },
+  });
+  assert.equal(refused.status, 403, 'an unlisted origin stays refused');
+
+  const allowed = await callRoute(route, {
+    url: '/plugins/@mostkia/dsh-htmlui/health',
+    headers: { host: 'dsh.lan:3080', origin: 'http://dsh.lan:3080' },
+  });
+  assert.equal(allowed.status, 200);
+  const body = JSON.parse(allowed.text);
+  assert.equal(body.trust.loopbackOnly, false);
+  assert.equal(body.trust.allowedOrigins, 1, 'an unusable entry is ignored');
+
+  // The frame's opaque origin still needs a token even on an exposed deployment.
+  const opaque = await callRoute(route, {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: 'dsh.lan:3080', origin: 'null' },
+    body: JSON.stringify({ uiId: 'ui-00000000', op: 'state', value: 1 }),
+  });
+  assert.equal(opaque.status, 403);
+  for (const dispose of context.disposed) {
+    try {
+      dispose();
+    } catch {
+      /* best effort */
+    }
+  }
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.
