@@ -38,3 +38,6 @@ jobs:
 
       - name: Document bridge
         run: node test/bridge.test.mjs
+
+      - name: Render smoke
+        run: node test/render-smoke.test.mjs
