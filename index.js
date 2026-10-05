@@ -480,6 +480,19 @@ function createStore(root) {
   }
 
   function readTemplate(slug) {
+    // The reader's own directory comes first, exactly as it does in the listing: a name
+    // they chose must resolve to their file, not to a bundled one with the same name.
+    const settings = readSettings();
+    if (settings.templatesDir !== undefined) {
+      const ownDir = join(settings.templatesDir, String(slug ?? ''));
+      const ownMeta = readJson(join(ownDir, 'meta.json'), undefined);
+      const ownDocument = join(ownDir, 'index.html');
+      if (ownMeta !== undefined && existsSync(ownDocument)) {
+        return { meta: ownMeta, documentPath: ownDocument, source: readFileSync(ownDocument, 'utf8') };
+      }
+      const ownBare = readBareTemplate(settings.templatesDir, slug);
+      if (ownBare !== undefined) return ownBare;
+    }
     const dir = templatePath(slug);
     const meta = readJson(join(dir, 'meta.json'), undefined);
     const documentPath = join(dir, 'index.html');

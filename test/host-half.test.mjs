@@ -1043,6 +1043,32 @@ test('a composed document over the cap is refused before it is stored', async ()
   assert.equal(readdirSync(join(process.env.DSH_HTMLUI_ROOT, 'ui')).length, before, 'nothing is stored');
 });
 
+test('the catalogue reads the directory the reader chose', async () => {
+  // The list is not a fixed set: it is whatever the directories hold, and the reader's
+  // own directory is read first. The setting is a plain file, so this checks the scan
+  // order rather than the route that writes it.
+  const own = mkdtempSync(join(tmpdir(), 'dsh-htmlui-templates-'));
+  writeFileSync(
+    join(own, 'mine.html'),
+    '<!doctype html><html><head><meta name="dsh-htmlui" content="placement=float"></head><body>mine</body></html>',
+    'utf8',
+  );
+  const settingsPath = join(process.env.DSH_HTMLUI_ROOT, 'settings.json');
+  writeFileSync(settingsPath, JSON.stringify({ templatesDir: own, templatesAsked: true }), 'utf8');
+
+  const listed = await tool('html_ui_template').execute({ op: 'list' }, exec('session-dir'));
+  assert.ok(listed.summary.includes('mine'), 'a template in the reader directory is listed');
+
+  const rendered = await tool('html_ui').execute({ op: 'render', template: 'mine' }, exec('session-dir'));
+  assert.equal(rendered.ok, true, rendered.error ?? 'and it renders like any other');
+  assert.equal(rendered.placement, 'float', 'with the placement the file declares');
+
+  // Clearing the setting goes back to the defaults, which do not have it.
+  writeFileSync(settingsPath, JSON.stringify({ templatesAsked: true }), 'utf8');
+  const after = await tool('html_ui_template').execute({ op: 'list' }, exec('session-dir'));
+  assert.ok(!after.summary.includes('mine'), 'and it is gone once the directory is cleared');
+});
+
 test('every tool renders content blocks, not a bare string', () => {
   // The harness takes `output.render`'s return value as the result's `content` and
   // calls `.some()` on it. A tool that returned a string therefore failed every single
