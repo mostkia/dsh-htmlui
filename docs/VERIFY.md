@@ -50,13 +50,14 @@ Attach one of each and confirm it appears where its placement promises:
 
 | Placement | What to look for |
 |---|---|
-| `inline` | The document renders inside the tool row, scrolls with the transcript, and its chrome shows the title |
-| `dock-top` | A full-width surface above the composer card |
-| `dock-bottom` | A full-width surface below the composer card (a different seat, not a second stack above) |
-| `dock-right` | The session's right column opens a tab hosting it; while that column cannot open a tab (no controller bound) it falls back to the dock above the composer |
+| `inline` | The document renders inside the tool row, scrolls with the transcript, and its chrome shows the title. The row opens itself for it |
+| `dock-top` | A 769 px-wide surface above the composer card (that was the width on a 1920 px viewport) |
+| `dock-bottom` | A surface below the composer card, in that card's own dock — a narrower seat (293 px on the same viewport), not a second stack above |
+| `panel` | The same seat as `dock-top`, and it updates in place after `html_ui op=update` |
+| `dock-right` | The session's right column opens a tab hosting it (851×830 measured); while that column cannot open a tab (no controller bound) it falls back to the dock above the composer |
 | `float` | A window that drags by its header and resizes from the corner (arrows work on the focused handle); `size` sets where it starts |
-| `fullscreen` | The surface covers the session, and "Back to chat" (or Escape) gives the chat back and keeps it closed |
-| `background` | A click-through layer: the page under it still receives clicks |
+| `fullscreen` | The surface covers the session (1920×845 measured: one chrome row of its own), and "Back to chat" or Escape gives the chat back and keeps it closed |
+| `background` | A click-through layer over the frame (1920×919 measured): the page under it still receives clicks |
 
 Two constraints of the host layout, worth knowing before judging a failure:
 
@@ -68,7 +69,9 @@ Two constraints of the host layout, worth knowing before judging a failure:
   up when the page loads its records (`/ui/list`), not live: the page keeps no
   session-level event stream. Inside a document, the model's output still streams
   live over that document's own SSE channel.
-| `panel` | The same surface updates in place after `html_ui op=update` |
+- The measurement to expect from a document is its own `innerWidth`/`innerHeight`.
+  A first reading of `0×0` with `visibility: hidden` happens while a seat is still
+  activating; the next reading settles. Do not judge a seat on one sample.
 
 ## 3. The template drawer
 
