@@ -553,14 +553,18 @@ window.__ModuleLoader__.load({
         fullscreenSuffix: '· fullscreen',
         backToChat: 'Back to chat',
         inlineAtTail: 'inline · shown at the end of this turn',
-        templatesButton: '⟨/⟩ Templates',
-        templatesTooltip: 'HTML UI templates',
-        templatesTitle: 'HTML UI templates',
+        templatesButton: '⟨+⟩ New HTML',
+        templatesTooltip: 'New HTML interface, or reuse a saved template',
+        templatesTitle: 'New or reuse',
         apply: 'Apply',
         applyHint: 'Apply to this session (no model round trip)',
         toModel: 'Ask the model',
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
+        newBlank: 'Blank canvas',
+        newBlankHint: 'Start an empty interface in the right column (no model round trip)',
+        newBlankDescription: 'An empty space in the right column, to fill as you like',
+        newTitle: 'New',
         expand: 'Show',
         surfaceError: 'This HTML UI surface failed to render',
         retry: 'Retry',
@@ -581,14 +585,18 @@ window.__ModuleLoader__.load({
         fullscreenSuffix: '· 全覆盖模式',
         backToChat: '切回聊天',
         inlineAtTail: '内联 · 显示在本轮末尾',
-        templatesButton: '⟨/⟩ 模板',
-        templatesTooltip: 'HTML UI 模板',
-        templatesTitle: 'HTML UI 模板',
+        templatesButton: '⟨+⟩ 新建 HTML',
+        templatesTooltip: '新建 HTML 界面，或复用已保存的模板',
+        templatesTitle: '新建 / 复用',
         apply: '套用',
         applyHint: '套用到当前会话（不经过模型）',
         toModel: '交给模型',
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
+        newBlank: '空白画布',
+        newBlankHint: '在右侧栏新建一块空白界面（不经过模型）',
+        newBlankDescription: '右侧栏里的空白空间，随你填什么',
+        newTitle: '新建',
         expand: '展开',
         surfaceError: '这个 HTML UI 表面渲染失败',
         retry: '重试',
@@ -1942,18 +1950,19 @@ window.__ModuleLoader__.load({
       if (state.templates.open !== true) return null;
 
       const items = state.templates.items;
+      const rowStyle = {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '8px',
+        padding: '5px 8px',
+        borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
+      };
       const rows = items.slice(0, 40).map((template) =>
         h(
           'div',
           {
             key: template.slug,
-            style: {
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: '8px',
-              padding: '5px 8px',
-              borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
-            },
+            style: rowStyle,
           },
           h(
             'button',
@@ -2010,6 +2019,26 @@ window.__ModuleLoader__.load({
         state.templates.error !== null
           ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)' } }, `${tr('catalogueUnavailable', 'Template catalogue unavailable')}: ${state.templates.error}`)
           : null,
+        h(
+          'div',
+          { style: Object.assign({}, rowStyle, { borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)' }) },
+          h(
+            'button',
+            {
+              type: 'button',
+              style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+              title: tr('newBlankHint', 'Start an empty interface in the right column (no model round trip)'),
+              onClick: () => applyTemplate('blank', sessionId),
+            },
+            tr('newBlank', 'Blank canvas'),
+          ),
+          h('span', { style: Object.assign({}, titleStyle, { flex: '0 0 auto' }) }, tr('newTitle', 'New')),
+          h(
+            'span',
+            { style: { flex: '1 1 auto', minWidth: '0', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            tr('newBlankDescription', 'An empty space in the right column, to fill as you like'),
+          ),
+        ),
         state.templates.loaded !== true
           ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('loading', 'Reading templates…'))
           : items.length === 0
@@ -2019,48 +2048,23 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The one control that opens the drawer, beside the composer.
+     * The user's own way in, beside the composer: it opens the drawer, whose first row
+     * is a blank canvas that needs no model and no template.
      *
-     * It is shown only when the catalogue has something in it: a control that opens an
-     * empty drawer is furniture nobody needs. The check is one cheap catalogue read on
-     * mount, refreshed when the window regains focus, so a template the model saves
-     * afterwards still brings the control back.
+     * It stays visible even with an empty catalogue, because "start one myself" is the
+     * point of it — unlike a control that would only open an empty list.
      */
     function HtmlUiTemplateButton(props) {
       useStore();
-      const sessionId = resolveSessionId(props);
-      const [count, setCount] = useState(undefined);
-      useEffect(() => {
-        let live = true;
-        const load = () => {
-          // An error must not hide the control: a catalogue that cannot be read is not
-          // an empty catalogue, and the drawer is where the failure is explained.
-          loadTemplates().then(
-            (items) => {
-              if (live) setCount(Array.isArray(items) ? items.length : -1);
-            },
-            () => {
-              if (live) setCount(-1);
-            },
-          );
-        };
-        load();
-        window.addEventListener('focus', load);
-        return () => {
-          live = false;
-          window.removeEventListener('focus', load);
-        };
-      }, [sessionId]);
-      if (count === 0) return null;
       return h(
         'button',
         {
           type: 'button',
           style: Object.assign({}, buttonStyle, { height: '26px' }),
-          title: tr('templatesTooltip', 'HTML UI templates'),
+          title: tr('templatesTooltip', 'New HTML interface, or reuse a saved template'),
           onClick: () => toggleTemplates(),
         },
-        tr('templatesButton', '⟨/⟩ Templates'),
+        tr('templatesButton', '⟨+⟩ New HTML'),
       );
     }
 

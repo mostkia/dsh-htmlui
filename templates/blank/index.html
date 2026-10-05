@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="dsh-htmlui" content="placement=dock-right" />
+    <title>HTML 画布</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 18px 20px;
+        font: 14px/1.7 "Segoe UI", system-ui, "Microsoft YaHei", sans-serif;
+        background: transparent;
+        color: var(--dsh-htmlui-fg, var(--dsw-alias-text-primary, #1a1a1a));
+      }
+      h1 { font-size: 15px; margin: 0 0 6px; font-weight: 600; }
+      p { margin: 0 0 10px; opacity: .68; font-size: 12.5px; }
+      .canvas {
+        border: 1px dashed var(--dsh-htmlui-border, var(--dsw-alias-border-l2, #ccc));
+        border-radius: 12px;
+        min-height: 220px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 20px;
+        opacity: .75;
+      }
+      code {
+        background: rgba(127, 127, 127, .14);
+        padding: 1px 5px;
+        border-radius: 5px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>HTML 画布</h1>
+    <p>
+      这是一块空白空间，已经放在右侧栏里。你可以直接对模型说
+      <code>把这块画布改成……</code>，它会用 <code>html_ui op=update</code> 就地替换这里的内容；
+      也可以用 <code>html_ui op=close</code> 把它收掉。
+    </p>
+    <div class="canvas">空白画布 · 等待内容</div>
+  </body>
+</html>
