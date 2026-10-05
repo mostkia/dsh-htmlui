@@ -90,8 +90,14 @@ function createClientContext(options = {}) {
         return typeof dispose === 'function' ? dispose : () => {};
       },
       register(options_, component) {
-        registrations.push({ options: options_, component });
-        return () => {};
+        const entry = { options: options_, component };
+        registrations.push(entry);
+        // The real registry drops the entry when its disposer runs; the fake has to do
+        // the same, because "the tab leaves the column" is asserted through it.
+        return () => {
+          const at = registrations.indexOf(entry);
+          if (at >= 0) registrations.splice(at, 1);
+        };
       },
     },
     inject(keys, callback) {
@@ -169,9 +175,14 @@ test('registers the tool card, the fallback dock, the drawer, the overlay and th
   assert.ok(context.injections.includes('sidebar.right.pane.tab'), 'the tab is registered on demand');
   assert.ok(byId().includes(`sidebar.right.pane.tab#${__internals.TAB_ID}`));
   __internals.retire('ui-aa770000', 'session-lazy');
-  // The fake slot registry keeps its entries, so the observable proof of teardown is
-  // the flag the component reads: with no records, the tab is no longer there.
-  assert.equal(__internals.state.rightPane.available, false, 'and it leaves with the last record');
+  // The registration is gone from the registry, which is what keeps an empty session's
+  // column free of an HTML UI page.
+  assert.equal(
+    context.registrations.some((entry) => entry.options.name === 'sidebar.right.pane.tab'),
+    false,
+    'and it leaves the column with the last record',
+  );
+  assert.equal(__internals.state.rightPane.available, false, 'with its flag cleared');
   assert.equal(typeof dispose, 'function');
 });
 

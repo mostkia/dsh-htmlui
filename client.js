@@ -1897,6 +1897,16 @@ window.__ModuleLoader__.load({
     function ensureRightPaneTab() {
       const ctx = rightPaneWiring.ctx;
       if (rightPaneWiring.wired || ctx === undefined) return;
+      // Belt and braces: whatever asked for the tab, it is only valid while some record
+      // needs it. A stale call must not put an empty page back into the column.
+      let needed = false;
+      for (const record of state.byId.values()) {
+        if (record.placement === 'dock-right') {
+          needed = true;
+          break;
+        }
+      }
+      if (!needed) return;
       rightPaneWiring.wired = true;
       const disposes = [];
       // The registration's own disposer is the one that takes it out of the slot tree:
