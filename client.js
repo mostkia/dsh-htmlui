@@ -717,6 +717,7 @@ window.__ModuleLoader__.load({
         placementFloat: 'Floating window',
         placementFullscreen: 'Fullscreen',
         placementBackground: 'Background layer',
+        placementBackgroundHint: 'Full-screen and always on screen, in every view, at 40% opacity so the interface stays usable. Close it from the session page when you are done.',
         cancel: 'Cancel',
         createMore: 'More template actions',
         buildTagHint: 'The browser half this page is running',
@@ -809,6 +810,7 @@ window.__ModuleLoader__.load({
         placementFloat: '浮动窗',
         placementFullscreen: '全屏',
         placementBackground: '背景层',
+        placementBackgroundHint: '全屏常驻：切到任何视图它都在屏幕上，为保持界面可用固定为 40% 透明度；用完请到「HTML管理」里关闭它。',
         cancel: '取消',
         createMore: '更多模板操作',
         buildTagHint: '当前页面运行的浏览器半部版本',
@@ -2895,6 +2897,18 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
+          // A background layer is unlike the other four: it belongs to no view, so it is
+          // still on screen after switching to the trajectory or the session page, and it
+          // only goes away when it is closed from there. Said here, where the choice is
+          // made, because otherwise "it is still there" reads as a stray record that keeps
+          // coming back rather than the form doing what it says.
+          state.create.placement === 'background'
+            ? h(
+                'div',
+                { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } },
+                tr('placementBackgroundHint', 'Full-screen and always on screen, in every view, at 40% opacity so the interface stays usable. Close it from the session page when you are done.'),
+              )
+            : null,
           state.templates.error !== null
             ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)', marginBottom: '8px' } }, String(state.templates.error))
             : null,
