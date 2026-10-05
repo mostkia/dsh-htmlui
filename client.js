@@ -1177,7 +1177,15 @@ window.__ModuleLoader__.load({
           if (frame === null || event.source !== frame.contentWindow) return;
           const data = event.data;
           if (data === null || typeof data !== 'object' || data.__dshHtmlUi === undefined) return;
-          if (data.nonce !== nonceRef.current) return;
+          // The document is allowed to speak before it has been told the nonce. A frame
+          // that finishes loading first measures itself and reports its height with no
+          // nonce yet; dropping that report left the surface at its fallback height with
+          // a scrollbar, which is the very bug the measurement exists to prevent. The
+          // source check above already establishes that the message came from this frame,
+          // and a static document never measures twice, so this one report is the only
+          // chance to learn how tall it is.
+          const allowedBeforeHandshake = data.__dshHtmlUi === 'content' || data.__dshHtmlUi === 'ready';
+          if (data.nonce !== nonceRef.current && !allowedBeforeHandshake) return;
           if (data.__dshHtmlUi === 'ready') setStatus('ready');
           if (data.__dshHtmlUi === 'close') props.onDismiss?.(record.uiId);
           if (data.__dshHtmlUi === 'resize') {

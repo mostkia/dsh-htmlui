@@ -135,6 +135,11 @@
           /* the host page may be gone */
         }
       }
+      // Say how tall this document is again. The host page attaches its listener at a
+      // moment of its own choosing, so the report sent on load can arrive too early to be
+      // heard; answering the handshake is what makes the height reliable rather than
+      // lucky, and a document that never changes size has no second chance to report.
+      measure();
       return;
     }
     if (data.__dshHtmlUi === 'theme') applyTheme(data.theme);

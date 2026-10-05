@@ -201,6 +201,27 @@ test('theme changes reach both the document element and listeners', () => {
   assert.equal(env.document.documentElement.attributes['data-dsh-htmlui-theme'], 'dark');
 });
 
+test('the handshake makes the document state its height again', async () => {
+  // The report sent when the document loads can arrive before the host page has its
+  // listener attached. A static document never measures twice, so without answering the
+  // handshake the height is lost and the surface falls back to a fixed box — which shows
+  // a scrollbar for content that would have fitted.
+  const env = loadBridge(baseConfig);
+  const handler = [...env.frames].find((entry) => entry.name === 'message');
+  // The fake document has no body until a document has one; the bridge measures both and
+  // guards for the head-time case, so the body has to exist for a height to be reported.
+  env.document.body = { scrollHeight: 0 };
+  env.document.documentElement.scrollHeight = 337;
+  assert.ok(!env.posted.some((message) => message.__dshHtmlUi === 'content'), 'nothing is reported until asked');
+  handler.handler({ data: { __dshHtmlUi: 'init', nonce: 'n-2', theme: 'dark' }, source: env.window.parent });
+  // Measurement is coalesced into a frame, so it lands on the next turn.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const report = env.posted.find((message) => message.__dshHtmlUi === 'content');
+  assert.ok(report !== undefined, 'the handshake is answered with the measured height');
+  assert.equal(report.height, 337);
+  assert.equal(report.nonce, 'n-2', 'and it carries the nonce the host just sent');
+});
+
 test('an unconfigured bridge fails closed instead of throwing', async () => {
   const env = loadBridge(undefined);
   const bridge = env.window.dshHTML;
