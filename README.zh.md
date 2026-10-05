@@ -64,7 +64,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 - **宿主半部**（`index.js`，纯 ESM，零依赖）：`html_ui` / `html_ui_template` 两个工具、`$DSH_HOME/htmlui` 下的存储、以及挂在 `/plugins/@mostkia/dsh-htmlui` 的 HTTP 载体（文档票据、拼装后的文档、按会话列取、模板目录与套用、POST 动作通道、SSE 事件流、健康探针）。每条路由都受[「安全」](#安全)一节所述策略管辖。
 - **浏览器半部**（`client.js`，手写模块，无需构建）：注册工具卡片、输入框停靠区、整帧浮层，并把每份文档放进 iframe。
-- **桥**（`assets/bridge.js`，服务时注入）：暴露 `window.dshHTML`，提供 `send`、`state`、`resize`、`close`、`on(...)`。
+- **桥**（`assets/bridge.js`，服务时注入）：暴露 `window.dshHTML`，提供 `send`、`state`、`resize`、`close`、`on(...)` 与 `ready(...)`。界面上的可见文案走客户端 locale 服务（en/zh 字典随包提供），没有该服务时回退到英文常量。
 
 **模型永远拿不到文档正文**：它读到的是工具结果的紧凑摘要（`ui_id`/`placement`/`bytes`/revision），文档本身由浏览器从载体的票据路由加载。大文档写进文件、用 `path` 引用，所以不会常驻模型上下文。
 
@@ -75,6 +75,8 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 文档会带上一套严格 CSP。注意：不带 `allow-same-origin` 的沙箱 frame 是**不透明源**，而不透明源匹配不到任何 URL，所以**所有"放行同源"的授权都显式写本机 origin，而不是 `'self'`**——其中 `script-src` 就是让注入的 bridge 能被加载的那一条。
 
 载体自身的策略：只信回环 Host/Origin 配对；不透明源的 frame 必须有合法令牌；跨站票据请求直接拒绝；写操作只收 POST；每份文档一个小令牌桶，防止脚本刷爆模型。文档里不该出现任何秘密，插件也从不索取。
+
+**这条边界覆盖什么、不覆盖什么。**回环**就是**信任边界，这一点值得说明白：**完全没有 `Origin` 头**的请求（`curl`、脚本、其它本机进程）会被当成可信——因为本机进程本来就有用户拥有的一切权限。载体无法把 DSH 页面和这类调用方区分开，所以它选择**收窄影响面**而不是假装能做鉴权：面向页面的列取路由必须显式指定会话，票据签发按文档限流，界面一被关闭或被覆盖，它的能力令牌立刻失效。而对**浏览器**攻击者是另一回事，一律拒绝：其它来源被拒、别人页面里的沙箱 frame 没有令牌、DNS 重绑定得到的 Host 名过不了回环检查。如果你要把这东西暴露到回环之外，请先读下面 `allowedOrigins` 那段——那才是改变信任边界的开关。
 
 如果 DSH 被故意暴露到回环之外（`webServer.host: 0.0.0.0`、局域网地址、反向代理），浏览器来源就会是默认策略拒绝的那个，整个插件会一律 403。把那个来源写进 `allowedOrigins` 即被信任——仅限那一个来源，别的一概不放：
 
@@ -119,7 +121,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 117 项断言：包完整性 12 + 文档契约 9 + 宿主 35 + 浏览器 25 + 桥 9 + 浅渲染 10 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm test        # 118 项断言：包完整性 12 + 文档契约 10 + 宿主 35 + 浏览器 25 + 桥 9 + 浅渲染 10 + 对抗输入 10 + 打包产物 2 + harness schema 5
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

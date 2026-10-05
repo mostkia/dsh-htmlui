@@ -98,6 +98,17 @@ test('both READMEs promise the same install command and the same placements', ()
   }
 });
 
+test('both READMEs state the same security boundary', () => {
+  // The trust boundary is the one claim a reader must not have to guess at, and it
+  // is easy to update one language and forget the other.
+  assert.ok(read('README.md').includes('Loopback *is* the trust boundary'), 'the English README states it');
+  const chinese = read('README.zh.md');
+  assert.ok(chinese.includes('回环**就是**信任边界'), 'the Chinese README states it');
+  for (const source of [read('README.md'), chinese]) {
+    assert.match(source, /allowedOrigins/u, 'and both point at the setting that changes it');
+  }
+});
+
 test('the documented bridge usage exists, wherever it is written', () => {
   const bridge = read('assets/bridge.js');
   const sources = ['SKILL.md', 'README.md', 'README.zh.md', 'templates/starter/index.html', 'docs/VERIFY.md'];

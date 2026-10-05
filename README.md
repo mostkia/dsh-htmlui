@@ -88,7 +88,9 @@ to the model shows up, and how to read a symptom.
 - **Bridge** (`assets/bridge.js`, injected at serve time): exposes
   `window.dshHTML` with `send`, `state`, `resize`, `close`, and
   `on(...)` for the streamed `assistant` text, `reasoning`, `session`, `action`,
-  `ui`, `theme`, and `ready` events.
+  `ui`, `theme`, and `ready` events, plus `ready(...)` for the immediate form.
+  Visible text is localized through the Client locale service (English and
+  Chinese dictionaries ship with the package) and falls back to English literals.
 
 The model never receives the document body: what it reads is a compact summary
 (`ui_id`, `placement`, `bytes`, revision), and the browser loads the document
@@ -191,7 +193,7 @@ close it.
 ## Development
 
 ```sh
-npm test        # 117 assertions: 12 package, 9 doc contract, 35 host, 25 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 118 assertions: 12 package, 10 doc contract, 35 host, 25 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 
