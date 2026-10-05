@@ -324,7 +324,8 @@ test('the template drawer renders nothing closed and a row per template open', (
     { slug: 'mine', name: 'mine', description: '', bundled: false, bytes: 2 },
   ];
   const open = render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' });
-  assert.match(open.text, /HTML UI templates \(2\)/u);
+  assert.match(open.text, /New or reuse \(2\)/u);
+  assert.match(open.text, /Blank canvas/u, 'the blank canvas is always the first way in');
   assert.match(open.text, /starter/);
   assert.match(open.text, /mine/);
   assert.match(open.text, /Apply/u, 'one action applies it locally');

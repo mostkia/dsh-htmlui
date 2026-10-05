@@ -639,10 +639,42 @@ window.__ModuleLoader__.load({
     };
     /** Bound once the locale service is reached; null means "literal fallback only". */
     let translateRef = null;
+    /** The locale service itself, so the active language can be read directly. */
+    let localeRef = null;
 
     /**
-     * Resolve one message. The locale lookup returns the key itself for an unknown
-     * entry, which is the signal to keep the literal.
+     * The language the page is actually in.
+     *
+     * A host locale id is not something to guess: registering a dictionary under `zh`
+     * while the column's locale says `zh-CN` silently falls back to English, which is
+     * how a Chinese session ends up reading English labels. Reading the active language
+     * and choosing our own table by its leading tag makes the mismatch impossible.
+     */
+    function activeLanguage() {
+      try {
+        const snapshot = localeRef?.getLocale?.();
+        const active = snapshot?.active ?? snapshot?.locale ?? snapshot?.id;
+        if (typeof active === 'string' && active.length > 0) return active;
+      } catch (error) {
+        /* a snapshot that refuses is not fatal */
+      }
+      const declared = typeof document === 'object' && document !== null && document.documentElement !== null ? document.documentElement.lang : undefined;
+      if (typeof declared === 'string' && declared.length > 0) return declared;
+      return 'en';
+    }
+
+    /** Our own dictionary for the active language, matched on the leading tag. */
+    function ownDictionary() {
+      const active = activeLanguage();
+      const exact = MESSAGES[active];
+      if (exact !== undefined) return exact;
+      const leading = String(active).split('-')[0];
+      return MESSAGES[leading];
+    }
+
+    /**
+     * Resolve one message, in this order: the host's bound dictionary, then our own
+     * table for the active language, then the caller's literal.
      */
     function tr(key, fallback, params) {
       let text = fallback;
@@ -653,6 +685,11 @@ window.__ModuleLoader__.load({
         } catch (error) {
           /* a broken dictionary must not break a render */
         }
+      }
+      if (text === fallback) {
+        const own = ownDictionary();
+        const value = own === undefined ? undefined : own[key];
+        if (typeof value === 'string' && value.length > 0) text = value;
       }
       if (params !== undefined) {
         for (const [name, replacement] of Object.entries(params)) {
@@ -2287,6 +2324,7 @@ window.__ModuleLoader__.load({
       state.theme = readTheme();
       // A fresh activation must not inherit a binding from a previous one.
       translateRef = null;
+      localeRef = null;
 
       // Visible text: register this plugin's dictionary with the Client locale
       // service and bind it. The service is optional — `ctx.get("locale")` is the
@@ -2295,6 +2333,7 @@ window.__ModuleLoader__.load({
       try {
         const locale = typeof ctx.get === 'function' ? ctx.get('locale') : undefined;
         if (locale !== undefined && typeof locale.register === 'function' && typeof locale.bind === 'function') {
+          localeRef = locale;
           for (const [language, dictionary] of Object.entries(MESSAGES)) {
             const disposeDictionary = locale.register(LOCALE_NS, language, dictionary);
             if (typeof disposeDictionary === 'function') disposers.push(disposeDictionary);

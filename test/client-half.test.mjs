@@ -264,9 +264,28 @@ test('visible text comes from the locale service when there is one', () => {
 
   assert.equal(__internals.tr('close', 'Close'), 'Schließen');
   assert.equal(__internals.tr('apply', 'Apply'), 'Anwenden');
-  assert.equal(__internals.tr('templatesTitle', 'HTML UI templates'), 'HTML UI templates', 'an untranslated key keeps the literal');
+  assert.equal(
+    __internals.tr('templatesTitle', 'HTML UI templates'),
+    'New or reuse',
+    'a key the host dictionary lacks falls back to our own table, not the caller literal',
+  );
   assert.equal(__internals.tr('apply', 'Apply', { slug: 'x' }), 'Anwenden', 'params are only used by the literals that carry them');
-  assert.equal(__internals.tr('draft', 'Render {slug}', { slug: 'starter' }), 'Render starter');
+  assert.equal(__internals.tr('draft', 'Render {slug}', { slug: 'starter' }), 'Render the template starter with html_ui', 'our own table supplies the text and the params fill it');
+
+  // The host id is not something to guess: registering a dictionary under `zh` while
+  // the column reports `zh-CN` used to fall back to English silently. The active
+  // language decides now, matched on its leading tag.
+  const chinese = createClientContext({
+    locale: {
+      register: () => () => {},
+      bind: () => (key) => key,
+      getLocale: () => ({ active: 'zh-CN' }),
+    },
+  });
+  apply(chinese);
+  assert.equal(__internals.tr('createTitle', 'New HTML interface'), '新建 HTML 界面');
+  assert.equal(__internals.tr('placementDockRight', 'Right column'), '右侧栏（真正的左右分屏）');
+  assert.equal(__internals.tr('notAKey', 'literal'), 'literal', 'a key no table has keeps the literal');
 
   dispose();
   assert.equal(disposed.length, 2, 'the dictionaries are disposed with the plugin');
