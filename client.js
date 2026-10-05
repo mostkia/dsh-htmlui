@@ -50,6 +50,10 @@ window.__ModuleLoader__.load({
       sessionSync: new Map(),
       /** Ids the user closed here, so a convergence cannot bring them back. */
       dismissed: new Set(),
+      /** Last ids the host listed per session, and which sessions have been asked. */
+      hostListed: new Map(),
+      hostSynced: new Set(),
+      hostSyncedAt: new Map(),
       collapsed: new Map(),
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
@@ -116,14 +120,34 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function publish(record) {
+    /**
+     * Publish a record into the store.
+     *
+     * `fromHost` marks an answer that came from the plugin's own carrier
+     * (`/ui/list`, a ticket, an applied template). Everything else is a tool card in
+     * the transcript — and a card keeps its `meta` forever, so it will happily
+     * republish a record the host has already dropped: a closed interface came back
+     * from its card, an emptied right-column tab reopened, and its frame asked for a
+     * ticket that no longer existed. Once a session has been synced with the host,
+     * the host is the authority on which ids exist.
+     */
+    function publish(record, options) {
       if (record === null || typeof record !== 'object') return;
       const uiId = String(record.uiId ?? '');
       if (uiId.length === 0) return;
-      // A surface the user closed stays closed. Otherwise the next `/ui/list`
-      // convergence (or any seat's sync) would bring it straight back, which is
-      // exactly what "the close button does nothing" looks like.
       if (state.dismissed.has(uiId)) return;
+      const fromHost = options !== undefined && options.fromHost === true;
+      const sessionId = typeof record.sessionId === 'string' ? record.sessionId : undefined;
+      if (!fromHost && sessionId !== undefined && state.hostSynced.has(sessionId)) {
+        const listed = state.hostListed.get(sessionId);
+        const syncedAt = state.hostSyncedAt.get(sessionId) ?? 0;
+        const createdAt = Number.isFinite(record.createdAt) ? record.createdAt : 0;
+        // A record created after that snapshot cannot be in it, so a new interface
+        // still shows the moment its card lands. One created before the snapshot and
+        // missing from it was dropped by the host: publish it and a closed surface
+        // comes back from its own transcript card.
+        if (createdAt <= syncedAt && listed !== undefined && !listed.has(uiId)) return;
+      }
       const previous = state.byId.get(uiId);
       const next = Object.assign({}, previous, record, { uiId });
       // Republishing an identical record must not notify: a component effect that
@@ -204,8 +228,13 @@ window.__ModuleLoader__.load({
       const seen = new Set();
       for (const record of uis) {
         seen.add(String(record.uiId ?? ''));
-        publish(record);
+        publish(record, { fromHost: true });
       }
+      // From here on this session knows what exists, so a transcript card can no
+      // longer reintroduce what the host has dropped.
+      state.hostListed.set(sessionId, seen);
+      state.hostSynced.add(sessionId);
+      state.hostSyncedAt.set(sessionId, Date.now());
       for (const known of recordsFor(sessionId)) {
         if (!seen.has(known.uiId)) retire(known.uiId, sessionId);
       }
@@ -364,7 +393,7 @@ window.__ModuleLoader__.load({
       return postJson('/ui/ticket', { uiId, theme }).then((value) => {
         if (value === null || value.ok !== true || typeof value.url !== 'string') return undefined;
         state.tickets.set(uiId, { url: value.url });
-        if (value.ui !== undefined) publish(value.ui);
+        if (value.ui !== undefined) publish(value.ui, { fromHost: true });
         return value.url;
       });
     }
@@ -584,7 +613,7 @@ window.__ModuleLoader__.load({
       }
       return postJson('/templates/render', { template: slug, sessionId }).then((value) => {
         if (value !== null && value.ok === true && value.ui !== undefined) {
-          publish(value.ui);
+          publish(value.ui, { fromHost: true });
           state.templates.error = null;
           return true;
         }
@@ -1483,11 +1512,11 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (sessionId === undefined) return undefined;
         let cancelled = false;
-        postJson('/ui/list', { sessionId }).then((value) => {
-          if (cancelled) return;
-          if (value !== null && value.ok === true && Array.isArray(value.uis)) {
-            for (const record of value.uis) publish(record);
-          }
+        // The same answer every seat asks for, and the same convergence: publishing
+        // alone would leave a record the host dropped on screen forever.
+        syncSession(sessionId).then((value) => {
+          if (cancelled) return undefined;
+          return value;
         });
         return () => {
           cancelled = true;

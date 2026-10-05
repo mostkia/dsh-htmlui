@@ -197,7 +197,7 @@ close it.
 ## Development
 
 ```sh
-npm test        # 128 assertions: 12 package, 10 doc contract, 35 host, 30 browser, 9 bridge, 15 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 130 assertions: 12 package, 10 doc contract, 35 host, 32 browser, 9 bridge, 15 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

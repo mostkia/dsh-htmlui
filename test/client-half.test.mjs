@@ -483,6 +483,45 @@ test('dismissing a surface closes it locally and asks the host with a token', as
   }
 });
 
+test('a transcript card cannot republish what the host has dropped', () => {
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  __internals.state.dismissed.clear();
+  __internals.state.hostListed.clear();
+  __internals.state.hostSynced.clear();
+  __internals.state.hostSyncedAt.clear();
+  const sessionId = 'session-authority';
+  const card = (uiId, createdAt) =>
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId, sessionId, title: uiId, placement: 'dock-top', revision: 1, bytes: 5, createdAt },
+      undefined,
+    );
+
+  // Before any sync a card is the only source of truth, which is how a first render
+  // shows the interface its tool call just carried.
+  __internals.publish(card('ui-card0001', 1_000));
+  assert.equal(__internals.recordsFor(sessionId).length, 1);
+
+  // The host answers without it: the record goes, and the card cannot bring it back.
+  // Every historical card keeps its meta, so this is what a closed interface used to
+  // ride back in on.
+  __internals.convergeSession(sessionId, []);
+  assert.equal(__internals.recordsFor(sessionId).length, 0);
+  __internals.publish(card('ui-card0001', 1_000));
+  assert.equal(__internals.recordsFor(sessionId).length, 0, 'the host dropped it, so it stays dropped');
+
+  // What the host lists is shown, whoever else mentions it.
+  __internals.convergeSession(sessionId, [
+    { uiId: 'ui-listed01', sessionId, title: 'listed', placement: 'panel', revision: 1, bytes: 5, sizeText: '', createdAt: 500 },
+  ]);
+  assert.equal(__internals.recordsFor(sessionId).length, 1);
+
+  // An interface attached after that snapshot cannot be in it, so its card still
+  // shows it at once rather than waiting for the next sync.
+  __internals.publish(card('ui-fresh001', Date.now() + 60_000));
+  assert.equal(__internals.recordsFor(sessionId).length, 2, 'a new interface appears immediately');
+});
+
 test('one message key means one thing everywhere it is used', () => {
   // `unavailable` was once used for both "the catalogue is unavailable" and "this
   // document failed to load", so a broken frame said the template catalogue was

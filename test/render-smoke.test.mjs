@@ -383,11 +383,16 @@ test('a closed surface stays closed until the host drops the record', () => {
     { uiId: 'ui-close0001', sessionId: 'session-close', title: 'C', placement: 'float', revision: 1, bytes: 5, sizeText: '' },
   ]);
   assert.equal(__internals.recordsFor('session-close').length, 0, 'a dismissal outlives a stale list');
-  // Once the host stops listing the id, the dismissal is spent and the id is free again.
+  // Once the host stops listing the id, the dismissal is spent - but the transcript
+  // card that carried the interface is still there, and it must NOT bring it back:
+  // that is how a closed surface reappeared every time the page was reloaded.
   __internals.convergeSession('session-close', []);
   assert.equal(__internals.state.dismissed.has('ui-close0001'), false);
   __internals.publish(record);
-  assert.equal(__internals.recordsFor('session-close').length, 1, 'a genuinely new record with that id shows');
+  assert.equal(__internals.recordsFor('session-close').length, 0, 'a card cannot resurrect what the host dropped');
+  // The host itself remains authoritative: what it lists is shown.
+  __internals.publish(record, { fromHost: true });
+  assert.equal(__internals.recordsFor('session-close').length, 1, 'the host answer is published');
   __internals.state.dismissed.clear();
 });
 
