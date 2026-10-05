@@ -667,6 +667,7 @@ window.__ModuleLoader__.load({
       const [attempt, setAttempt] = useState(0);
       const frameRef = useRef(null);
       const nonceRef = useRef(newNonce());
+      const urlRef = useRef(undefined);
       const initial = props.initialSize ?? parseSizeText(record.sizeText) ?? {};
       const [size, setSize] = useState(() => {
         if (variant === 'float') {
@@ -689,6 +690,13 @@ window.__ModuleLoader__.load({
             setStatus('error');
             return;
           }
+          // A frame whose URL changes reloads the document and loses whatever it held.
+          // Saying so in the console is how a reload is told apart from a remount (a
+          // remount logs nothing, because this ref starts empty again).
+          if (urlRef.current !== undefined && urlRef.current !== next) {
+            console.debug('[dsh-htmlui] reloading the document', record.uiId, 'revision', record.revision);
+          }
+          urlRef.current = next;
           setUrl(next);
         });
         return () => {
