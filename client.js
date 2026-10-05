@@ -506,6 +506,7 @@ window.__ModuleLoader__.load({
         fullscreenSuffix: '· fullscreen',
         backToChat: 'Back to chat',
         rightPaneEmpty: 'This session has no right-column interface.',
+        rightPaneNoSession: 'No session is open for this column yet.',
         templatesButton: '⟨/⟩ Templates',
         templatesTooltip: 'HTML UI templates',
         templatesTitle: 'HTML UI templates',
@@ -534,6 +535,7 @@ window.__ModuleLoader__.load({
         fullscreenSuffix: '· 全覆盖模式',
         backToChat: '切回聊天',
         rightPaneEmpty: '这个会话还没有右侧栏界面。',
+        rightPaneNoSession: '这个栏还没有对应到会话。',
         templatesButton: '⟨/⟩ 模板',
         templatesTooltip: 'HTML UI 模板',
         templatesTitle: 'HTML UI 模板',
@@ -1415,10 +1417,17 @@ window.__ModuleLoader__.load({
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
-      if (sessionId === undefined) return null;
-      const records = recordsIn(sessionId, ['dock-right']);
+      // Never render nothing: an empty tab is indistinguishable from a broken plugin,
+      // and this tab stays open once something has opened it.
+      const records = sessionId === undefined ? [] : recordsIn(sessionId, ['dock-right']);
       if (records.length === 0) {
-        return h('div', { style: emptyStyle }, tr('rightPaneEmpty', 'This session has no right-column interface.'));
+        return h(
+          'div',
+          { style: emptyStyle },
+          sessionId === undefined
+            ? tr('rightPaneNoSession', 'No session is open for this column yet.')
+            : tr('rightPaneEmpty', 'This session has no right-column interface.'),
+        );
       }
       return h(
         'div',
