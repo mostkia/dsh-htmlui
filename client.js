@@ -665,6 +665,8 @@ window.__ModuleLoader__.load({
         managerClose: 'Remove',
         managerRestore: 'Show',
         managerHidden: 'hidden',
+        hideBackground: 'Hide background',
+        hideBackgroundHint: 'Hide the background layer (it can be restored from the session page)',
         minimize: 'Hide the window',
         managerCloseAll: 'Remove all',
         managerEmpty: 'This session has no HTML interface.',
@@ -756,6 +758,8 @@ window.__ModuleLoader__.load({
         managerClose: '关闭',
         managerRestore: '恢复显示',
         managerHidden: '已隐藏',
+        hideBackground: '隐藏背景层',
+        hideBackgroundHint: '隐藏背景层（可在会话页里恢复显示）',
         minimize: '隐藏窗口',
         managerCloseAll: '全部关闭',
         managerEmpty: '本会话没有 HTML 界面。',
@@ -1752,7 +1756,9 @@ window.__ModuleLoader__.load({
         openRightPane(record.uiId);
         return;
       }
-      if (record.placement === 'float') {
+      if (record.placement === 'float' || record.placement === 'background') {
+        // A background layer can be hidden by the escape control, so it needs the same
+        // way back as a minimized window.
         state.hidden.delete(record.uiId);
         bump();
         return;
@@ -1808,15 +1814,14 @@ window.__ModuleLoader__.load({
           state.hidden.has(record.uiId)
             ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
             : null,
-          // Every form that can be out of sight gets the same control, with the same
-          // words. A background layer is always on screen, so it has none.
-          record.placement === 'background'
-            ? null
-            : h(
-                'button',
-                { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
-                tr('managerRestore', 'Show'),
-              ),
+          // Every form can now be out of sight — a background layer included, because the
+          // escape control hides it rather than deleting it — so every row offers the same
+          // way back, in the same words.
+          h(
+            'button',
+            { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
+            tr('managerRestore', 'Show'),
+          ),
           h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
         ),
       );
@@ -2461,6 +2466,7 @@ window.__ModuleLoader__.load({
 
       const floats = records.filter((record) => record.placement === 'float');
       const backgrounds = records.filter((record) => record.placement === 'background');
+      const visibleBackgrounds = backgrounds.filter((record) => !state.hidden.has(record.uiId));
       const fullscreenRecord = activeFullscreen(records);
 
       const dismiss = dismissRecord;
@@ -2474,6 +2480,8 @@ window.__ModuleLoader__.load({
       const layers = [];
 
       for (const record of backgrounds) {
+        // A hidden background layer leaves the screen; the record stays listed.
+        if (state.hidden.has(record.uiId)) continue;
         layers.push(
           h(
             'div',
@@ -2482,13 +2490,20 @@ window.__ModuleLoader__.load({
               style: {
                 position: 'fixed',
                 inset: '0',
-                // Decoration: the layer does not take clicks.
+                // Decoration: the layer does not take clicks — not even its own document's
+                // buttons, which is exactly why it must never be able to cover the rest of
+                // the interface. The escape control below is what guarantees that.
                 pointerEvents: 'none',
                 // No opacity here. A wrapper that dims the document cannot be undone from
                 // inside it, so a document that wanted to paint a fully opaque background
                 // — a wallpaper, a backdrop — could never get there. Transparency is the
                 // document's own decision: set it in its CSS, where it can also be left out.
-                zIndex: 1,
+                //
+                // Its layer sits *below* the plugin's own layers, so an opaque document
+                // does not hide the escape control or the rest of the interface. It cannot
+                // be placed behind the host application from this slot, so the control — not
+                // the stacking order — is what makes a full-bleed layer safe.
+                zIndex: -1,
               },
             },
             h(HtmlUiFrame, { record, theme: state.theme, variant: 'background', onDismiss: dismiss }),
@@ -2566,6 +2581,36 @@ window.__ModuleLoader__.load({
         'div',
         { style: { position: 'fixed', inset: '0', pointerEvents: 'none' } },
         ...layers,
+        // The way out of a background layer, always on top of it and always clickable.
+        //
+        // A full-bleed layer that paints itself opaque covers everything behind it, and
+        // because it takes no pointer events its own document cannot offer a way to turn
+        // itself off either: without this, the only recovery was deleting the project
+        // files. Reported once, the hard way. It appears only while a layer is showing,
+        // and hides every visible layer in one click — the records stay listed, and the
+        // session page brings any of them back.
+        visibleBackgrounds.length > 0
+          ? h(
+              'div',
+              { style: { position: 'fixed', top: '6px', right: '10px', pointerEvents: 'auto', zIndex: 30 } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  style: Object.assign({}, buttonStyle, {
+                    background: 'var(--dsw-alias-bg-overlay, #fff)',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
+                  }),
+                  title: tr('hideBackgroundHint', 'Hide the background layer (it can be restored from the session page)'),
+                  onClick: () => {
+                    for (const record of visibleBackgrounds) state.hidden.add(record.uiId);
+                    bump();
+                  },
+                },
+                `${tr('hideBackground', 'Hide background')} (${visibleBackgrounds.length})`,
+              ),
+            )
+          : null,
         h(HtmlUiCreateDialog, { ctx: props.ctx }),
       );
     }
