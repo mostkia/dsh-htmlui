@@ -637,6 +637,7 @@ window.__ModuleLoader__.load({
         minimize: 'Hide the window',
         managerCloseAll: 'Remove all',
         managerEmpty: 'This session has no HTML interface.',
+        managerNew: 'New HTML project',
         create: 'Create',
         creating: 'Creating…',
         createTitle: 'New HTML interface',
@@ -704,6 +705,7 @@ window.__ModuleLoader__.load({
         minimize: '隐藏窗口',
         managerCloseAll: '全部关闭',
         managerEmpty: '本会话没有 HTML 界面。',
+        managerNew: '新建 HTML 项目',
         create: '创建',
         creating: '正在创建…',
         createTitle: '新建 HTML 界面',
@@ -1712,6 +1714,23 @@ window.__ModuleLoader__.load({
           'div',
           { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' } },
           h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML interfaces in this session')} (${records.length})`),
+          // The same create flow the composer control opens. A reader who cannot find a
+          // small control beside the composer should not have to hunt for the way in.
+          h(
+            'button',
+            {
+              type: 'button',
+              style: Object.assign({}, buttonStyle, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
+              onClick: () => {
+                state.create.open = true;
+                state.create.busy = false;
+                state.create.dirInput = undefined;
+                bump();
+                loadTemplates();
+              },
+            },
+            tr('managerNew', 'New HTML project'),
+          ),
           records.length > 0
             ? h(
                 'button',

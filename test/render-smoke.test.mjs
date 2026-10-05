@@ -403,6 +403,15 @@ test('the tool card points at the tail instead of drawing a second copy', () => 
   assert.ok(!card.text.includes('Preparing interface'), 'it does not draw the document as well');
 });
 
+test('the session page carries its own way to start a project', () => {
+  // The composer control is small and easy to miss; the page the reader is already on
+  // offers the same flow in words.
+  resetStore();
+  const page = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.match(page.text, /New HTML project/u, 'the create flow is offered here too');
+  resetStore();
+});
+
 test('the create dialog asks what to start from and where to put it', () => {
   resetStore();
   resetCreate();
