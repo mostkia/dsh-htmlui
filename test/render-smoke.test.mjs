@@ -470,12 +470,21 @@ test('the create dialog asks what to start from and where to put it', () => {
   assert.ok(named.text.includes('我的页面（my-page）'), 'the name leads and the id follows');
   assert.ok(!named.text.includes('我的页面（my-page） — '), 'the description stays out of the row');
   assert.ok(!named.text.includes('red（red）'), 'and an entry whose name is its id stays plain');
-  __internals.state.templates.items = [
-    { slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 },
-  ];
-
-  // A copied-in folder or file that is not a project yet is reported and can be adopted,
-  // which is what stops it from looking like it never arrived.
+  // Every project carries a pencil that reopens the same form, prefilled, to edit it.
+  const pencils = named.elements.filter((element) => typeof element.props?.['aria-label'] === 'string' && element.props['aria-label'].startsWith('Edit this project'));
+  assert.equal(pencils.length, 2, 'one pencil per project, and none for the blank canvas');
+  __internals.state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+  pencils[0].props.onClick();
+  assert.equal(__internals.state.adopt.open, true, 'the pencil opens the form');
+  assert.equal(__internals.state.adopt.existing, true, 'and says it is an edit');
+  assert.equal(__internals.state.adopt.slug, 'my-page');
+  assert.equal(__internals.state.adopt.name, '我的页面', 'prefilled from the project itself');
+  assert.equal(__internals.state.adopt.description, '自述');
+  const editing = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  assert.ok(editing.text.includes('Edit project details'), 'the form reads as an edit');
+  assert.ok(editing.text.includes('Save changes'), 'and its button saves rather than creates');
+  assert.ok(!editing.text.includes('Nothing is written yet'), 'without claiming nothing exists');
+  __internals.state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
   __internals.state.templates.candidates = [
     { kind: 'dir', name: 'my-folder', html: 2 },
     { kind: 'file', name: '我的页面.html', html: 1 },
@@ -488,7 +497,7 @@ test('the create dialog asks what to start from and where to put it', () => {
 
   // Adopting asks for the manifest instead of writing one behind the reader's back:
   // the slug is what a template is addressed by, so it is filled in and confirmed.
-  __internals.state.adopt = { open: true, source: 'my-folder', slug: 'my-folder', name: 'my-folder', description: '', placement: 'dock-right', busy: false };
+  __internals.state.adopt = { open: true, existing: false, source: 'my-folder', slug: 'my-folder', name: 'my-folder', description: '', placement: 'dock-right', busy: false };
   const adopting = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
   for (const text of ['Project details for my-folder', 'Project name', 'Process ID', 'Details', 'Where it opens', 'Write the manifest']) {
     assert.ok(adopting.text.includes(text), `the adopt form offers ${text}`);

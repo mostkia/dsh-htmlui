@@ -551,6 +551,12 @@ function createStore(root) {
     return readBareTemplate(root, slug);
   }
 
+  /** The slug a project declares, whatever its folder is called. */
+  function readDeclaredSlug(dir) {
+    const meta = readJson(join(dir, 'meta.json'), undefined);
+    return meta !== undefined && typeof meta.slug === 'string' ? meta.slug : undefined;
+  }
+
   /**
    * Find a project whose folder is not named after its id.
    *
@@ -733,13 +739,21 @@ function createStore(root) {
     if (name.length === 0 || name.includes('..') || name.includes('/') || name.includes('\\')) {
       return { ok: false, error: `not a name in the templates directory: ${name}` };
     }
-    const target = join(root, name);
+    // A folder name first, then the slug in a manifest: the second is how an existing
+    // project is edited again, whatever its folder happens to be called.
+    let target = join(root, name);
+    if (!existsSync(target)) {
+      const bySlug = readTemplateByDeclaredSlug(root, name);
+      if (bySlug !== undefined) target = dirname(bySlug.documentPath);
+    }
     if (!existsSync(target)) return { ok: false, error: `not found: ${name}` };
     const wanted = input !== null && typeof input === 'object' ? input : {};
     let slug = slugify(typeof wanted.slug === 'string' && wanted.slug.length > 0 ? wanted.slug : name.replace(/\.html?$/iu, ''));
     if (slug === undefined) slug = `project-${Date.now().toString(36)}`;
     const taken = new Set(listTemplates().map((template) => template.slug));
-    if (taken.has(slug)) {
+    // Taking a slug another project already holds gets a suffix; keeping the one this
+    // project already has is not a clash, it is an edit.
+    if (taken.has(slug) && slug !== name && slug !== readDeclaredSlug(target)) {
       let index = 2;
       while (taken.has(`${slug}-${index}`)) index += 1;
       slug = `${slug}-${index}`;
@@ -1688,6 +1702,8 @@ export function apply(ctx, config) {
             slug: String(template.slug ?? ''),
             name: String(template.name ?? template.slug ?? ''),
             description: String(template.description ?? ''),
+            // The edit form opens with these filled in, so the page needs them too.
+            placement: normalizePlacement(template.placement),
             bundled: template.bundled === true,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
           })),

@@ -1130,6 +1130,40 @@ test('a copied-in folder is adopted with the manifest the reader filled in', asy
   clearTemplatesDir();
 });
 
+test('an existing project is edited in place, addressed by its slug', async () => {
+  // The pencil beside a project reopens the same form. The folder is called 我的页面 and
+  // the project's id is my-page, so the request addresses the id and the manifest has to
+  // be found by it — and the edit must not turn into a rename or a second project.
+  const own = mkdtempSync(join(tmpdir(), 'dsh-htmlui-edit-'));
+  writeFileSync(join(process.env.DSH_HTMLUI_ROOT, 'settings.json'), JSON.stringify({ templatesDir: own, templatesAsked: true }), 'utf8');
+  mkdirSync(join(own, '我的页面'), { recursive: true });
+  writeFileSync(join(own, '我的页面', 'index.html'), '<p>hello</p>', 'utf8');
+  writeFileSync(
+    join(own, '我的页面', 'meta.json'),
+    JSON.stringify({ slug: 'my-page', name: '我的页面', description: '旧描述', placement: 'inline' }),
+    'utf8',
+  );
+
+  const edited = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/templates/adopt',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ name: 'my-page', meta: { slug: 'my-page', name: '改名后的页面', description: '新描述', placement: 'float' } }),
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(JSON.parse(edited.text).slug, 'my-page', 'the same project keeps its id');
+  assert.ok(existsSync(join(own, '我的页面', 'meta.json')), 'and stays in its folder');
+
+  const saved = JSON.parse(readFileSync(join(own, '我的页面', 'meta.json'), 'utf8'));
+  assert.equal(saved.name, '改名后的页面');
+  assert.equal(saved.description, '新描述');
+  assert.equal(saved.placement, 'float');
+
+  const listed = await tool('html_ui_template').execute({ op: 'list' }, exec('session-edit'));
+  assert.equal((listed.summary.match(/my-page/gu) ?? []).length, 1, 'editing must not leave a second entry behind');
+  clearTemplatesDir();
+});
+
 test('every tool renders content blocks, not a bare string', () => {
   // The harness takes `output.render`'s return value as the result's `content` and
   // calls `.some()` on it. A tool that returned a string therefore failed every single

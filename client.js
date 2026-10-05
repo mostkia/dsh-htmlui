@@ -103,6 +103,11 @@ window.__ModuleLoader__.load({
       templates: { open: false, loaded: false, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null },
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
+      /**
+       * The manifest form, shared by adopting a copied-in folder and editing an existing
+       * project: `existing` decides whether it creates or saves over one.
+       */
+      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -675,7 +680,12 @@ window.__ModuleLoader__.load({
         adoptPlacement: 'Where it opens',
         adoptHint: 'Nothing is written yet: fill this in and the project is created with it.',
         adoptConfirm: 'Write the manifest',
+        editTitle: 'Edit project details',
+        editHint: 'These details are saved over the project’s manifest.',
+        editConfirm: 'Save changes',
+        editProject: 'Edit this project’s details',
         adopted: 'It is a project now.',
+        edited: 'Saved.',
         createPlacement: 'Where',
         placementDockRight: 'Right column (a real split)',
         placementInline: 'In the conversation',
@@ -752,7 +762,12 @@ window.__ModuleLoader__.load({
         adoptPlacement: '默认生成位置',
         adoptHint: '此时还没有写入任何东西：填完后点下面的按钮，才会带着这些信息创建项目。',
         adoptConfirm: '写入清单',
+        editTitle: '编辑项目信息',
+        editHint: '这些信息会覆盖写入该项目的清单文件。',
+        editConfirm: '保存修改',
+        editProject: '编辑这个项目的信息',
         adopted: '已成为项目。',
+        edited: '已保存。',
         createPlacement: '生成位置',
         placementDockRight: '右侧栏（真正的左右分屏）',
         placementInline: '对话流内',
@@ -936,8 +951,10 @@ window.__ModuleLoader__.load({
             return false;
           }
           state.templates.error = null;
-          state.templates.notice = tr('adopted', 'It is a project now.');
-          state.adopt = { open: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+          // An edit says so: "it is a project now" would be false for one that already was.
+          state.templates.notice =
+            state.adopt.existing === true ? tr('edited', 'Saved.') : tr('adopted', 'It is a project now.');
+          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
           return loadTemplates().then(() => true);
         })
         .catch(() => {
@@ -2572,6 +2589,9 @@ window.__ModuleLoader__.load({
         bump();
       };
       const candidates = Array.isArray(state.templates.candidates) ? state.templates.candidates : [];
+      // The manifest form is shared by adopting and editing, so the container that holds
+      // it has to open for either — an edit has no candidates to show.
+      const adoptOpen = state.adopt !== undefined && state.adopt.open === true;
       return h(
         'div',
         {
@@ -2710,18 +2730,53 @@ window.__ModuleLoader__.load({
               bump();
             }),
             ...items.map((template) =>
-              radio(
-                'dsh-create-source',
-                template.slug,
-                // The reader's own name first: the slug is an id, and an id is not what a
-                // person looks for in a list. It stays visible beside it, in parentheses,
-                // because it is what `template=` takes.
-                templateListItem(template),
-                state.create.source === template.slug,
-                () => {
-                  state.create.source = template.slug;
-                  bump();
-                },
+              h(
+                'div',
+                { key: template.slug, style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+                h(
+                  'div',
+                  { style: { flex: '1 1 auto', minWidth: '0' } },
+                  radio(
+                    'dsh-create-source',
+                    template.slug,
+                    // The reader's own name first: the slug is an id, and an id is not what
+                    // a person looks for in a list. It stays visible beside it, in
+                    // parentheses, because it is what `template=` takes.
+                    templateListItem(template),
+                    state.create.source === template.slug,
+                    () => {
+                      state.create.source = template.slug;
+                      bump();
+                    },
+                  ),
+                ),
+                // A pencil on every project: the manifest stays editable, with the same
+                // form that created it, prefilled with what is on disk.
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: Object.assign({}, buttonStyle, { flex: '0 0 auto', padding: '2px 7px', lineHeight: 1.1 }),
+                    title: tr('editProject', 'Edit this project’s details'),
+                    'aria-label': `${tr('editProject', 'Edit this project’s details')}: ${templateListItem(template)}`,
+                    onClick: () => {
+                      state.adopt = {
+                        open: true,
+                        // Editing, not adopting: the project exists, so the form says so
+                        // and its button saves instead of creating.
+                        existing: true,
+                        source: template.slug,
+                        slug: template.slug,
+                        name: typeof template.name === 'string' && template.name.length > 0 ? template.name : template.slug,
+                        description: typeof template.description === 'string' ? template.description : '',
+                        placement: typeof template.placement === 'string' && template.placement.length > 0 ? template.placement : 'dock-right',
+                        busy: false,
+                      };
+                      bump();
+                    },
+                  },
+                  '✎',
+                ),
               ),
             ),
           ),
@@ -2751,16 +2806,25 @@ window.__ModuleLoader__.load({
           // Files copied into the directory that are not projects yet: a folder without a
           // manifest, or a file whose name cannot be a slug. Asking is the whole point —
           // silently skipping them is what made a copied file look like it never arrived.
-          candidates.length > 0
+          //
+          // This container also carries the manifest form, which is why it opens for a
+          // form even with no candidates at all: editing a project that is already
+          // registered used to show nothing, because the form lived inside the
+          // "not registered yet" branch.
+          candidates.length > 0 || adoptOpen
             ? h(
                 'div',
                 { style: { marginBottom: '10px' } },
-                h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, `${tr('candidatesTitle', 'Not projects yet')} (${candidates.length})`),
-                h(
-                  'div',
-                  { style: { fontSize: '11.5px', opacity: 0.72, marginBottom: '4px' } },
-                  tr('candidatesHint', 'These are in the directory but carry no project manifest. Adopt one and it becomes a template you can create from.'),
-                ),
+                candidates.length > 0
+                  ? h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, `${tr('candidatesTitle', 'Not projects yet')} (${candidates.length})`)
+                  : null,
+                candidates.length > 0
+                  ? h(
+                      'div',
+                      { style: { fontSize: '11.5px', opacity: 0.72, marginBottom: '4px' } },
+                      tr('candidatesHint', 'These are in the directory but carry no project manifest. Adopt one and it becomes a template you can create from.'),
+                    )
+                  : null,
                 ...candidates.map((candidate) =>
                   h(
                     'div',
@@ -2776,6 +2840,7 @@ window.__ModuleLoader__.load({
                           const stem = candidate.name.replace(/\.html?$/iu, '');
                           state.adopt = {
                             open: true,
+                            existing: false,
                             source: candidate.name,
                             slug: slugifyClient(stem),
                             name: stem,
@@ -2805,15 +2870,21 @@ window.__ModuleLoader__.load({
                           background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))',
                         },
                       },
-                      h('div', { style: { fontSize: '12px', fontWeight: 600, marginBottom: '2px' } }, `${tr('adoptTitle', 'Project details for')} ${state.adopt.source}`),
-                      // The reader's own instruction: nothing is written before they say
-                      // so. The files are not touched, no manifest exists yet, and the
-                      // project only comes into being on the confirm button below.
                       h(
                         'div',
-                        { style: { fontSize: '11px', opacity: 0.7, marginBottom: '6px' } },
-                        tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
+                        { style: { fontSize: '12px', fontWeight: 600, marginBottom: '2px' } },
+                        `${state.adopt.existing === true ? tr('editTitle', 'Edit project details') : tr('adoptTitle', 'Project details for')} ${state.adopt.source}`,
                       ),
+                      // The reader's own instruction: nothing is written before they say
+                      // so. This line belongs to adopting only — an existing project is
+                      // already on disk, and telling its owner otherwise would be a lie.
+                      state.adopt.existing === true
+                        ? h('div', { style: { fontSize: '11px', opacity: 0.7, marginBottom: '6px' } }, tr('editHint', 'These details are saved over the project’s manifest.'))
+                        : h(
+                            'div',
+                            { style: { fontSize: '11px', opacity: 0.7, marginBottom: '6px' } },
+                            tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
+                          ),
                       ...[
                         // The reader's order: the human name first, then the id that
                         // `template=` takes, then what it is and where it opens.
@@ -2883,7 +2954,7 @@ window.__ModuleLoader__.load({
                             type: 'button',
                             style: buttonStyle,
                             onClick: () => {
-                              state.adopt = { open: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
                               bump();
                             },
                           },
@@ -2904,7 +2975,11 @@ window.__ModuleLoader__.load({
                               });
                             },
                           },
-                          state.adopt.busy === true ? tr('creating', 'Creating…') : tr('adoptConfirm', 'Write the manifest'),
+                          state.adopt.busy === true
+                            ? tr('creating', 'Creating…')
+                            : state.adopt.existing === true
+                              ? tr('editConfirm', 'Save changes')
+                              : tr('adoptConfirm', 'Write the manifest'),
                         ),
                       ),
                     )
