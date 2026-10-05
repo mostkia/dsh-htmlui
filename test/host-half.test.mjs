@@ -740,6 +740,51 @@ test('a capability token never reaches a durable projection', async () => {
   assert.equal(framed.status, 200);
 });
 
+test('a document can declare where it belongs, and an argument outranks it', async () => {
+  const declared = `<!doctype html><html><head>
+    <meta name="dsh-htmlui" content="placement=dock-top; size=520x360+40+40; title=自述位置">
+    </head><body><p>declared</p></body></html>`;
+  const byMeta = await tool('html_ui').execute({ op: 'render', html: declared }, exec('session-declare'));
+  assert.equal(byMeta.ok, true);
+  assert.equal(byMeta.placement, 'dock-top', 'the meta declaration is honoured');
+  assert.equal(byMeta.size, '520x360+40+40');
+  assert.equal(byMeta.title, '自述位置');
+
+  const byAttribute = `<!doctype html><html data-dsh-htmlui-placement="float" data-dsh-htmlui-size="420x300"><body><p>attr</p></body></html>`;
+  const attr = await tool('html_ui').execute({ op: 'render', html: byAttribute }, exec('session-declare'));
+  assert.equal(attr.placement, 'float');
+  assert.equal(attr.size, '420x300');
+
+  // The tool argument wins, and a nonsense declaration is ignored, not fatal.
+  const overridden = await tool('html_ui').execute(
+    { op: 'render', html: declared, placement: 'inline', title: '参数优先' },
+    exec('session-declare'),
+  );
+  assert.equal(overridden.placement, 'inline');
+  assert.equal(overridden.title, '参数优先');
+
+  const nonsense = await tool('html_ui').execute(
+    { op: 'render', html: '<meta name="dsh-htmlui" content="placement=teleport; size=nope">' },
+    exec('session-declare'),
+  );
+  assert.equal(nonsense.ok, true);
+  assert.equal(nonsense.placement, 'inline', 'an unusable placement falls back to the default');
+  assert.equal(nonsense.size, '', 'and an unusable size is dropped');
+
+  // An update whose document declares nothing keeps what the record already had.
+  const moved = await tool('html_ui').execute({ op: 'update', id: byMeta.uiId, html: '<p>quiet</p>' }, exec('session-declare'));
+  assert.equal(moved.placement, 'dock-top', 'an undeclared update keeps the record placement');
+  assert.equal(moved.title, '自述位置');
+
+  // Declaring a new one moves it.
+  const renamed = await tool('html_ui').execute(
+    { op: 'update', id: byMeta.uiId, html: '<meta name="dsh-htmlui" content="placement=panel; title=Moved">' },
+    exec('session-declare'),
+  );
+  assert.equal(renamed.placement, 'panel');
+  assert.equal(renamed.title, 'Moved');
+});
+
 test('the template shipped with the package renders like any other', async () => {
   // Nothing named "starter" exists in this scratch store, so this exercises the
   // packaged fallback that a fresh install renders from.
@@ -755,6 +800,7 @@ test('the template shipped with the package renders like any other', async () =>
     exec('session-starter'),
   );
   assert.equal(rendered.ok, true);
+  assert.equal(rendered.placement, 'dock-top', 'the shipped template declares its own placement');
   const entry = await callRoute(route(), {
     method: 'POST',
     url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',

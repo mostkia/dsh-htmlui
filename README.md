@@ -31,6 +31,16 @@ conversation needs it.
 | `fullscreen` | Covers the session, with a built-in switch back to chat |
 | `dock-right` | The session's right column, as a tab that hosts this session's right-placed interfaces (falls back to the dock above the composer when the column exposes no tab service) |
 
+A document can declare its own placement instead of the caller naming it — useful
+for a template, which then carries its home with it:
+
+```html
+<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">
+```
+
+The tool argument wins over the declaration, the declaration wins over the
+`inline` default, and an unusable value is ignored.
+
 ## Install
 
 ```sh
@@ -154,7 +164,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 94 assertions: 12 package, 7 doc contract, 26 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial
+npm test        # 97 assertions: 12 package, 9 doc contract, 27 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

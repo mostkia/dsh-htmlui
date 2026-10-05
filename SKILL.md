@@ -44,6 +44,25 @@ is replaced in place, and the browser surface refreshes without a new card.
 
 Give `size` as `"WxH"` or `"WxH+X+Y"`.
 
+### A document may declare its own placement
+
+A document is the best place to say where it belongs, and a template should carry
+that with it. Declare it in the head:
+
+```html
+<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">
+```
+
+or on the root element:
+
+```html
+<html data-dsh-htmlui-placement="float" data-dsh-htmlui-size="520x360">
+```
+
+Precedence: the tool argument wins, then the declaration, then `inline`. An
+unusable value is ignored rather than fatal, and an `update` whose document
+declares nothing keeps the placement the record already has.
+
 ## Inside the document: `window.dshHTML`
 
 ```html

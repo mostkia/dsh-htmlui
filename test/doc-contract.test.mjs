@@ -98,6 +98,30 @@ test('both READMEs promise the same install command and the same placements', ()
   }
 });
 
+test('the documented bridge usage exists, wherever it is written', () => {
+  const bridge = read('assets/bridge.js');
+  const sources = ['SKILL.md', 'README.md', 'README.zh.md', 'templates/starter/index.html', 'docs/VERIFY.md'];
+  const used = new Set();
+  for (const file of sources) {
+    for (const match of read(file).matchAll(/dshHTML\.([a-zA-Z]+)/gu)) used.add(match[1]);
+  }
+  assert.ok(used.size >= 4, 'the documents and the shipped template should show real usage');
+  for (const member of used) {
+    assert.ok(new RegExp(`\\b${member}[:(]`, 'u').test(bridge), `dshHTML.${member} is documented but not implemented`);
+  }
+});
+
+test('a document can declare its own placement, and the skill says so', () => {
+  const source = read('index.js');
+  assert.match(source, /function readDocumentDeclaration/u, 'the parser must exist');
+  const skill = read('SKILL.md');
+  assert.ok(skill.includes('name="dsh-htmlui"'), 'the meta form must be documented');
+  assert.ok(skill.includes('data-dsh-htmlui-placement'), 'the attribute form must be documented');
+  assert.match(skill, /Precedence/u, 'and the precedence rule');
+  // The shipped template demonstrates it, so the feature is not only prose.
+  assert.ok(read('templates/starter/index.html').includes('name="dsh-htmlui"'));
+});
+
 test('the operator documents stay complete and reachable', () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   for (const file of ['PUBLISHING.md', 'VERIFY.md', 'marketplace-pr.md', 'awesome-dsh-plugin.yml']) {

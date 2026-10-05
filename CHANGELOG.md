@@ -6,6 +6,14 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- A document can declare its own placement, size, and title, which is what makes
+  a template carry its home with it:
+  `<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">`
+  or `data-dsh-htmlui-placement` / `-size` / `-title` on the root element. The
+  tool argument wins over the declaration, the declaration wins over the `inline`
+  default, an unusable value is ignored, and an update whose document declares
+  nothing keeps the placement the record already has. The shipped template
+  demonstrates it.
 - `test/robustness.test.mjs` plus `test/harness.mjs`: the host half is now fed
   what a broken document, a hostile page, or a clumsy model would send —
   malformed bodies, object ids, traversal-shaped names and paths, over-cap

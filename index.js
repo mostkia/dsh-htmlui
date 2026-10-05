@@ -262,6 +262,44 @@ function mergeInlineParts(html, css, js) {
   return out;
 }
 
+/**
+ * Read the placement a document declares for itself.
+ *
+ * A document is the best place to say where it belongs, and a template should
+ * carry that with it. Two forms are accepted, the head-scoped one first:
+ *
+ *   <meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">
+ *   <html data-dsh-htmlui-placement="float" data-dsh-htmlui-size="520x360">
+ *
+ * A tool argument always wins over a declaration, and an unusable value is
+ * ignored rather than fatal.
+ */
+function readDocumentDeclaration(source) {
+  const text = String(source ?? '');
+  const declared = {};
+  const meta = /<meta\b[^>]*\bname\s*=\s*["']dsh-htmlui["'][^>]*>/iu.exec(text);
+  const content = meta === null ? null : /\bcontent\s*=\s*["']([^"']*)["']/iu.exec(meta[0]);
+  if (content !== null) {
+    for (const part of content[1].split(';')) {
+      const separator = part.indexOf('=');
+      if (separator <= 0) continue;
+      const key = part.slice(0, separator).trim().toLowerCase();
+      const value = part.slice(separator + 1).trim();
+      if (key.length > 0 && value.length > 0) declared[key] = value;
+    }
+  }
+  for (const [key, attribute] of [
+    ['placement', 'data-dsh-htmlui-placement'],
+    ['size', 'data-dsh-htmlui-size'],
+    ['title', 'data-dsh-htmlui-title'],
+  ]) {
+    if (declared[key] !== undefined) continue;
+    const match = new RegExp(`\\b${attribute}\\s*=\\s*["']([^"']*)["']`, 'iu').exec(text);
+    if (match !== null && match[1].trim().length > 0) declared[key] = match[1].trim();
+  }
+  return declared;
+}
+
 const THEME_STYLE = [
   '<style data-dsh-htmlui-theme>',
   ':root{color-scheme:light;--dsh-htmlui-theme:light;--dsh-htmlui-bg:#ffffff;--dsh-htmlui-fg:#1a1a1a;',
@@ -990,7 +1028,8 @@ export function apply(ctx, config) {
         placement: {
           type: 'string',
           enum: PLACEMENTS,
-          description: 'Where the interface lives. Defaults to inline.',
+          description:
+            'Where the interface lives. Defaults to what the document declares for itself (a dsh-htmlui meta tag or data-dsh-htmlui-placement attribute), otherwise inline.',
         },
         size: { type: 'string', description: 'Optional geometry, e.g. "520x360" or "520x360+80+60" for a float window.' },
         template: { type: 'string', description: 'Template name to instantiate instead of html/path.' },
@@ -1054,11 +1093,20 @@ export function apply(ctx, config) {
         if (source === undefined) {
           return { ok: false, op, error: 'nothing to render', hint: 'pass html, path, or template' };
         }
+        // A document may declare its own placement, size, and title; an explicit
+        // tool argument always wins, and an unusable value falls back to the
+        // default rather than failing the call.
+        const declared = readDocumentDeclaration(source.source);
         const input = {
           sessionId: own,
-          title: typeof args?.title === 'string' ? args.title.slice(0, 200) : undefined,
-          placement: normalizePlacement(args?.placement),
-          size: normalizeSize(args?.size),
+          title:
+            typeof args?.title === 'string' && args.title.length > 0
+              ? args.title.slice(0, 200)
+              : typeof declared.title === 'string'
+                ? declared.title.slice(0, 200)
+                : undefined,
+          placement: normalizePlacement(args?.placement) ?? normalizePlacement(declared.placement),
+          size: normalizeSize(args?.size) ?? normalizeSize(declared.size),
           origin: source.origin,
           template: source.template,
           sourcePath: source.sourcePath,

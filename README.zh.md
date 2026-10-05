@@ -27,6 +27,14 @@ dsh-genui 渲染的是白名单 JSON 组件；本插件渲染的是真东西：�
 | `fullscreen` | 覆盖整个会话，内置切回聊天的按钮 |
 | `dock-right` | 会话右侧栏，作为承载该会话右侧界面的一个标签页（该列没有 tab 服务时回落为输入框上方停靠） |
 
+文档可以自己声明它该待在哪，而不必由调用方指定——模板因此能把"家在哪儿"一起带走：
+
+```html
+<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=订单看板">
+```
+
+优先级：工具参数 > 文档声明 > 默认 `inline`；不可用的值会被忽略而不是报错。
+
 ## 安装
 
 ```sh
@@ -107,7 +115,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 94 项断言：包完整性 12 + 文档契约 7 + 宿主 26 + 浏览器 21 + 桥 9 + 浅渲染 9 + 对抗输入 10
+npm test        # 97 项断言：包完整性 12 + 文档契约 9 + 宿主 27 + 浏览器 21 + 桥 9 + 浅渲染 9 + 对抗输入 10
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 
