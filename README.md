@@ -165,7 +165,10 @@ Runtime state lives under `$DSH_HOME/htmlui`: `ui/<id>/index.html` (the authored
 document, kept clean and portable — nothing is injected on disk),
 `templates/<name>/` for managed templates or `templates/<name>.html` for
 hand-written ones, `state/<session>.json`, and a `secret` used for capability
-tokens.
+tokens. Deleting a `ui/<id>/` directory by hand is safe at any time: an interface
+whose record is gone simply disappears from its session. (A record whose session
+no longer exists is left in place rather than garbage-collected, so an interface
+cannot vanish because a session was archived.)
 
 ## Templates
 

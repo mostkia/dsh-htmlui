@@ -103,7 +103,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
         allowedOrigins: []    # 额外信任的浏览器来源（见「安全」）
 ```
 
-运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`templates/<name>/`（托管模板）或 `templates/<name>.html`（手写模板）、`state/<session>.json`，以及用于能力令牌的 `secret`。
+运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`templates/<name>/`（托管模板）或 `templates/<name>.html`（手写模板）、`state/<session>.json`，以及用于能力令牌的 `secret`。随时手动删除某个 `ui/<id>/` 目录都是安全的：记录没了，该界面就会从会话里消失。（会话已不存在的记录会被保留而不会被自动回收，免得界面因为会话被归档而莫名消失。）
 
 ## 模板
 
