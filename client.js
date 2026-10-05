@@ -666,6 +666,7 @@ window.__ModuleLoader__.load({
         candidateAdopt: 'Adopt',
         adoptTitle: 'Project details for',
         adoptSlug: 'Project name',
+        adoptSlugHint: 'lowercase letters, digits, dot, dash, underscore',
         adoptName: 'Process name',
         adoptDescription: 'Details',
         adoptPlacement: 'Where it opens',
@@ -742,6 +743,7 @@ window.__ModuleLoader__.load({
         candidateAdopt: '设为项目',
         adoptTitle: '补全项目信息：',
         adoptSlug: '项目名称',
+        adoptSlugHint: '仅支持小写英文数字或._-',
         adoptName: '进程名称',
         adoptDescription: '详细描述',
         adoptPlacement: '默认生成位置',
@@ -2798,9 +2800,9 @@ window.__ModuleLoader__.load({
                         tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
                       ),
                       ...[
-                        { key: 'slug', label: tr('adoptSlug', 'Project id (used by template=)'), hint: 'lowercase letters, digits, dot, dash, underscore' },
-                        { key: 'name', label: tr('adoptName', 'Display name'), hint: '' },
-                        { key: 'description', label: tr('adoptDescription', 'Description'), hint: '' },
+                        { key: 'slug', label: tr('adoptSlug', 'Project name'), hint: tr('adoptSlugHint', 'lowercase letters, digits, dot, dash, underscore') },
+                        { key: 'name', label: tr('adoptName', 'Process name'), hint: '' },
+                        { key: 'description', label: tr('adoptDescription', 'Details'), hint: '' },
                       ].map((field) =>
                         h(
                           'div',
