@@ -32,29 +32,72 @@ Every reading below is a machine value, not an impression.
 
 ## Results
 
+The final sweep checked one placement at a time, each with its own document
+reporting its own measurements and its own button, so a failure could not be
+attributed to the wrong surface.
+
 | Placement | Reading | Verdict |
 |---|---|---|
-| `float` | `bridge: true`; the panel's own button returned `9/9` checks | works, end to end |
-| `dock-right` | `851×830, visible` once its tab activated | works |
-| `background` | `1920×919, visible` | works |
-| `fullscreen` | `1920×845, visible` (74 px less than `background`: its chrome row) | works |
-| `inline` | the document loaded; the card lives inside the tool row | works after the fix below |
-| `dock-top` | first reading `0×0, hidden`; every later reading `769×321, visible` | works after the fixes below |
-| `panel` | `769×321, visible` | works after the fixes below |
-| `dock-bottom` | `293×321, visible` | works after the fixes below |
+| `dock-top` | `1633×321, visible` | works |
+| `dock-bottom` | `325×321, visible` (a narrower seat, as measured) | works |
+| `dock-right` | `851×830, visible`; the tab opens itself | works |
+| `panel` | `1633×321, visible` | works |
+| `float` | `520×343, visible` for a requested `520x380+140+140` (343 = 380 minus its chrome); its ✕ drops the record from the host (`/ui/list` count 1 → 0) | works |
+| `fullscreen` | `1920×882, visible`; "Back to chat" leaves the layer and keeps the record (host count stays 1); ✕ deletes it | works |
+| `background` | `1920×919, visible` — the whole frame, because this layer has no chrome | works |
+| `inline` | renders into the tool call row; **this GUI does not show tool rows**, so the surface is invisible here | needs the `turn-tail` seat, below |
 
-All eight placements reported a real size, from documents measuring themselves, on
-the second live run. The three dock seats had never loaded before it.
+Sizes depend on the window; the pairs are what matter. `dock-top`/`panel` are the
+same seat (1633 px wide here), `dock-bottom` is a different and narrower one
+(325 px), and the two overlay layers differ by exactly one chrome row: `background`
+fills all 919 px, `fullscreen` gives up 37 px to its title bar. That last number is
+also the evidence for the single-title-bar fix: the same layer measured 845 px
+before it, i.e. one extra row.
 
 The nine self-checks that passed inside a live document: `window.dshHTML` exists,
 version, `uiId`, `sessionId`, theme, `parent.document` access refused,
 `localStorage` unavailable, state readable, SSE subscription available.
 
+## Fixes this sweep produced
+
+The one-at-a-time run found defects the earlier all-at-once run could not:
+
+1. **A dock would not render at all** — `useRef`/`useCallback` sat after two early
+   returns, which stayed invisible while the session never resolved. Once records
+   matched, the hook count changed between renders and React raised error #310; the
+   surface boundary turned that into a red line instead of silence, which is how it
+   was found at all.
+2. **A closed interface came back from its own transcript card** — a card keeps its
+   meta forever, so it republished records the host had dropped. That produced a
+   stale panel, an emptied right-column tab, and a frame stuck on a 404 ticket.
+   The host is authoritative now: after a session syncs, a card may only publish an
+   id the host listed or one created after that snapshot, and an id the host does
+   not know is settled by asking again rather than by guessing from a timestamp.
+3. **The float header swallowed its own buttons** — dragging captured the pointer on
+   the whole header row, so the ✕ never received a click. The grip is the title text
+   now, and a pointerdown on a button never starts a drag.
+4. **A close carried no capability**, so the host refused every one with 403 and a
+   working close button looked dead.
+5. **One message key meant two things**, so a frame that failed to load blamed the
+   template catalogue.
+6. **A dock entry was squashed to its first row** when the composer's dock had other
+   entries competing for height, which is what a drawer "flattened to its title bar"
+   was.
+
+## Still open
+
+`inline` has no visible seat in this GUI. The correct seat is
+`conversation.chat.turnTail`, which receives the turn and its closing sequence, and
+every shipped in-flow feature uses it. Making an inline surface render *only* in the
+turn that created it needs the record to carry that turn, which is a host change and
+therefore a restart. Until then, an inline interface is reachable only where tool
+rows are shown.
+
 Two seat facts worth knowing, both measured rather than assumed:
 
-- The dock above the input is 769 px wide on a 1920 px viewport; the composer's own
-  dock below it is 293 px. They are not the same seat, and they are not the same
-  width.
+- The dock above the input is the wide seat; the composer's own dock below it is much
+  narrower (325 px against 1633 px in this run). They are not the same seat, and they
+  are not the same width.
 - Frames were observed to remount in batches — several ids reloading within the same
   millisecond, and one id reloading while its revision never changed — which recreates
   the iframe and clears the document's own state. This run did not establish what
