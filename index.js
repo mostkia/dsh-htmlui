@@ -1581,9 +1581,24 @@ export function apply(ctx, config) {
     if (frame === undefined || frame === null) return;
     if (frame.type === 'chunk') {
       const chunk = frame.chunk ?? {};
-      const text = typeof chunk.text === 'string' ? chunk.text : typeof chunk.delta === 'string' ? chunk.delta : undefined;
-      if (text !== undefined && text.length > 0) {
-        hub.push(String(sessionId), 'assistant', { type: 'text', text: text.slice(0, 8_000) });
+      // StreamChunk is a tagged union: `text` exists on text deltas AND on
+      // reasoning deltas, so the tag decides what an interface receives.
+      if (typeof chunk.text === 'string' && chunk.text.length > 0) {
+        if (chunk.type === 'reasoning-delta') {
+          hub.push(String(sessionId), 'reasoning', { text: chunk.text.slice(0, 8_000) });
+          return;
+        }
+        if (chunk.type === 'text-delta') {
+          hub.push(String(sessionId), 'assistant', { type: 'text', text: chunk.text.slice(0, 8_000) });
+          return;
+        }
+      }
+      if (chunk.type === 'tool-call-delta') {
+        hub.push(String(sessionId), 'assistant', {
+          type: 'tool',
+          id: typeof chunk.id === 'string' ? chunk.id : undefined,
+          name: typeof chunk.name === 'string' ? chunk.name : undefined,
+        });
       }
       return;
     }

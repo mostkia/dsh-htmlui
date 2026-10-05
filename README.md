@@ -44,7 +44,9 @@ dsh plugin --profile web add github:mostkia/dsh-htmlui
 ```
 
 Requires DSH `>=0.1.7-0` (the pre-release line is included on purpose, so `0.1.7-rc.*`
-installs). Then hard-refresh the page. A working client half logs
+installs, and each 0.2 pre-release line has its own branch — see
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for what was checked against
+`0.2.0-rc.2`). Then hard-refresh the page. A working client half logs
 `[dsh-htmlui] client active (0.1.1)` in the browser console.
 
 Two cheap ways to confirm which generation a running host has loaded:
@@ -72,7 +74,9 @@ to the model shows up, and how to read a symptom.
   the tool view, the composer dock, and the frame-wide overlay, and hosts every
   document in an iframe.
 - **Bridge** (`assets/bridge.js`, injected at serve time): exposes
-  `window.dshHTML` with `send`, `state`, `resize`, `close`, and `on(...)`.
+  `window.dshHTML` with `send`, `state`, `resize`, `close`, and
+  `on(...)` for the streamed `assistant` text, `reasoning`, `session`, `action`,
+  `ui`, `theme`, and `ready` events.
 
 The model never receives the document body: what it reads is a compact summary
 (`ui_id`, `placement`, `bytes`, revision), and the browser loads the document
@@ -150,7 +154,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 83 assertions: 12 package, 7 doc contract, 26 host, 21 browser, 8 bridge, 9 render smoke
+npm test        # 84 assertions: 12 package, 7 doc contract, 26 host, 21 browser, 9 bridge, 9 render smoke
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

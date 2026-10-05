@@ -559,11 +559,36 @@ test('the SSE stream delivers model output and interface lifecycle for its sessi
   // The model's streamed text is what an interface subscribes for.
   harness.ctx.emit('agent/assistant-stream', {
     agent: { session: { id: 'session-sse' } },
-    frame: { type: 'chunk', chunk: { text: 'hello from the model' } },
+    frame: { type: 'chunk', chunk: { type: 'text-delta', index: 0, text: 'hello from the model' } },
   });
   await tick();
   assert.match(stream.text(), /event: assistant/u);
   assert.ok(stream.text().includes('"text":"hello from the model"'));
+
+  // Reasoning carries a `text` field too, but it is not assistant output.
+  harness.ctx.emit('agent/assistant-stream', {
+    agent: { session: { id: 'session-sse' } },
+    frame: { type: 'chunk', chunk: { type: 'reasoning-delta', index: 0, text: 'weighing options' } },
+  });
+  await tick();
+  assert.match(stream.text(), /event: reasoning/u);
+  assert.ok(stream.text().includes('"text":"weighing options"'));
+  // Frame by frame: reasoning must not ride the assistant event.
+  const frames = stream.text().split('\n\n').filter((block) => block.trim().length > 0);
+  const reasoningFrame = frames.find((block) => block.includes('weighing options'));
+  assert.ok(reasoningFrame !== undefined && reasoningFrame.startsWith('event: reasoning'), 'reasoning rides its own event');
+  const textFrame = frames.find((block) => block.includes('hello from the model'));
+  assert.ok(textFrame !== undefined && textFrame.startsWith('event: assistant'), 'text rides the assistant event');
+  assert.ok(!textFrame.includes('weighing options'));
+
+  // A tool call in flight is reported as a tool frame, not as text.
+  harness.ctx.emit('agent/assistant-stream', {
+    agent: { session: { id: 'session-sse' } },
+    frame: { type: 'chunk', chunk: { type: 'tool-call-delta', index: 1, id: 'call-1', name: 'grep', argumentsDelta: '{"q"' } },
+  });
+  await tick();
+  assert.ok(stream.text().includes('"type":"tool"'));
+  assert.ok(stream.text().includes('"name":"grep"'));
 
   // Another session's traffic must never reach this document.
   harness.ctx.emit('agent/assistant-stream', {

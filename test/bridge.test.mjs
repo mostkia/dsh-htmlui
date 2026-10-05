@@ -163,6 +163,20 @@ test('subscribing opens the stream and delivers frames', () => {
   assert.equal(env.calls.filter((entry) => entry.kind === 'eventsource').length, 1);
 });
 
+test('every event the host streams has a listener in the bridge', () => {
+  const env = loadBridge(baseConfig);
+  const seen = { assistant: [], reasoning: [], session: [], action: [], ui: [] };
+  for (const type of Object.keys(seen)) env.window.dshHTML.on(type, (detail) => seen[type].push(detail));
+  const source = env.calls.find((entry) => entry.kind === 'eventsource');
+  assert.ok(source !== undefined);
+  // The bridge subscribes to the named SSE events the host sends; a missing one
+  // would be dropped silently and the document would never see it.
+  const bridge = readFileSync(new URL('../assets/bridge.js', import.meta.url), 'utf8');
+  for (const type of ['hello', 'assistant', 'reasoning', 'session', 'action', 'ui']) {
+    assert.ok(bridge.includes(`addEventListener('${type}'`), `the bridge must forward the ${type} event`);
+  }
+});
+
 test('theme changes reach both the document element and listeners', () => {
   const env = loadBridge(baseConfig);
   const seen = [];

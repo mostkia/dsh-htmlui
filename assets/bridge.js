@@ -103,6 +103,9 @@
     events.addEventListener('assistant', function (event) {
       emit('assistant', JSON.parse(event.data));
     });
+    events.addEventListener('reasoning', function (event) {
+      emit('reasoning', JSON.parse(event.data));
+    });
     events.addEventListener('session', function (event) {
       emit('session', JSON.parse(event.data));
     });

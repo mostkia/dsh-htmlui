@@ -57,11 +57,19 @@ test('the bundle patch mounts this exact package', () => {
 
 test('the compatibility floor includes the DSH 0.1.7 pre-release line', () => {
   // A plain ">=0.1.7" excludes 0.1.7-rc.* from every range, so the install gate
-  // refuses a plugin on the very runtime it was developed against.
+  // refuses a plugin on the very runtime it was developed against. The 0.2 lines
+  // need their own branch for the same reason: semver only admits a pre-release
+  // when a comparator names that same major.minor.patch.
   for (const [name, range] of Object.entries(pkg.peerDependencies)) {
     if (!name.startsWith('@deepseek-ai/dsh-')) continue;
     assert.ok(range.includes('0.1.7-0'), `${name} must accept 0.1.7-0, got ${range}`);
+    assert.ok(range.includes('>=0.2.0-rc.1 <0.3.0-0'), `${name} must accept the 0.2 pre-release line, got ${range}`);
     assert.ok(pkg.peerDependenciesMeta?.[name]?.optional === true, `${name} should stay optional so a slim deployment still installs`);
+  }
+  // Every package the code registers into or reads a service from is declared, so
+  // a reviewer can see the dependency instead of finding it in the source.
+  for (const name of ['dsh-client-ui-sidebar-right', 'dsh-client-ui-tool', 'dsh-host-webserver', 'dsh-tools']) {
+    assert.ok(`@deepseek-ai/${name}` in pkg.peerDependencies, `@deepseek-ai/${name} must be declared as a peer`);
   }
 });
 

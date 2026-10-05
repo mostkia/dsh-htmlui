@@ -6,6 +6,16 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `docs/COMPATIBILITY.md`, and the peer range widened to admit the 0.2
+  pre-release lines. Each pre-release line needs its own branch because semver
+  only admits a pre-release when a comparator names that same
+  major.minor.patch, so `>=0.1.7-0` alone silently refused `0.2.0-rc.*`. The
+  contracts this plugin uses were checked against `0.2.0-rc.2` by reading its
+  published declarations; `@deepseek-ai/dsh-client-ui-sidebar-right`, which the
+  code already registered into, is now declared as a peer too.
+- A `reasoning` stream event. The host maps the model's stream by chunk tag
+  instead of by "has a text field", so thinking no longer rides the `assistant`
+  event, and a tool call in flight arrives as `{ type: 'tool', name }`.
 - `docs/VERIFY.md`: the live acceptance checklist — which generation is running,
   what each of the eight placements should look like, how the round trip to the
   model shows up, and a triage table from symptom to check. The documentation
@@ -18,6 +28,10 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- Reasoning no longer arrives as assistant text. `StreamChunk` is a tagged union
+  in which `text-delta` and `reasoning-delta` both carry `text`, so the previous
+  mapping leaked the model's thinking into the answer an interface displayed; the
+  chunk tag decides the event now.
 - The READMEs no longer claim the browser receives a document through the tool
   result's presentation projection. It carries the record only; the document
   itself is loaded from the carrier's ticket route.

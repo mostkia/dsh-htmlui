@@ -68,11 +68,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5.0.0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.7-0",
-    "@deepseek-ai/dsh-tools": ">=0.1.7-0",
-    "@deepseek-ai/dsh-client-ui-tool": ">=0.1.7-0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.7-0",
-    "@deepseek-ai/dsh-client-ui-layout": ">=0.1.7-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-tool": ">=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-layout": ">=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0",
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
@@ -89,6 +90,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-client-ui-layout": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-sidebar-right": {
       "optional": true
     }
   }

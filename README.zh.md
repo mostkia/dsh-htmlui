@@ -107,7 +107,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 83 项断言：包完整性 12 + 文档契约 7 + 宿主 26 + 浏览器 21 + 桥 8 + 浅渲染 9
+npm test        # 84 项断言：包完整性 12 + 文档契约 7 + 宿主 26 + 浏览器 21 + 桥 9 + 浅渲染 9
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

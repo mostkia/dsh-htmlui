@@ -67,7 +67,7 @@ Give `size` as `"WxH"` or `"WxH+X+Y"`.
 | `dshHTML.state.get()` / `.set(value)` | Server-side state for this document; survives reloads (this sandbox has no `localStorage`). |
 | `dshHTML.resize('520x420')` | Ask the host to resize the surface. |
 | `dshHTML.close()` | Ask the host to remove the surface. |
-| `dshHTML.on(type, handler)` | `assistant` (streamed model text), `session`, `action`, `ui`, `theme`, `ready`. |
+| `dshHTML.on(type, handler)` | `assistant` (streamed model text, and `{ type: 'tool', name }` while a tool call streams), `reasoning` (the model's thinking, kept apart from its answer), `session`, `action`, `ui`, `theme`, `ready`. |
 | `dshHTML.stream()` | Open the SSE stream explicitly. |
 | `dshHTML.theme()` | `'light'` or `'dark'`. |
 
