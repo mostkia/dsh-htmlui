@@ -563,6 +563,11 @@ window.__ModuleLoader__.load({
         toModel: 'Ask the model',
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
+        managerView: 'HTML UI',
+        managerTitle: 'HTML interfaces in this session',
+        managerClose: 'Remove',
+        managerCloseAll: 'Remove all',
+        managerEmpty: 'This session has no HTML interface.',
         create: 'Create',
         creating: 'Creating…',
         createTitle: 'New HTML interface',
@@ -608,6 +613,11 @@ window.__ModuleLoader__.load({
         toModel: '交给模型',
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
+        managerView: 'HTML 界面',
+        managerTitle: '本会话的 HTML 界面',
+        managerClose: '关闭',
+        managerCloseAll: '全部关闭',
+        managerEmpty: '本会话没有 HTML 界面。',
         create: '创建',
         creating: '正在创建…',
         createTitle: '新建 HTML 界面',
@@ -1411,6 +1421,66 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The session's HTML interfaces, listed where the reader already is.
+     *
+     * A `background` layer is click-through by design and an `inline` one is seamless,
+     * so neither offers a control of its own; without this page a user has no way to
+     * remove what a model attached. `conversation.view` is the shipped seat for a
+     * session-scoped page like this one, and its label is the row it appears in.
+     */
+    function HtmlUiManager(props) {
+      useStore();
+      const sessionId = resolveSessionId(props);
+      useSessionSync(sessionId);
+      const records = sessionId === undefined ? [] : recordsFor(sessionId);
+      const rows = records.map((record) =>
+        h(
+          'div',
+          {
+            key: record.uiId,
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '7px 10px',
+              borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
+            },
+          },
+          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) }, record.title.length > 0 ? record.title : record.uiId),
+          h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
+          h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}${record.sizeText !== undefined && record.sizeText.length > 0 ? ` · ${record.sizeText}` : ''}`),
+          h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),
+          h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
+        ),
+      );
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', padding: '10px 12px' } },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' } },
+          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML interfaces in this session')} (${records.length})`),
+          records.length > 0
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  style: buttonStyle,
+                  onClick: () => {
+                    for (const record of records) dismissRecord(record.uiId);
+                  },
+                },
+                tr('managerCloseAll', 'Remove all'),
+              )
+            : null,
+        ),
+        records.length === 0
+          ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML interface.'))
+          : h('div', null, ...rows),
+      );
+    }
+
+    /**
      * The tool row's own disclosure. The contract makes `useDisclosure` a required
      * owner prop; the guard keeps a slimmer owner from crashing the card. `useState`
      * runs unconditionally so the hook order never changes.
@@ -1444,15 +1514,23 @@ window.__ModuleLoader__.load({
         // render, and an object dependency would republish on each one.
       }, [meta === undefined ? undefined : meta.uiId, meta === undefined ? undefined : meta.revision, meta === undefined ? undefined : meta.op, sessionId]);
 
-      // A dock-right interface lives in the right column: reveal its tab as soon as
-      // the column can be opened. The controller binds asynchronously, so this
-      // retries whenever it arrives rather than giving up on the first render.
+      // A dock-right interface lives in the right column: reveal its tab as soon as the
+      // column can be opened. Both halves of that — the tab type and the controller —
+      // bind asynchronously, so the effect has to re-run when either arrives. Missing
+      // the tab type here is what made a dock-right interface invisible: by then the
+      // dock had already let go of it, so nothing drew it at all.
       const rightPaneController = state.rightPane.controller;
+      const rightPaneTab = state.rightPane.available;
       useEffect(() => {
         if (record === undefined || record.placement !== 'dock-right') return;
         if (state.rightPane.opened.has(record.uiId)) return;
         openRightPane(record.uiId);
-      }, [record === undefined ? undefined : record.uiId, record === undefined ? undefined : record.placement, rightPaneController]);
+      }, [
+        record === undefined ? undefined : record.uiId,
+        record === undefined ? undefined : record.placement,
+        rightPaneController,
+        rightPaneTab,
+      ]);
 
       // An inline interface lives *inside this tool row*, and a collapsed row hides it
       // completely: the caller asks for a panel and sees a one-line tool call. Open
@@ -2377,6 +2455,15 @@ window.__ModuleLoader__.load({
       );
 
       disposers.push(
+        ctx.slots.inject('conversation.view', () =>
+          ctx.slots.register(
+            { name: 'conversation.view', id: 'htmlui-view', order: 60, label: () => tr('managerView', 'HTML UI') },
+            guarded(ctx, (props) => h(HtmlUiManager, Object.assign({}, props, { ctx }))),
+          ),
+        ),
+      );
+
+      disposers.push(
         ctx.slots.inject('conversation.chat.turnTail', () =>
           ctx.slots.register(
             { name: 'conversation.chat.turnTail', id: 'htmlui-inline', order: 45 },
@@ -2471,6 +2558,7 @@ window.__ModuleLoader__.load({
         LOCALE_NS,
         HtmlUiTemplateDrawer,
         HtmlUiCreateDialog,
+        HtmlUiManager,
         HtmlUiTemplateButton,
         HtmlUiInlineTail,
         HtmlUiBoundary,

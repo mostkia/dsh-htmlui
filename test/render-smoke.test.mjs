@@ -411,6 +411,27 @@ test('the create dialog asks what to start from and where to put it', () => {
   resetCreate();
 });
 
+test('the session manager lists what is attached and can remove it', () => {
+  // A click-through background layer and a seamless inline one offer no control of
+  // their own, so this page is the only way for a user to take them away.
+  resetStore();
+  const empty = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.match(empty.text, /no HTML interface/u);
+
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000001', sessionId: 'session-1', title: '看板', placement: 'background', revision: 2, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000002', sessionId: 'session-1', title: '表单', placement: 'inline', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.match(listed.text, /\(2\)/u, 'the count is the session count');
+  for (const text of ['看板', '表单', 'background', 'inline', 'ui-99000001', 'ui-99000002', 'Remove']) {
+    assert.ok(listed.text.includes(text), `the manager shows ${text}`);
+  }
+  // A different session is not this session's business.
+  const other = render(__internals.HtmlUiManager, { sessionId: 'session-2' });
+  assert.match(other.text, /no HTML interface/u);
+});
+
 test('every surface keeps one hook order, records or not', () => {
   // React error #310 in the live page came from exactly this: hooks placed after an
   // early return. The count only changed once a seat actually had records, so no test
