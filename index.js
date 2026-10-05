@@ -2029,9 +2029,11 @@ export function apply(ctx, config) {
     }
     res.writeHead(200, {
       'content-type': fileTypeFor(resolved),
-      // A project under development is read on every load: caching would make an edit
-      // look like it did nothing.
-      'cache-control': 'no-store',
+      // The document is always read fresh, so an edit shows up on the next load. Everything
+      // else — a wallpaper's 5 MB image, a 75 MB video — is cached, because a project's
+      // layer is remounted on every view switch and re-downloading all of that each time is
+      // what "the page keeps loading it" was.
+      'cache-control': /\.html?$/iu.test(resolved) ? 'no-store' : 'private, max-age=300',
       'content-length': data.length,
       'access-control-allow-origin': '*',
     });
