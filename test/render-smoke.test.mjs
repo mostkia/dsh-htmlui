@@ -312,6 +312,16 @@ test('the right pane renders nothing until it has something to host', () => {
   assert.ok(!hosted.text.includes('R'), 'the tab title is not repeated inside the body');
   assert.match(hosted.text, /✕/u, 'one object can be closed without closing the tab');
   assert.match(hosted.text, /▾/u, 'and collapsed on its own');
+
+  // Collapsing has to give the space back: a collapsed row takes its control row only.
+  const expandedRow = hosted.elements.filter((element) => element.props?.style?.flex !== undefined).map((element) => element.props.style.flex);
+  assert.ok(expandedRow.includes('1 1 auto'), 'an expanded object shares the column height');
+  __internals.state.collapsed.set('ui-55550000', true);
+  const collapsed = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
+  const collapsedRow = collapsed.elements.filter((element) => element.props?.style?.flex !== undefined).map((element) => element.props.style.flex);
+  assert.ok(collapsedRow.includes('0 0 auto'), 'a collapsed object keeps only its control row');
+  assert.ok(!collapsedRow.includes('1 1 auto'), 'and does not hold an empty share of the column');
+  __internals.state.collapsed.delete('ui-55550000');
 });
 
 test('the template drawer renders nothing closed and a row per template open', () => {

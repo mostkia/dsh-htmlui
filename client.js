@@ -1995,7 +1995,16 @@ window.__ModuleLoader__.load({
             'div',
             {
               key: record.uiId,
-              style: { flex: '1 1 auto', minHeight: '0', display: 'flex', flexDirection: 'column' },
+              style: {
+                // An expanded surface shares the column's height with its neighbours; a
+                // collapsed one takes only its control row. Leaving it at `1 1 auto` kept
+                // its share of empty space, which is what "collapsed but still there"
+                // looked like.
+                flex: state.collapsed.get(record.uiId) === true ? '0 0 auto' : '1 1 auto',
+                minHeight: '0',
+                display: 'flex',
+                flexDirection: 'column',
+              },
             },
             // Each object keeps its own collapse and close: the column can hold several
             // independent surfaces, and one of them being in the way is not a reason to
