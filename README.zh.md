@@ -72,6 +72,8 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 文档运行在 `sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock"` 的 iframe 里，**不含** `allow-same-origin`：不透明源，没有 cookie、没有本地存储、碰不到宿主页面。每份文档带一个按文档派生的能力令牌（插件本地 secret 的 HMAC），文档、动作、状态、SSE 四条路由都由它把关。该令牌只出现在一个地方——票据路由交出的 iframe URL——所以工具结果、会话日志、列表响应、事件流帧里都不会有它，而且不带令牌的地址根本加载不了。
 
+文档会带上一套严格 CSP。注意：不带 `allow-same-origin` 的沙箱 frame 是**不透明源**，而不透明源匹配不到任何 URL，所以**所有"放行同源"的授权都显式写本机 origin，而不是 `'self'`**——其中 `script-src` 就是让注入的 bridge 能被加载的那一条。
+
 载体自身的策略：只信回环 Host/Origin 配对；不透明源的 frame 必须有合法令牌；跨站票据请求直接拒绝；写操作只收 POST；每份文档一个小令牌桶，防止脚本刷爆模型。文档里不该出现任何秘密，插件也从不索取。
 
 如果 DSH 被故意暴露到回环之外（`webServer.host: 0.0.0.0`、局域网地址、反向代理），浏览器来源就会是默认策略拒绝的那个，整个插件会一律 403。把那个来源写进 `allowedOrigins` 即被信任——仅限那一个来源，别的一概不放：
@@ -115,7 +117,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 105 项断言：包完整性 12 + 文档契约 9 + 宿主 28 + 浏览器 21 + 桥 9 + 浅渲染 9 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm test        # 106 项断言：包完整性 12 + 文档契约 9 + 宿主 29 + 浏览器 21 + 桥 9 + 浅渲染 9 + 对抗输入 10 + 打包产物 2 + harness schema 5
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

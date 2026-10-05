@@ -360,6 +360,36 @@ test('the document route demands a capability token and injects the bridge', asy
   assert.match(document.headers['content-security-policy'], /connect-src http:\/\/127\.0\.0\.1:3080/u);
 });
 
+test('the document policy lets the injected bridge load in an opaque origin', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>csp</p>' }, exec('session-csp'));
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const framed = await callRoute(route(), { url: JSON.parse(entry.text).url, headers: { host: '127.0.0.1:3080' } });
+  const csp = framed.headers['content-security-policy'];
+  const directives = new Map(
+    csp.split(';').map((part) => {
+      const [name, ...sources] = part.trim().split(/\s+/u);
+      return [name, sources];
+    }),
+  );
+  // The bridge is an external same-origin script. A sandboxed frame has an opaque
+  // origin, where 'self' matches nothing, so the script source must name the host:
+  // without it the browser blocks the bridge and every document loses its API.
+  assert.ok(directives.get('script-src').includes('http://127.0.0.1:3080'), `script-src must allow the host: ${csp}`);
+  assert.ok(!directives.get('script-src').includes("'self'"), 'an opaque origin cannot use self');
+  assert.ok(directives.get('script-src').includes("'unsafe-inline'"), 'the runtime config is inline');
+  // The frame is embedded by the host page, so frame-ancestors must name it too.
+  assert.deepEqual(directives.get('frame-ancestors'), ['http://127.0.0.1:3080', 'https://127.0.0.1:3080']);
+  assert.ok(directives.get('style-src').includes('http://127.0.0.1:3080'));
+  assert.ok(directives.get('font-src').includes('http://127.0.0.1:3080'));
+  assert.ok(!csp.includes("'self'"), `no directive may rely on self in an opaque origin: ${csp}`);
+  assert.ok(framed.text.includes('/assets/bridge.js'), 'and the bridge is what that allowance is for');
+});
+
 test('a cross-origin page cannot reach the carrier, an opaque frame can with a token', async () => {
   const created = await tool('html_ui').execute({ op: 'render', html: '<p>x</p>' }, exec());
   const foreign = await callRoute(route(), {

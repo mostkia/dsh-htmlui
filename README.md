@@ -104,6 +104,11 @@ That token appears in exactly one place — the frame URL the ticket route hands
 out — so no tool result, session log entry, list response, or stream frame ever
 contains it, and a token-free address cannot be loaded.
 
+The served document carries a strict CSP. Because a sandboxed frame without
+`allow-same-origin` has an *opaque* origin, and an opaque origin matches no URL,
+every same-origin allowance names this host explicitly rather than `'self'` —
+including `script-src`, which is what lets the injected bridge load at all.
+
 The carrier's own policy: only loopback Host/Origin pairs are trusted, an
 opaque-origin frame is accepted only with a valid token, cross-site ticket
 requests are refused, mutating routes are POST-only, and each document gets a
@@ -164,7 +169,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 105 assertions: 12 package, 9 doc contract, 28 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 106 assertions: 12 package, 9 doc contract, 29 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

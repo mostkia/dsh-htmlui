@@ -66,6 +66,13 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   in which `text-delta` and `reasoning-delta` both carry `text`, so the previous
   mapping leaked the model's thinking into the answer an interface displayed; the
   chunk tag decides the event now.
+- The document CSP lets the injected bridge load. A sandboxed frame without
+  `allow-same-origin` has an opaque origin, and an opaque origin matches no URL,
+  so `script-src` without this host blocked `assets/bridge.js` outright:
+  `window.dshHTML` would not have existed in any document, so every interface
+  would have failed on its first use while still rendering normally. Every
+  same-origin allowance now names this request's host — including
+  `frame-ancestors`, where `'self'` could make the frame refuse to display.
 - The READMEs no longer claim the browser receives a document through the tool
   result's presentation projection. It carries the record only; the document
   itself is loaded from the carrier's ticket route.

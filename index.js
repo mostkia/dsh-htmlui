@@ -1336,18 +1336,24 @@ export function apply(ctx, config) {
     };
     const html = composeDocument(current.source, config);
     const host = String(req.headers.host ?? '');
+    // A sandboxed frame without `allow-same-origin` has an *opaque* origin, and an
+    // opaque origin matches no URL: `'self'` would allow nothing, which would block
+    // the injected bridge script (`window.dshHTML` would simply not exist) and could
+    // make the frame refuse to display at all. Every same-origin allowance therefore
+    // names this request's own host explicitly.
+    const selfOrigin = host.length > 0 ? `http://${host} https://${host}` : '';
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
       'content-security-policy': [
         "default-src 'none'",
-        "script-src 'unsafe-inline' 'unsafe-eval' blob:",
-        "style-src 'unsafe-inline'",
-        "img-src 'self' data: blob: https: http:",
-        "media-src 'self' data: blob: https: http:",
-        "font-src 'self' data:",
-        `connect-src http://${host} https://${host}`,
-        "frame-ancestors 'self'",
+        `script-src 'unsafe-inline' 'unsafe-eval' blob: ${selfOrigin}`.trim(),
+        `style-src 'unsafe-inline' ${selfOrigin}`.trim(),
+        `img-src ${selfOrigin} data: blob: https: http:`.trim(),
+        `media-src ${selfOrigin} data: blob: https: http:`.trim(),
+        `font-src ${selfOrigin} data:`.trim(),
+        `connect-src ${selfOrigin}`.trim(),
+        `frame-ancestors ${selfOrigin}`.trim(),
         "base-uri 'none'",
         "form-action 'none'",
       ].join('; '),
