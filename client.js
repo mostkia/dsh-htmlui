@@ -2153,36 +2153,20 @@ window.__ModuleLoader__.load({
      * parameters are not needed, because the session arrives in the standard
      * props every session-scoped body receives.
      */
-    /** Whether the column's body is on screen, and the pending close it may owe. */
-    const rightPaneBody = { mounted: 0, timer: null };
-
     function HtmlUiRightPane(props) {
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
-      // Closing this tab is how a reader says they are done with these interfaces. The
-      // records have to go with it, or the session page keeps listing surfaces nothing
-      // can show — an interface with no seat, which reads as a ghost.
+      // Unmounting this body is deliberately *not* treated as "the reader closed the
+      // tab". An earlier revision did exactly that — it waited 500 ms and retired the
+      // session's interfaces when nothing had remounted — and it destroyed work: a
+      // session switch unmounts the old body, the new session's column can mount later
+      // than the delay (or not at all), and the previous session's interfaces were
+      // deleted, host-side, so not even a reload brought them back. Switching to
+      // another tab in the same column unmounts it too. "Not on screen right now" and
+      // "closed" are simply not distinguishable from here, so the records are removed
+      // only where the reader says so: the ✕ on a row, or the session page's controls.
       //
-      // The check is delayed and counts mounts, because hiding the column unmounts this
-      // body too, and only a body that never comes back was really closed. A session
-      // switch remounts it at once, so switching sessions cannot delete anything.
-      useEffect(() => {
-        rightPaneBody.mounted += 1;
-        if (rightPaneBody.timer !== null) {
-          clearTimeout(rightPaneBody.timer);
-          rightPaneBody.timer = null;
-        }
-        return () => {
-          rightPaneBody.mounted -= 1;
-          if (rightPaneBody.mounted > 0 || rightPaneBody.timer !== null) return;
-          rightPaneBody.timer = setTimeout(() => {
-            rightPaneBody.timer = null;
-            if (rightPaneBody.mounted > 0) return;
-            for (const record of recordsIn(sessionId, ['dock-right'])) dismissRecord(record.uiId);
-          }, 500);
-        };
-      }, [sessionId]);
       // Nothing to show means showing nothing: an explanatory line in an open column
       // costs the reader half the frame for no content. The column itself is not ours
       // to open or close — it may host other plugins' tabs — so the plugin simply never

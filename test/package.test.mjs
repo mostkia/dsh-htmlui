@@ -122,6 +122,18 @@ test('the version is stated the same way everywhere it is stated', () => {
   assert.equal(headings[0], pkg.version, 'the newest changelog heading must be the packaged version');
 });
 
+test('nothing retires interfaces except an explicit click', () => {
+  // A guard with a scar behind it: an earlier revision retired a session's dock-right
+  // interfaces when their body unmounted and did not remount within 500 ms. Switching
+  // sessions unmounts that body, the next session's column can mount later than the
+  // delay, and the interfaces were deleted host-side — reloads could not bring them
+  // back. "Not on screen right now" is not "closed", and only a click can tell them
+  // apart, so neither the state it used nor a timer reaching dismissRecord comes back.
+  const client = read('client.js');
+  assert.ok(!client.includes('rightPaneBody'), 'the unmount-based retirement must not return');
+  assert.ok(!/setTimeout\([\s\S]{0,240}dismissRecord/u.test(client), 'no timer may retire an interface on its own');
+});
+
 test('the model-facing reference keeps its frontmatter', () => {
   const skill = read('SKILL.md');
   assert.match(skill, /^---\nname: dsh-htmlui\n/u);
