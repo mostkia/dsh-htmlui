@@ -17,7 +17,6 @@
     "icon.svg",
     "assets",
     "locale/*.json",
-    "templates",
     "SKILL.md",
     "README.md",
     "README.zh.md",

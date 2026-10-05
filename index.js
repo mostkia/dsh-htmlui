@@ -479,29 +479,74 @@ function createStore(root) {
     return join(templateRoot, slug);
   }
 
-  function readTemplate(slug) {
-    // The reader's own directory comes first, exactly as it does in the listing: a name
-    // they chose must resolve to their file, not to a bundled one with the same name.
+  /**
+   * The blank canvas: a project with nothing in it yet.
+   *
+   * It is built in rather than shipped as a file, because the catalogue now holds only
+   * two things — this and whatever directory the reader points at — and a blank canvas
+   * has to exist before any directory does.
+   */
+  const BLANK_DOCUMENT = [
+    '<!doctype html>',
+    '<html lang="zh">',
+    '  <head>',
+    '    <meta charset="utf-8" />',
+    '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+    '    <meta name="dsh-htmlui" content="placement=dock-right" />',
+    '    <title>HTML 画布</title>',
+    '    <style>',
+    '      :root { color-scheme: light dark; }',
+    '      body { margin: 0; padding: 18px 20px; background: transparent;',
+    '        font: 14px/1.7 "Segoe UI", system-ui, "Microsoft YaHei", sans-serif;',
+    '        color: var(--dsh-htmlui-fg, var(--dsw-alias-text-primary, #1a1a1a)); }',
+    '      h1 { font-size: 15px; margin: 0 0 6px; font-weight: 600; }',
+    '      p { margin: 0 0 10px; opacity: .68; font-size: 12.5px; }',
+    '      .canvas { border: 1px dashed var(--dsh-htmlui-border, var(--dsw-alias-border-l2, #ccc));',
+    '        border-radius: 12px; min-height: 220px; display: flex; align-items: center;',
+    '        justify-content: center; text-align: center; padding: 20px; opacity: .75; }',
+    '      code { background: rgba(127, 127, 127, .14); padding: 1px 5px; border-radius: 5px; font-size: 12px; }',
+    '    </style>',
+    '  </head>',
+    '  <body>',
+    '    <h1>HTML 画布</h1>',
+    '    <p>这是一块空白空间。直接对模型说 <code>把这块画布改成……</code>，它会就地替换这里的内容。</p>',
+    '    <div class="canvas">空白画布 · 等待内容</div>',
+    '  </body>',
+    '</html>',
+    '',
+  ].join('\n');
+
+  /** The synthetic catalogue entry the blank canvas takes. */
+  const BLANK_TEMPLATE = {
+    slug: 'blank',
+    name: 'blank',
+    description: '空白画布：一块空区域，说一句话就能填上内容。',
+    bundled: true,
+    bytes: BLANK_DOCUMENT.length,
+  };
+
+  /** The reader's own directory, when they have chosen one. */
+  function templatesDir() {
     const settings = readSettings();
-    if (settings.templatesDir !== undefined) {
-      const ownDir = join(settings.templatesDir, String(slug ?? ''));
-      const ownMeta = readJson(join(ownDir, 'meta.json'), undefined);
-      const ownDocument = join(ownDir, 'index.html');
-      if (ownMeta !== undefined && existsSync(ownDocument)) {
-        return { meta: ownMeta, documentPath: ownDocument, source: readFileSync(ownDocument, 'utf8') };
-      }
-      const ownBare = readBareTemplate(settings.templatesDir, slug);
-      if (ownBare !== undefined) return ownBare;
+    return settings.templatesDir;
+  }
+
+  function readTemplate(slug) {
+    const name = String(slug ?? '');
+    if (name === 'blank') {
+      return { meta: { slug: 'blank', name: 'blank', description: BLANK_TEMPLATE.description }, documentPath: undefined, source: BLANK_DOCUMENT };
     }
-    const dir = templatePath(slug);
-    const meta = readJson(join(dir, 'meta.json'), undefined);
-    const documentPath = join(dir, 'index.html');
-    if (meta !== undefined && existsSync(documentPath)) {
-      return { meta, documentPath, source: readFileSync(documentPath, 'utf8') };
+    // Everything else comes from the reader's directory, and only from there: the
+    // catalogue is their folder plus the blank canvas, with nothing hidden behind it.
+    const root = templatesDir();
+    if (root === undefined) return undefined;
+    const ownDir = join(root, name);
+    const ownMeta = readJson(join(ownDir, 'meta.json'), undefined);
+    const ownDocument = join(ownDir, 'index.html');
+    if (ownMeta !== undefined && existsSync(ownDocument)) {
+      return { meta: ownMeta, documentPath: ownDocument, source: readFileSync(ownDocument, 'utf8') };
     }
-    const bare = readBareTemplate(templateRoot, slug);
-    if (bare !== undefined) return bare;
-    return readBundledTemplate(slug);
+    return readBareTemplate(root, slug);
   }
 
   /**
@@ -532,22 +577,33 @@ function createStore(root) {
     return readBareTemplate(bundledTemplateRoot, slug);
   }
 
+  /**
+   * Save a template into the reader's directory.
+   *
+   * That directory is the only catalogue there is, so without one there is nowhere to
+   * put a template — and saying so is better than writing it somewhere the reader will
+   * never see it.
+   */
   function writeTemplate(meta, source) {
-    const dir = ensureDir(templatePath(meta.slug));
+    const root = templatesDir();
+    if (root === undefined) return { ok: false, error: 'no templates directory is set' };
+    const dir = ensureDir(join(root, String(meta.slug)));
     writeTextAtomic(join(dir, 'index.html'), source);
     writeJsonAtomic(join(dir, 'meta.json'), meta);
-    return meta;
+    return { ok: true, meta };
   }
 
   function removeTemplate(slug) {
-    // Remove whatever is in force for this name: the managed template first,
-    // then the hand-written file it may be covering.
-    const dir = templatePath(slug);
+    const root = templatesDir();
+    if (root === undefined) return false;
+    // Remove whatever is in force for this name: the directory form first, then the
+    // hand-written file it may be covering.
+    const dir = join(root, String(slug));
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
       return true;
     }
-    const bare = join(templateRoot, `${slug}.html`);
+    const bare = join(root, `${slug}.html`);
     if (existsSync(bare)) {
       rmSync(bare, { force: true });
       return true;
@@ -582,14 +638,13 @@ function createStore(root) {
         seen.add(match[1]);
       }
     };
-    // The reader's own directory comes first, so their templates win a name clash with
-    // the ones this plugin ships; then the store's templates; then the bundled ones.
-    const settings = readSettings();
-    if (settings.templatesDir !== undefined) collect(settings.templatesDir, false);
-    collect(templateRoot, false);
-    collect(bundledTemplateRoot, true);
+    // The catalogue is the reader's directory plus the blank canvas, and nothing else:
+    // no store of saved templates, no shipped samples to explain away.
+    const root = templatesDir();
+    if (root !== undefined) collect(root);
     out.sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
-    return out;
+    const withoutBlank = out.filter((template) => template.slug !== 'blank');
+    return [BLANK_TEMPLATE, ...withoutBlank];
   }
 
   function statePath(sessionId) {
@@ -1391,7 +1446,7 @@ export function apply(ctx, config) {
         } else {
           return { ok: false, op, error: 'nothing to save', hint: 'pass ui_id, html, or path' };
         }
-        store.writeTemplate(
+        const saved = store.writeTemplate(
           {
             slug,
             name: slug,
@@ -1401,6 +1456,14 @@ export function apply(ctx, config) {
           },
           source,
         );
+        if (saved.ok !== true) {
+          return {
+            ok: false,
+            op,
+            error: saved.error ?? 'could not save the template',
+            hint: 'the templates directory is set from the new-project dialog (⟨+⟩ New HTML)',
+          };
+        }
         return { ok: true, op, name: slug, bytes: byteLength(source) };
       } catch (error) {
         return { ok: false, op: op.length > 0 ? op : 'unknown', error: String(error?.message ?? error) };
@@ -1470,7 +1533,6 @@ export function apply(ctx, config) {
           // reported with it: the page shows the reader where their templates come from
           // instead of leaving it to a document.
           dir: settings.templatesDir,
-          dirDefault: store.templateRoot,
           configured: settings.templatesDir !== undefined,
           asked: settings.templatesAsked === true,
           count: all.length,

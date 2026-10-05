@@ -33,6 +33,17 @@ Iterate with `update`: pass the same `id` from the previous result and only the
 parts you changed (`path`, or `html`, or `css`/`js` next to either). The document
 is replaced in place, and the browser surface refreshes without a new card.
 
+## Templates
+
+There are two things in the catalogue: the **blank canvas**, and whatever is in the
+**templates directory the user chose** (from the `⟨+⟩ New HTML` dialog, with the system
+folder picker). Nothing else is listed — no bundled samples, no hidden store — so
+`html_ui_template op=list` is exactly what the user sees.
+
+- `html_ui op=render template=blank` starts an empty project.
+- `html_ui_template op=save name=<slug>` writes into that directory, so the user can
+  reuse it from the dialog. With no directory chosen it fails and says so.
+
 ## Placement
 | `placement` | Where it lives |
 |---|---|

@@ -92,7 +92,7 @@ window.__ModuleLoader__.load({
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
-      templates: { open: false, loaded: false, items: [], error: null, dir: undefined, dirDefault: '', configured: false, asked: true, savingDir: false },
+      templates: { open: false, loaded: false, items: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false },
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       listeners: new Set(),
@@ -642,9 +642,12 @@ window.__ModuleLoader__.load({
         createTitle: 'New HTML interface',
         createHint: 'Nothing here goes through the model; the interface is created in this session right away.',
         createSource: 'New HTML project',
-        createDirPlaceholder: 'Templates directory',
+        createDirPlaceholder: 'No directory chosen yet',
+        createDirBrowse: 'Browse…',
+        createDirBrowseHint: 'Choose the folder with the system file browser',
+        createDirNoPicker: 'This build cannot open a folder picker; type the path instead.',
         createDirSave: 'Use this directory',
-        createDirUnset: 'Reading the default directory. Point the box above at a folder of your own to use it instead.',
+        createDirUnset: 'No directory yet: choose the folder that holds your HTML projects.',
         createPlacement: 'Where',
         placementDockRight: 'Right column (a real split)',
         placementInline: 'In the conversation',
@@ -698,9 +701,12 @@ window.__ModuleLoader__.load({
         createTitle: '新建 HTML 界面',
         createHint: '整个过程不经过模型：界面会立刻在本会话里建好。',
         createSource: '新建HTML项目',
-        createDirPlaceholder: '模板目录',
+        createDirPlaceholder: '还没有选择目录',
+        createDirBrowse: '浏览…',
+        createDirBrowseHint: '用系统文件浏览器选择文件夹',
+        createDirNoPicker: '这个构建打不开文件夹选择器，请手动输入路径。',
         createDirSave: '使用这个目录',
-        createDirUnset: '当前读取默认目录；把上面的框指向你自己的文件夹即可改用它。',
+        createDirUnset: '还没有目录：请选择存放你的 HTML 项目的文件夹。',
         createPlacement: '生成位置',
         placementDockRight: '右侧栏（真正的左右分屏）',
         placementInline: '对话流内',
@@ -798,7 +804,6 @@ window.__ModuleLoader__.load({
           // The directory travels with the catalogue: the page shows where the list came
           // from instead of leaving the reader to guess, and knows whether to ask.
           state.templates.dir = typeof value.dir === 'string' && value.dir.length > 0 ? value.dir : undefined;
-          state.templates.dirDefault = typeof value.dirDefault === 'string' ? value.dirDefault : '';
           state.templates.configured = value.configured === true;
           state.templates.asked = value.asked === true;
         } else {
@@ -2484,10 +2489,7 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'text',
               value: state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '',
-              placeholder:
-                typeof state.templates.dirDefault === 'string' && state.templates.dirDefault.length > 0
-                  ? `${tr('createDirPlaceholder', 'Templates directory')} · ${state.templates.dirDefault}`
-                  : tr('createDirPlaceholder', 'Templates directory'),
+              placeholder: tr('createDirPlaceholder', 'No directory chosen yet'),
               onChange: (event) => {
                 state.templates.dirInput = event.target.value;
                 bump();
@@ -2509,6 +2511,34 @@ window.__ModuleLoader__.load({
               {
                 type: 'button',
                 style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+                title: tr('createDirBrowseHint', 'Choose the folder with the system file browser'),
+                onClick: () => {
+                  // The shell exposes a directory picker; typing a path by hand is the
+                  // fallback, not the way in.
+                  const workspace = props !== undefined && props.ctx !== undefined && typeof props.ctx.get === 'function' ? props.ctx.get('uiWorkspace') : undefined;
+                  if (workspace === undefined || typeof workspace.pickDirectory !== 'function') {
+                    state.templates.error = tr('createDirNoPicker', 'This build cannot open a folder picker; type the path instead.');
+                    bump();
+                    return;
+                  }
+                  workspace.pickDirectory().then(
+                    (chosen) => {
+                      if (typeof chosen !== 'string' || chosen.length === 0) return;
+                      state.templates.dirInput = chosen;
+                      bump();
+                      saveTemplatesDir(chosen);
+                    },
+                    () => undefined,
+                  );
+                },
+              },
+              tr('createDirBrowse', 'Browse…'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
                 disabled: state.templates.savingDir === true,
                 onClick: () => {
                   const value = state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '';
@@ -2522,7 +2552,7 @@ window.__ModuleLoader__.load({
             ? h(
                 'div',
                 { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } },
-                tr('createDirUnset', 'Reading the default directory. Point the box above at a folder of your own to use it instead.'),
+                tr('createDirUnset', 'No directory yet: choose the folder that holds your HTML projects.'),
               )
             : null,
           h(
@@ -2933,6 +2963,8 @@ window.__ModuleLoader__.load({
         activeFullscreen,
         isCurrentRevision,
         loadTemplates,
+        saveTemplatesDir,
+        markTemplatesAsked,
         toggleTemplates,
         applyTemplate,
         askModelForTemplate,

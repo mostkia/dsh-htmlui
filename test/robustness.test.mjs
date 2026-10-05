@@ -201,15 +201,21 @@ test('a path that names a directory, a missing file, or a non-document is refuse
   }
 });
 
-test('a traversal-shaped template name is normalized into the store, never out of it', async () => {
+test('a traversal-shaped template name is normalized, never written out of the directory', async () => {
   const templates = harness.tool('html_ui_template');
+  // Saving goes into the reader's directory, which is the only catalogue there is, so
+  // the harness points one at a place of its own first.
+  const own = join(harness.scratch, 'own-templates');
+  mkdirSync(own, { recursive: true });
+  writeFileSync(join(harness.root, 'settings.json'), JSON.stringify({ templatesDir: own, templatesAsked: true }), 'utf8');
+
   const saved = await templates.execute({ op: 'save', name: '../../escape', html: '<p>escaped</p>' }, harness.exec());
   assert.equal(saved.ok, true);
   assert.match(saved.name, /^[a-z0-9][a-z0-9._-]*$/u, 'the stored name is a slug');
-  assert.ok(existsSync(join(harness.root, 'templates', saved.name, 'index.html')), 'it lands inside the template store');
+  assert.ok(existsSync(join(own, saved.name, 'index.html')), 'it lands inside the reader directory');
   // Nothing appears where the traversal pointed.
   assert.ok(!existsSync(join(harness.scratch, 'escape')));
-  assert.ok(!existsSync(join(harness.root, '..', 'escape')));
+  assert.ok(!existsSync(join(own, '..', 'escape')));
 
   // A name longer than the slug budget is truncated rather than refused, and the
   // answer names what was actually stored so the caller can see the difference.
@@ -217,14 +223,14 @@ test('a traversal-shaped template name is normalized into the store, never out o
   const truncated = await templates.execute({ op: 'save', name: long, html: '<p>long</p>' }, harness.exec());
   assert.equal(truncated.ok, true);
   assert.equal(truncated.name.length, 64);
-  assert.ok(existsSync(join(harness.root, 'templates', truncated.name, 'index.html')));
+  assert.ok(existsSync(join(own, truncated.name, 'index.html')));
 });
 
 test('nothing hostile ever lands outside the data root', async () => {
   const root = harness.root;
   assert.ok(existsSync(join(root, 'ui')), 'the store keeps its own layout');
   const entries = readdirSync(root).sort();
-  assert.deepEqual(entries, ['secret', 'state', 'templates', 'ui'], 'the store holds only what it owns');
+  assert.deepEqual(entries, ['secret', 'settings.json', 'state', 'templates', 'ui'], 'the store holds only what it owns');
   // Every recorded document is a directory the plugin created, with the two files
   // it writes and nothing else.
   for (const id of readdirSync(join(root, 'ui'))) {

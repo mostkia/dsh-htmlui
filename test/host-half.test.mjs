@@ -317,7 +317,24 @@ test('unknown ids and unsupported ops fail with actionable hints', async () => {
   assert.match(unsupported.hint, /render/u);
 });
 
+/**
+ * Point the catalogue at a directory of the reader's own, as the dialog's folder picker
+ * does. The catalogue holds the blank canvas plus this directory and nothing else, so
+ * every template test starts here.
+ */
+function useTemplatesDir(label) {
+  const dir = mkdtempSync(join(tmpdir(), `dsh-htmlui-${label}-`));
+  writeFileSync(join(process.env.DSH_HTMLUI_ROOT, 'settings.json'), JSON.stringify({ templatesDir: dir, templatesAsked: true }), 'utf8');
+  return dir;
+}
+
+/** Take the directory away again, leaving only the blank canvas. */
+function clearTemplatesDir() {
+  writeFileSync(join(process.env.DSH_HTMLUI_ROOT, 'settings.json'), JSON.stringify({ templatesAsked: true }), 'utf8');
+}
+
 test('templates save, render with variables, list, and remove', async () => {
+  useTemplatesDir('save');
   const saved = await tool('html_ui_template').execute(
     { op: 'save', name: 'Counter', html: '<button id="b">{{label}}</button>', description: 'demo' },
     exec(),
@@ -644,9 +661,8 @@ test('the SSE stream delivers model output and interface lifecycle for its sessi
   assert.equal(await sseClients(), before, 'a closed stream is released');
 });
 
-test('a hand-written template is just an html file in the templates directory', async () => {
-  const directory = join(process.env.DSH_HTMLUI_ROOT, 'templates');
-  mkdirSync(directory, { recursive: true });
+test('a hand-written template is just an html file in the reader directory', async () => {
+  const directory = useTemplatesDir('handwritten');
   writeFileSync(join(directory, 'my-panel.html'), '<h1>{{title}}</h1>', 'utf8');
 
   const listed = await tool('html_ui_template').execute({ op: 'list' }, exec());
@@ -656,7 +672,8 @@ test('a hand-written template is just an html file in the templates directory', 
   const served = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', rendered.uiId, 'index.html'), 'utf8');
   assert.ok(served.includes('手写模板'), 'variables apply to a hand-written template too');
 
-  // A managed template of the same name takes precedence while it exists.
+  // A managed template of the same name takes precedence while it exists, and it is
+  // written into the same directory — there is only the one catalogue now.
   await tool('html_ui_template').execute({ op: 'save', name: 'my-panel', html: '<p>managed</p>' }, exec());
   const managed = await tool('html_ui').execute({ op: 'render', template: 'my-panel' }, exec());
   assert.ok(readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', managed.uiId, 'index.html'), 'utf8').includes('managed'));
@@ -668,6 +685,7 @@ test('a hand-written template is just an html file in the templates directory', 
   assert.ok(readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', uncovered.uiId, 'index.html'), 'utf8').includes('{{title}}'));
   assert.equal((await tool('html_ui_template').execute({ op: 'remove', name: 'my-panel' }, exec())).ok, true);
   assert.equal((await tool('html_ui').execute({ op: 'render', template: 'my-panel' }, exec())).ok, false);
+  clearTemplatesDir();
 });
 
 test('the document URL changes with the revision so an update reloads the frame', async () => {
@@ -815,24 +833,19 @@ test('a document can declare where it belongs, and an argument outranks it', asy
   assert.equal(renamed.title, 'Moved');
 });
 
-test('the template shipped with the package renders like any other', async () => {
-  // Nothing named "starter" exists in this scratch store, so this exercises the
-  // packaged fallback that a fresh install renders from.
+test('the blank canvas renders like any other template, with nothing configured', async () => {
+  // The catalogue is the blank canvas plus the reader's directory, so on a fresh store
+  // this is the one entry, and it has to render without any file behind it.
+  clearTemplatesDir();
   const listed = await tool('html_ui_template').execute({ op: 'list' }, exec());
-  assert.ok(listed.summary.includes('starter'), 'the packaged template is listed');
-  const shown = await tool('html_ui_template').execute({ op: 'show', name: 'starter' }, exec());
-  assert.equal(shown.ok, true);
-  assert.ok(shown.bytes > 0, 'the reported size comes from the file, not a cache');
-  // The description is the template's own copy, and the shipped one is written in the
-  // language its author works in — it is not one of this plugin's translated strings.
-  assert.match(shown.summary, /面板/u);
+  assert.ok(listed.summary.includes('blank'), 'the blank canvas is listed');
 
   const rendered = await tool('html_ui').execute(
-    { op: 'render', template: 'starter', variables: { title: '自检面板' }, title: 'Starter' },
-    exec('session-starter'),
+    { op: 'render', template: 'blank', title: '画布' },
+    exec('session-blank'),
   );
   assert.equal(rendered.ok, true);
-  assert.equal(rendered.placement, 'dock-right', 'the shipped template declares its own placement');
+  assert.equal(rendered.placement, 'dock-right', 'the blank canvas declares its own placement');
   const entry = await callRoute(route(), {
     method: 'POST',
     url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
@@ -840,13 +853,11 @@ test('the template shipped with the package renders like any other', async () =>
     body: JSON.stringify({ uiId: rendered.uiId }),
   });
   const framed = await callRoute(route(), { url: JSON.parse(entry.text).url, headers: { host: '127.0.0.1:3080' } });
-  assert.ok(framed.text.includes('自检面板'), 'the variables are substituted');
-  assert.ok(!framed.text.includes('{{title}}'), 'no placeholder is left behind');
+  assert.ok(framed.text.includes('HTML 画布'), 'the built-in document is served');
   assert.ok(framed.text.includes('/assets/bridge.js'), 'the bridge is injected into it');
-  assert.ok(framed.text.includes('dshHTML.send'), 'and the packaged template uses the bridge');
 
   const onDisk = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', rendered.uiId, 'index.html'), 'utf8');
-  assert.ok(onDisk.includes('自检面板'));
+  assert.ok(onDisk.includes('HTML 画布'));
   assert.ok(!onDisk.includes('bridge.js'), 'injection stays at serve time');
 });
 
@@ -904,15 +915,16 @@ test('the page can list templates and apply one without the model', async () => 
   assert.equal(listed.status, 200);
   const catalogue = JSON.parse(listed.text);
   assert.ok(catalogue.count >= 1);
-  const starter = catalogue.templates.find((template) => template.slug === 'starter');
-  assert.ok(starter !== undefined, 'the packaged template is in the catalogue');
-  assert.equal(starter.bundled, true);
+  const blank = catalogue.templates.find((template) => template.slug === 'blank');
+  assert.ok(blank !== undefined, 'the blank canvas is in the catalogue');
+  assert.equal(blank.bundled, true);
+  assert.equal(catalogue.configured, false, 'nothing is configured on a fresh store');
 
   const applied = await callRoute(route(), {
     method: 'POST',
     url: '/plugins/@mostkia/dsh-htmlui/templates/render',
     headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
-    body: JSON.stringify({ template: 'starter', sessionId: 'session-drawer', variables: { title: '抽屉' } }),
+    body: JSON.stringify({ template: 'blank', sessionId: 'session-drawer' }),
   });
   assert.equal(applied.status, 200);
   const record = JSON.parse(applied.text).ui;
@@ -927,7 +939,7 @@ test('the page can list templates and apply one without the model', async () => 
 
   // Refusals are statuses, not crashes.
   const cases = [
-    [{ template: 'starter' }, 400, /sessionId/u],
+    [{ template: 'blank' }, 400, /sessionId/u],
     [{ sessionId: 'session-drawer' }, 400, /template name/u],
     [{ template: 'nope', sessionId: 'session-drawer' }, 404, /unknown template/u],
   ];
@@ -951,6 +963,7 @@ test('the page can list templates and apply one without the model', async () => 
 });
 
 test('freezing an interface accepts either field name and still checks ownership', async () => {
+  useTemplatesDir('freeze');
   const created = await tool('html_ui').execute({ op: 'render', html: '<p>freeze me</p>', title: 'Freeze' }, exec('session-freeze'));
   // `id` is what the html_ui tool calls this field; a model carrying it across must
   // not be told there is nothing to save.

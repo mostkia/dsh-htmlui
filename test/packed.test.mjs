@@ -87,13 +87,14 @@ test('the tarball ships everything the plugin reads at runtime', { skip }, () =>
     'CHANGELOG.md',
     'LICENSE',
     'assets/bridge.js',
-    'templates/starter/index.html',
-    'templates/starter/meta.json',
     'locale/en.json',
     'locale/zh.json',
   ]) {
     assert.ok(existsSync(join(prepared.packageDir, required)), `${required} must ship`);
   }
+  // Nothing to do with templates ships: the catalogue is the reader's own directory
+  // plus the blank canvas, which the host builds itself.
+  assert.ok(!existsSync(join(prepared.packageDir, 'templates')), 'no bundled templates ship');
   // Tests and operator docs stay out of the tarball.
   assert.ok(!existsSync(join(prepared.packageDir, 'test')), 'tests must not ship');
   assert.ok(!existsSync(join(prepared.packageDir, 'docs')), 'docs must not ship');
@@ -126,15 +127,16 @@ test('the packed host half activates and serves from its own files', { skip }, a
     assert.equal(bridge.status, 200);
     assert.equal(bridge.text, readFileSync(join(prepared.packageDir, 'assets/bridge.js'), 'utf8'));
 
-    // The shipped template comes from the tarball, not from the repository.
+    // The blank canvas is built into the packed host half, so a fresh install has one
+    // usable project before any directory is chosen.
     const rendered = await harness.tool('html_ui').execute(
-      { op: 'render', template: 'starter', variables: { title: '打包自检' } },
+      { op: 'render', template: 'blank' },
       harness.exec('session-packed'),
     );
-    assert.equal(rendered.ok, true, rendered.error ?? 'the starter template must render');
+    assert.equal(rendered.ok, true, rendered.error ?? 'the blank canvas must render');
     assert.equal(rendered.placement, 'dock-right');
     const listed = await harness.tool('html_ui_template').execute({ op: 'list' }, harness.exec('session-packed'));
-    assert.ok(listed.summary.includes('starter'));
+    assert.ok(listed.summary.includes('blank'));
   } finally {
     harness.dispose();
   }

@@ -111,7 +111,9 @@ test('both READMEs state the same security boundary', () => {
 
 test('the documented bridge usage exists, wherever it is written', () => {
   const bridge = read('assets/bridge.js');
-  const sources = ['SKILL.md', 'README.md', 'README.zh.md', 'templates/starter/index.html', 'docs/VERIFY.md'];
+  // The catalogue is the reader's own directory now, so the documents are the only
+  // shipped place where real bridge usage is written down.
+  const sources = ['SKILL.md', 'README.md', 'README.zh.md', 'docs/VERIFY.md'];
   const used = new Set();
   for (const file of sources) {
     for (const match of read(file).matchAll(/dshHTML\.([a-zA-Z]+)/gu)) used.add(match[1]);
@@ -129,8 +131,9 @@ test('a document can declare its own placement, and the skill says so', () => {
   assert.ok(skill.includes('name="dsh-htmlui"'), 'the meta form must be documented');
   assert.ok(skill.includes('data-dsh-htmlui-placement'), 'the attribute form must be documented');
   assert.match(skill, /Precedence/u, 'and the precedence rule');
-  // The shipped template demonstrates it, so the feature is not only prose.
-  assert.ok(read('templates/starter/index.html').includes('name="dsh-htmlui"'));
+  // The blank canvas demonstrates it, so the feature is not only prose: it is the one
+  // document this plugin builds itself.
+  assert.ok(read('index.js').includes('content="placement=dock-right"'), 'the built-in canvas declares its placement');
 });
 
 test('the operator documents stay complete and reachable', () => {

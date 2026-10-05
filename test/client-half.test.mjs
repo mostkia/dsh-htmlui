@@ -78,6 +78,7 @@ function createClientContext(options = {}) {
   if (options.tabs !== undefined) services.sidebarRightTabs = options.tabs;
   if (options.controller !== undefined) services.sidebarRight = options.controller;
   if (options.locale !== undefined) services.locale = options.locale;
+  if (options.uiWorkspace !== undefined) services.uiWorkspace = options.uiWorkspace;
   const context = {
     registrations,
     injections,
@@ -489,6 +490,38 @@ test('a card announcing before the first host answer cannot claim a seat', () =>
     ),
   );
   assert.equal(__internals.recordsFor(sessionId).length, 1, 'a listed record is published');
+});
+
+test('the folder picker chooses the templates directory', async () => {
+  // Typing a path by hand is the fallback: the shell exposes a real directory picker,
+  // and choosing a folder there saves it straight away.
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.endsWith('/templates/dir')) {
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, dir: body.dir, configured: true }) });
+    }
+    if (url.endsWith('/templates')) {
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, dir: '/opt/chosen', configured: true, count: 0, templates: [] }) });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
+  };
+  try {
+    __internals.state.byId.clear();
+    __internals.state.bySession.clear();
+    const context = createClientContext({ uiWorkspace: { pickDirectory: () => Promise.resolve('/opt/chosen') } });
+    apply(context);
+    const picked = await context.get('uiWorkspace').pickDirectory();
+    assert.equal(picked, '/opt/chosen');
+    assert.equal(await __internals.saveTemplatesDir(picked), true, 'the chosen folder is saved');
+    assert.equal(calls[0].url.endsWith('/templates/dir'), true);
+    assert.deepEqual(calls[0].body, { dir: '/opt/chosen' });
+    assert.equal(__internals.state.templates.dir, '/opt/chosen', 'and the catalogue follows it');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('a theme switch does not reload an open document', async () => {
