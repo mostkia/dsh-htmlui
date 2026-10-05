@@ -66,6 +66,10 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   in which `text-delta` and `reasoning-delta` both carry `text`, so the previous
   mapping leaked the model's thinking into the answer an interface displayed; the
   chunk tag decides the event now.
+- A fragment is served in standards mode. A document authored as inline `html`
+  declares no doctype, and a document without one is parsed in quirks mode, where
+  the box model differs from what any modern stylesheet assumes. The composed
+  document adds one when the author wrote none, and never rewrites what is stored.
 - The document CSP lets the injected bridge load. A sandboxed frame without
   `allow-same-origin` has an opaque origin, and an opaque origin matches no URL,
   so `script-src` without this host blocked `assets/bridge.js` outright:

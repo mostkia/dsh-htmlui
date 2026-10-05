@@ -312,11 +312,19 @@ const THEME_STYLE = [
 /**
  * Compose the document actually served to the iframe: theme variables, the
  * runtime config, and the bridge script, ahead of anything the author wrote.
+ *
+ * A document that declares no doctype is served in quirks mode, where the box
+ * model differs from what any modern stylesheet assumes (`width` includes
+ * padding, and so on). A fragment authored as inline `html` is the common case,
+ * so one is added when the author wrote none — the authored document itself is
+ * never rewritten on disk.
  */
 function composeDocument(source, config) {
   const script = `<script>window.__DSH_HTMLUI__=${escapeForInlineScript(config)};</script>`;
   const bridge = `<script src="${ROUTE_PREFIX}/assets/${BRIDGE_FILE}"></script>`;
-  return injectIntoDocument(source, `${THEME_STYLE}\n${script}\n${bridge}\n`, '');
+  const text = String(source ?? '');
+  const composed = injectIntoDocument(text, `${THEME_STYLE}\n${script}\n${bridge}\n`, '');
+  return /^\s*<!doctype\b/iu.test(composed) ? composed : `<!doctype html>\n${composed}`;
 }
 
 // --------------------------------------------------------------------- store

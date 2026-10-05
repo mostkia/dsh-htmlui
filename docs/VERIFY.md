@@ -86,4 +86,5 @@ flips with it.
 | Frame blank, console reports a CSP violation | The document loads a third-party origin | The carrier allows only this host; fetch through the model instead |
 | An interaction does nothing | The document never called `dshHTML.send`, or it errored | The document's own console; `dshHTML.lastError()` |
 | A surface stays after `op=close` | Another page closed it and this one has not synced | Reload; it converges on `/ui/list` |
+| An image or font inside a document 404s | A relative URL resolves against the carrier, not the workspace | Use an absolute URL or a data URL |
 | 403 on every carrier route | The page's origin is not loopback and is not listed | `/health` → `trust`, then `config.allowedOrigins` |

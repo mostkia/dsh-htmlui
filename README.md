@@ -169,7 +169,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 106 assertions: 12 package, 9 doc contract, 29 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 107 assertions: 12 package, 9 doc contract, 30 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

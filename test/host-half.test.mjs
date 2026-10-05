@@ -863,6 +863,35 @@ test('list reports every interface of a session, so each id stays reachable', as
   }
 });
 
+test('a fragment is served in standards mode, and an authored doctype is kept', async () => {
+  const fragment = await tool('html_ui').execute({ op: 'render', html: '<div>fragment</div>' }, exec('session-doctype'));
+  const ticket = async (uiId) => {
+    const entry = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      body: JSON.stringify({ uiId }),
+    });
+    return callRoute(route(), { url: JSON.parse(entry.text).url, headers: { host: '127.0.0.1:3080' } });
+  };
+  const served = await ticket(fragment.uiId);
+  assert.match(served.text, /^<!doctype html>/iu, 'a fragment must not be served in quirks mode');
+  assert.ok(served.text.includes('<div>fragment</div>'), 'and the fragment survives');
+  assert.equal(served.text.match(/<!doctype/giu).length, 1, 'exactly one doctype');
+
+  const full = await tool('html_ui').execute({
+    op: 'render',
+    html: '<!doctype html><html><head><title>t</title></head><body><p>full</p></body></html>',
+  }, exec('session-doctype'));
+  const servedFull = await ticket(full.uiId);
+  assert.equal(servedFull.text.match(/<!doctype/giu).length, 1, 'an authored doctype is not doubled');
+  assert.match(servedFull.text, /^<!doctype html>/iu);
+
+  // The stored document is never rewritten: injection and the doctype are serve-time.
+  const stored = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', fragment.uiId, 'index.html'), 'utf8');
+  assert.equal(stored, '<div>fragment</div>');
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.

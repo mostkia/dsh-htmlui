@@ -106,7 +106,11 @@ declares nothing keeps the placement the record already has.
   provides `--dsh-htmlui-bg`, `--dsh-htmlui-fg`, `--dsh-htmlui-muted`,
   `--dsh-htmlui-border`, `--dsh-htmlui-accent`. Prefer those over hard colors.
 - **No host assumptions.** The document is an opaque-origin sandbox: no cookies,
-  no `localStorage`, no parent DOM. `dshHTML` is the whole API surface.
+  no `localStorage`, no parent DOM. `dshHTML` is the whole API surface. It is
+  served in standards mode even when you write only a fragment.
+- **Relative URLs resolve against the carrier**, not your workspace: a relative
+  `<img src="logo.png">` points at `/plugins/@mostkia/dsh-htmlui/ui/logo.png` and
+  will 404. Reference media absolutely, as a data URL, or not at all.
 - **Network.** `connect-src` allows only this host, so do not fetch third-party
   origins from inside a document; fetch data through the model or a host tool.
 
