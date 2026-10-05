@@ -935,6 +935,18 @@ window.__ModuleLoader__.load({
 
     // --------------------------------------------------------------- tool card
 
+    /**
+     * The tool row's own disclosure. The contract makes `useDisclosure` a required
+     * owner prop; the guard keeps a slimmer owner from crashing the card. `useState`
+     * runs unconditionally so the hook order never changes.
+     */
+    function useOptionalDisclosure(props) {
+      const [state] = useState(null);
+      const factory = props.useDisclosure;
+      if (typeof factory !== 'function') return state;
+      return factory();
+    }
+
     function HtmlUiToolView(props) {
       useStore();
       const { phase, block } = props;
@@ -942,6 +954,7 @@ window.__ModuleLoader__.load({
       const meta = metaOf(block);
       const sessionId = typeof meta?.sessionId === 'string' && meta.sessionId.length > 0 ? meta.sessionId : undefined;
       const record = recordFromMeta(meta, sessionId);
+      const disclosure = useOptionalDisclosure(props);
 
       useEffect(() => {
         const next = recordFromMeta(meta, sessionId);
@@ -965,6 +978,19 @@ window.__ModuleLoader__.load({
         if (state.rightPane.opened.has(record.uiId)) return;
         openRightPane(record.uiId);
       }, [record === undefined ? undefined : record.uiId, record === undefined ? undefined : record.placement, rightPaneController]);
+
+      // An inline interface lives *inside this tool row*, and a collapsed row hides it
+      // completely: the caller asks for a panel and sees a one-line tool call. Open
+      // the row for it, once, without fighting a user who closed it again (the
+      // dependency only re-fires when the row is collapsed and a record is present).
+      const expanded = disclosure === null || disclosure === undefined ? undefined : disclosure.expanded;
+      useEffect(() => {
+        if (disclosure === null || disclosure === undefined) return;
+        if (record === undefined || record.placement !== 'inline') return;
+        if (disclosure.expanded === true) return;
+        if (typeof disclosure.setExpanded !== 'function') return;
+        disclosure.setExpanded(true);
+      }, [expanded, record === undefined ? undefined : record.uiId, record === undefined ? undefined : record.placement]);
 
       if (phase === 'preparing') {
         return h(
@@ -1658,6 +1684,7 @@ window.__ModuleLoader__.load({
         openRightPane,
         rightPaneReady,
         dockPlacements,
+        useOptionalDisclosure,
         wireRightPane,
         HtmlUiRightPane,
         HtmlUiFrame,

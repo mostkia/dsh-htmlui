@@ -121,6 +121,21 @@ test('an inline frame renders its chrome and a loading body', () => {
   assert.ok(elements.length > 0);
 });
 
+test('the tool card asks for its own row to open, and tolerates an owner without one', () => {
+  // The tool row is collapsed by default, and an inline interface lives inside it:
+  // without this the caller asks for a panel and sees a one-line tool call.
+  const calls = [];
+  const disclosure = __internals.useOptionalDisclosure({
+    useDisclosure: () => ({ expanded: false, setExpanded: (open) => calls.push(open), toggle: () => {} }),
+  });
+  assert.equal(disclosure.expanded, false);
+  disclosure.setExpanded(true);
+  assert.deepEqual(calls, [true], 'the card can open its own row');
+  // A slimmer owner that supplies no hook must not crash the card.
+  assert.equal(__internals.useOptionalDisclosure({}), null);
+  assert.equal(__internals.useOptionalDisclosure({ useDisclosure: 'not a hook' }), null);
+});
+
 test('a float frame carries its own drag chrome and a close control', () => {
   const { text } = render(__internals.HtmlUiFrame, { record: recordFor('float'), theme: 'light', variant: 'float', onDismiss: () => {} });
   assert.match(text, /看板/);
