@@ -82,6 +82,8 @@ window.__ModuleLoader__.load({
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
       templates: { open: false, loaded: false, items: [], error: null },
+      /** The user's own create flow: what to start from, and where it should go. */
+      create: { open: false, source: 'blank', placement: 'dock-right', busy: false },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -561,6 +563,19 @@ window.__ModuleLoader__.load({
         toModel: 'Ask the model',
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
+        create: 'Create',
+        creating: 'Creating…',
+        createTitle: 'New HTML interface',
+        createHint: 'Nothing here goes through the model; the interface is created in this session right away.',
+        createSource: 'Start from',
+        createPlacement: 'Where',
+        placementDockRight: 'Right column (a real split)',
+        placementInline: 'In the conversation',
+        placementFloat: 'Floating window',
+        placementFullscreen: 'Fullscreen',
+        placementBackground: 'Background layer',
+        cancel: 'Cancel',
+        createMore: 'More template actions',
         newBlank: 'Blank canvas',
         newBlankHint: 'Start an empty interface in the right column (no model round trip)',
         newBlankDescription: 'An empty space in the right column, to fill as you like',
@@ -593,6 +608,19 @@ window.__ModuleLoader__.load({
         toModel: '交给模型',
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
+        create: '创建',
+        creating: '正在创建…',
+        createTitle: '新建 HTML 界面',
+        createHint: '整个过程不经过模型：界面会立刻在本会话里建好。',
+        createSource: '从什么开始',
+        createPlacement: '生成位置',
+        placementDockRight: '右侧栏（真正的左右分屏）',
+        placementInline: '对话流内',
+        placementFloat: '浮动窗',
+        placementFullscreen: '全屏',
+        placementBackground: '背景层',
+        cancel: '取消',
+        createMore: '更多模板操作',
         newBlank: '空白画布',
         newBlankHint: '在右侧栏新建一块空白界面（不经过模型）',
         newBlankDescription: '右侧栏里的空白空间，随你填什么',
@@ -661,12 +689,17 @@ window.__ModuleLoader__.load({
     /**
      * Apply a template to a session straight from the page: no model round trip,
      * and the returned record is published so every surface picks it up at once.
+     *
+     * `placement` overrides what the document declares, which is what lets the create
+     * dialog ask where the new interface should go.
      */
-    function applyTemplate(slug, sessionId) {
+    function applyTemplate(slug, sessionId, placement) {
       if (typeof slug !== 'string' || slug.length === 0 || typeof sessionId !== 'string' || sessionId.length === 0) {
         return Promise.resolve(false);
       }
-      return postJson('/templates/render', { template: slug, sessionId }).then((value) => {
+      const body = { template: slug, sessionId };
+      if (typeof placement === 'string' && placement.length > 0) body.placement = placement;
+      return postJson('/templates/render', body).then((value) => {
         if (value !== null && value.ok === true && value.ui !== undefined) {
           publish(value.ui, { fromHost: true });
           state.templates.error = null;
@@ -695,6 +728,16 @@ window.__ModuleLoader__.load({
     }
 
     // ------------------------------------------------------------------ styles
+
+    const createOptionStyle = {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      padding: '3px 6px',
+      borderRadius: '7px',
+      fontSize: '12px',
+      cursor: 'pointer',
+    };
 
     const surfaceChrome = {
       display: 'flex',
@@ -1934,7 +1977,170 @@ window.__ModuleLoader__.load({
         );
       }
 
-      return h('div', { style: { position: 'fixed', inset: '0', pointerEvents: 'none' } }, ...layers);
+      return h(
+        'div',
+        { style: { position: 'fixed', inset: '0', pointerEvents: 'none' } },
+        ...layers,
+        h(HtmlUiCreateDialog, { ctx: props.ctx }),
+      );
+    }
+
+    /** The placements the create dialog offers, with the label each one shows. */
+    const CREATE_PLACEMENTS = [
+      { value: 'dock-right', key: 'placementDockRight', fallback: 'Right column (a real split)' },
+      { value: 'inline', key: 'placementInline', fallback: 'In the conversation' },
+      { value: 'float', key: 'placementFloat', fallback: 'Floating window' },
+      { value: 'fullscreen', key: 'placementFullscreen', fallback: 'Fullscreen' },
+      { value: 'background', key: 'placementBackground', fallback: 'Background layer' },
+    ];
+
+    /**
+     * The user's own way to start an interface: what to start from, and where to put it.
+     *
+     * Everything here happens without the model — the source is either the blank canvas
+     * or a saved template, and the placement is passed straight to the host route that
+     * renders it.
+     */
+    function HtmlUiCreateDialog(props) {
+      useStore();
+      const sessionId = resolveSessionId(props);
+      if (state.create.open !== true) return null;
+      const items = state.templates.items;
+      const radio = (group, value, label, checked, onPick) =>
+        h(
+          'label',
+          { style: createOptionStyle },
+          h('input', { type: 'radio', name: group, value, checked, onChange: onPick }),
+          h('span', null, label),
+        );
+      const close = () => {
+        state.create.open = false;
+        bump();
+      };
+      return h(
+        'div',
+        {
+          style: {
+            position: 'fixed',
+            inset: '0',
+            zIndex: 6,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'auto',
+            background: 'rgba(0,0,0,0.28)',
+          },
+          onClick: (event) => {
+            if (event.target === event.currentTarget) close();
+          },
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-label': tr('createTitle', 'New HTML interface'),
+        },
+        h(
+          'div',
+          {
+            style: {
+              width: 'min(520px, 92vw)',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              background: 'var(--dsw-alias-bg-overlay, #fff)',
+              color: 'var(--dsw-alias-text-primary, #111)',
+              border: '1px solid var(--dsw-alias-border-l1, #ddd)',
+              borderRadius: '12px',
+              boxShadow: '0 18px 48px rgba(0,0,0,0.28)',
+              padding: '14px 16px',
+            },
+          },
+          h('div', { style: Object.assign({}, titleStyle, { fontSize: '14px', marginBottom: '4px' }) }, tr('createTitle', 'New HTML interface')),
+          h(
+            'div',
+            { style: { fontSize: '11.5px', opacity: 0.65, marginBottom: '10px' } },
+            tr('createHint', 'Nothing here goes through the model; the interface is created in this session right away.'),
+          ),
+          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createSource', 'Start from')),
+          h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '10px' } },
+            radio('dsh-create-source', 'blank', tr('newBlank', 'Blank canvas'), state.create.source === 'blank', () => {
+              state.create.source = 'blank';
+              bump();
+            }),
+            ...items.map((template) =>
+              radio(
+                'dsh-create-source',
+                template.slug,
+                template.description !== undefined && template.description.length > 0 ? `${template.slug} — ${template.description}` : template.slug,
+                state.create.source === template.slug,
+                () => {
+                  state.create.source = template.slug;
+                  bump();
+                },
+              ),
+            ),
+          ),
+          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createPlacement', 'Where')),
+          h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '10px' } },
+            ...CREATE_PLACEMENTS.map((entry) =>
+              radio(
+                'dsh-create-placement',
+                entry.value,
+                `${tr(entry.key, entry.fallback)} · ${entry.value}`,
+                state.create.placement === entry.value,
+                () => {
+                  state.create.placement = entry.value;
+                  bump();
+                },
+              ),
+            ),
+          ),
+          state.templates.error !== null
+            ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)', marginBottom: '8px' } }, String(state.templates.error))
+            : null,
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' } },
+            h(
+              'button',
+              {
+                type: 'button',
+                style: Object.assign({}, buttonStyle, { border: 'none', background: 'transparent', opacity: 0.7 }),
+                onClick: () => {
+                  state.create.open = false;
+                  toggleTemplates();
+                },
+              },
+              tr('createMore', 'More template actions'),
+            ),
+            h(
+              'div',
+              { style: { display: 'flex', gap: '6px' } },
+              h('button', { type: 'button', style: buttonStyle, onClick: close }, tr('cancel', 'Cancel')),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  style: Object.assign({}, buttonStyle, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
+                  disabled: state.create.busy === true || sessionId === undefined,
+                  onClick: () => {
+                    if (sessionId === undefined || state.create.busy === true) return;
+                    state.create.busy = true;
+                    bump();
+                    applyTemplate(state.create.source, sessionId, state.create.placement).then((created) => {
+                      state.create.busy = false;
+                      if (created === true) state.create.open = false;
+                      bump();
+                    });
+                  },
+                },
+                state.create.busy === true ? tr('creating', 'Creating…') : tr('create', 'Create'),
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     // ------------------------------------------------------------ template drawer
@@ -2062,7 +2268,13 @@ window.__ModuleLoader__.load({
           type: 'button',
           style: Object.assign({}, buttonStyle, { height: '26px' }),
           title: tr('templatesTooltip', 'New HTML interface, or reuse a saved template'),
-          onClick: () => toggleTemplates(),
+          onClick: () => {
+            state.create.open = true;
+            state.create.busy = false;
+            bump();
+            // The source list is the catalogue, so ask for it as the dialog opens.
+            if (state.templates.loaded !== true) loadTemplates();
+          },
         },
         tr('templatesButton', '⟨+⟩ New HTML'),
       );
@@ -2219,6 +2431,7 @@ window.__ModuleLoader__.load({
         MESSAGES,
         LOCALE_NS,
         HtmlUiTemplateDrawer,
+        HtmlUiCreateDialog,
         HtmlUiTemplateButton,
         HtmlUiInlineTail,
         HtmlUiBoundary,

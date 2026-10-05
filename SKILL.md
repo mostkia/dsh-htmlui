@@ -34,7 +34,6 @@ parts you changed (`path`, or `html`, or `css`/`js` next to either). The documen
 is replaced in place, and the browser surface refreshes without a new card.
 
 ## Placement
-
 | `placement` | Where it lives |
 |---|---|
 | `inline` (default) | In the transcript, at the end of the turn that attached it. Seamless: no chrome, no border, no background, and the height comes from the document — do not paint a page background |
@@ -131,6 +130,19 @@ come back after a reload, and they are the only storage this sandbox has.
   will 404. Reference media absolutely, as a data URL, or not at all.
 - **Network.** `connect-src` allows only this host, so do not fetch third-party
   origins from inside a document; fetch data through the model or a host tool.
+
+## The user can start one without you
+
+Beside the composer there is a `⟨+⟩ New HTML` control. It opens a dialog that asks what
+to start from (the blank canvas, or any saved template) and where it should go (right
+column, in the conversation, floating window, fullscreen, background layer), then
+creates the interface through the host route — **without a model round trip**. So a
+user may already have an interface in front of them that you never created: read
+`html_ui op=list` before assuming a placement is free, and treat an existing `ui_id`
+as the thing to `update` rather than something to replace with a second copy.
+
+The right column's tab is registered only while a `dock-right` interface exists, so a
+session with none has no HTML UI page in that column at all.
 
 ## Reading results
 

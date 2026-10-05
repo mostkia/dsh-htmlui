@@ -150,7 +150,13 @@ function resetStore(records = []) {
   state.fullscreenDismissed.clear();
   state.rightPane.available = false;
   state.rightPane.controller = undefined;
+  resetCreate();
   for (const entry of records) __internals.publish(entry);
+}
+
+/** The create dialog is shared state, so every reset has to close it too. */
+function resetCreate() {
+  state.create = { open: false, source: 'blank', placement: 'dock-right', busy: false };
 }
 
 // --------------------------------------------------------------------- tests
@@ -383,6 +389,25 @@ test('the tool card points at the tail instead of drawing a second copy', () => 
   assert.match(card.text, /Card/u, 'the row still names the interface');
   assert.match(card.text, /shown at the end of this turn/u, 'and says where it is drawn');
   assert.ok(!card.text.includes('Preparing interface'), 'it does not draw the document as well');
+});
+
+test('the create dialog asks what to start from and where to put it', () => {
+  resetStore();
+  resetCreate();
+  // Closed, it is not in the tree at all.
+  assert.equal(__internals.HtmlUiCreateDialog({ sessionId: 'session-1' }), null);
+  __internals.state.create.open = true;
+  __internals.state.templates.loaded = true;
+  __internals.state.templates.items = [
+    { slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 },
+  ];
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  for (const text of ['New HTML interface', 'Blank canvas', 'starter', 'Right column', 'Floating window', 'Fullscreen', 'Create', 'Cancel']) {
+    assert.ok(dialog.text.includes(text), `the dialog offers ${text}`);
+  }
+  // The chosen place is the one the placement has to name.
+  assert.equal(__internals.state.create.placement, 'dock-right');
+  resetCreate();
 });
 
 test('every surface keeps one hook order, records or not', () => {

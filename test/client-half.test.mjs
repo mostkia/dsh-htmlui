@@ -334,6 +334,38 @@ test('dock-right keeps its fallback until the column can actually open a tab', (
   resetRightPane();
 });
 
+test('the create dialog creates without the model, at the chosen place', async () => {
+  resetRightPane();
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.endsWith('/templates/render')) {
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            ok: true,
+            ui: { uiId: 'ui-cd000001', sessionId: body.sessionId, title: 'blank', placement: body.placement, sizeText: '', revision: 1, bytes: 4 },
+          }),
+      });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
+  };
+  try {
+    // The chosen placement travels to the host, which is what makes "where" real.
+    const created = await __internals.applyTemplate('blank', 'session-create', 'float');
+    assert.equal(created, true);
+    assert.deepEqual(calls[0].body, { template: 'blank', sessionId: 'session-create', placement: 'float' });
+    assert.equal(__internals.state.byId.get('ui-cd000001').placement, 'float', 'and the record is published at once');
+    // With no placement named, the document's own declaration decides.
+    await __internals.applyTemplate('blank', 'session-create');
+    assert.deepEqual(calls[1].body, { template: 'blank', sessionId: 'session-create' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('a theme switch does not reload an open document', async () => {
   resetRightPane();
   const tickets = [];
