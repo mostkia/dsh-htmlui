@@ -643,6 +643,41 @@ test('a session converges on what the host reports', () => {
   assert.equal(__internals.recordsFor('session-c').length, 2);
 });
 
+test('a reloaded page rebuilds every seat from the host list alone', () => {
+  // After F5 the transcript may be virtualized, so the tool cards are not rendered:
+  // every surface has to come back from /ui/list, whose records carry no `htmlui`
+  // flag and a different shape. This is what the reload path depends on.
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  resetRightPane();
+  const hostRecord = (uiId, placement, extra) =>
+    Object.assign({ uiId, sessionId: 'session-reload', title: `t-${uiId}`, placement, revision: 1, bytes: 10, sizeText: '' }, extra);
+  __internals.convergeSession('session-reload', [
+    hostRecord('ui-aaaa0001', 'dock-top'),
+    hostRecord('ui-aaaa0002', 'panel'),
+    hostRecord('ui-aaaa0003', 'dock-bottom'),
+    hostRecord('ui-aaaa0004', 'dock-right'),
+    hostRecord('ui-aaaa0005', 'background'),
+    hostRecord('ui-aaaa0006', 'fullscreen'),
+    hostRecord('ui-aaaa0007', 'float', { size: { w: 500, h: 400, x: 20, y: 20 }, sizeText: '500x400+20+20' }),
+    hostRecord('ui-aaaa0008', 'inline'),
+  ]);
+  assert.equal(__internals.recordsFor('session-reload').length, 8);
+  // The right pane is reset here, so the fallback is active and the dock claims
+  // dock-right as well as its own two seats.
+  assert.deepEqual(
+    __internals.recordsIn('session-reload', __internals.dockPlacements(['dock-top', 'panel'])).map((entry) => entry.placement).sort(),
+    ['dock-right', 'dock-top', 'panel'],
+  );
+  assert.equal(__internals.recordsIn('session-reload', ['dock-bottom']).length, 1);
+  assert.equal(__internals.recordsIn('session-reload', ['dock-right']).length, 1);
+  assert.equal(__internals.recordsIn('session-reload', ['background']).length, 1);
+  assert.equal(__internals.recordsIn('session-reload', ['float']).length, 1);
+  const fullscreen = __internals.activeFullscreen(__internals.recordsFor('session-reload'));
+  assert.equal(fullscreen === undefined ? undefined : fullscreen.uiId, 'ui-aaaa0006', 'the layer finds its record');
+  assert.equal(fullscreen.title, 't-ui-aaaa0006', 'and the title the client renders is a string');
+});
+
 test('a superseded card stops claiming the interface', () => {
   __internals.state.byId.clear();
   __internals.state.bySession.clear();
