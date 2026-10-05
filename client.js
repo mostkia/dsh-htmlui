@@ -10,7 +10,7 @@
  *   float                  a draggable, resizable window over the frame
  *   background             a click-through layer over the frame
  *   fullscreen             covers the session, with a built-in switch back to chat
- *   dock-right             not implemented yet; falls back to the dock above the composer
+ *   dock-right             the session's right column, as a tab
  *
  * The frame talks back through the host HTTP carrier, never through host DOM
  * access: `window.dshHTML` is injected by the host half.
@@ -357,6 +357,16 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The session a surface belongs to: the owner's own props first, then the session
+     * the user is looking at. A seat that hands no session (the input zones do not
+     * always carry one) must not silently render nothing — that is exactly how a
+     * docked interface disappeared while the overlay and the drawer stayed alive.
+     */
+    function resolveSessionId(props) {
+      return sessionIdOf(props) ?? resolveViewedSessionId(props?.ctx);
+    }
+
+    /**
      * Whether a tool card still carries the current document for its id. After an
      * `op=update` the earlier card in the transcript would otherwise keep a second
      * live copy of the same interface on screen.
@@ -433,6 +443,7 @@ window.__ModuleLoader__.load({
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
         expand: 'Show',
+        surfaceError: 'This HTML UI surface failed to render',
         retry: 'Retry',
         resizeHandle: 'Resize the panel',
         bundled: 'bundled',
@@ -459,6 +470,7 @@ window.__ModuleLoader__.load({
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
         expand: '展开',
+        surfaceError: '这个 HTML UI 表面渲染失败',
         retry: '重试',
         resizeHandle: '调整面板高度',
         bundled: '自带',
@@ -611,6 +623,17 @@ window.__ModuleLoader__.load({
       minHeight: '80px',
       color: 'var(--dsw-alias-label-secondary, #888)',
       fontSize: '12px',
+    };
+
+    /** A visible failure beats an invisible seat. */
+    const errorStyle = {
+      padding: '8px 10px',
+      border: '1px solid var(--dsw-alias-state-error-primary, #c33)',
+      borderRadius: '8px',
+      color: 'var(--dsw-alias-state-error-primary, #c33)',
+      fontSize: '12px',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
     };
 
     // ---------------------------------------------------------------- surfaces
@@ -936,6 +959,46 @@ window.__ModuleLoader__.load({
     // --------------------------------------------------------------- tool card
 
     /**
+     * Contained rendering. One surface failing must not take its whole seat down,
+     * and a seat that renders nothing is invisible — which is exactly how a docked
+     * interface disappeared during acceptance. The failure becomes a line the user
+     * can report instead of silence.
+     */
+    // Real React always has Component; resolving it through a fallback keeps the
+    // module loadable in a test harness that only fakes createElement.
+    const ReactComponent = typeof React.Component === 'function' ? React.Component : function Component() {};
+
+    class HtmlUiBoundary extends ReactComponent {
+      constructor(props) {
+        super(props);
+        this.state = { error: null };
+      }
+
+      static getDerivedStateFromError(error) {
+        return { error };
+      }
+
+      componentDidCatch(error) {
+        logWarn(this.props.ctx, 'dsh-htmlui: a surface failed to render', error);
+      }
+
+      render() {
+        if (this.state.error !== null) {
+          const detail = String((this.state.error && this.state.error.message) || this.state.error);
+          return h('div', { style: errorStyle }, `${tr('surfaceError', 'This HTML UI surface failed to render')}: ${detail}`);
+        }
+        return h(React.Fragment, null, this.props.children);
+      }
+    }
+
+    /** Wrap one registered component in that boundary. */
+    function guarded(ctx, Component) {
+      return function GuardedSurface(props) {
+        return h(HtmlUiBoundary, { ctx }, h(Component, props));
+      };
+    }
+
+    /**
      * The tool row's own disclosure. The contract makes `useDisclosure` a required
      * owner prop; the guard keeps a slimmer owner from crashing the card. `useState`
      * runs unconditionally so the hook order never changes.
@@ -1105,7 +1168,7 @@ window.__ModuleLoader__.load({
 
     function HtmlUiDock(props) {
       useStore();
-      const sessionId = sessionIdOf(props);
+      const sessionId = resolveSessionId(props);
       const [height, setHeight] = useState(360);
       useSessionSync(sessionId);
 
@@ -1207,7 +1270,7 @@ window.__ModuleLoader__.load({
      */
     function HtmlUiRightPane(props) {
       useStore();
-      const sessionId = sessionIdOf(props);
+      const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
       if (sessionId === undefined) return null;
       const records = recordsIn(sessionId, ['dock-right']);
@@ -1246,8 +1309,9 @@ window.__ModuleLoader__.load({
     function wireRightPane(ctx, disposers) {
       disposers.push(
         ctx.slots.inject('sidebar.right.pane.tab', () =>
-          ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, (props) =>
-            h(HtmlUiRightPane, Object.assign({}, props, { ctx })),
+          ctx.slots.register(
+            { name: 'sidebar.right.pane.tab', key: TAB_ID },
+            guarded(ctx, (props) => h(HtmlUiRightPane, Object.assign({}, props, { ctx }))),
           ),
         ),
       );
@@ -1457,7 +1521,7 @@ window.__ModuleLoader__.load({
      */
     function HtmlUiTemplateDrawer(props) {
       useStore();
-      const sessionId = sessionIdOf(props) ?? resolveViewedSessionId(props.ctx);
+      const sessionId = resolveSessionId(props);
       if (state.templates.open !== true) return null;
 
       const items = state.templates.items;
@@ -1575,14 +1639,18 @@ window.__ModuleLoader__.load({
 
       disposers.push(
         ctx.slots.inject('tool.call.toolview', () =>
-          ctx.slots.register({ name: 'tool.call.toolview', key: 'html_ui' }, (props) => h(HtmlUiToolView, Object.assign({}, props, { ctx }))),
+          ctx.slots.register(
+            { name: 'tool.call.toolview', key: 'html_ui' },
+            guarded(ctx, (props) => h(HtmlUiToolView, Object.assign({}, props, { ctx }))),
+          ),
         ),
       );
 
       disposers.push(
         ctx.slots.inject('conversation.input.dock', () =>
-          ctx.slots.register({ name: 'conversation.input.dock', id: 'htmlui-dock', order: 40 }, (props) =>
-            h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-top', 'panel'] })),
+          ctx.slots.register(
+            { name: 'conversation.input.dock', id: 'htmlui-dock', order: 40 },
+            guarded(ctx, (props) => h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-top', 'panel'] }))),
           ),
         ),
       );
@@ -1591,30 +1659,36 @@ window.__ModuleLoader__.load({
       // rather than a second stack above the input.
       disposers.push(
         ctx.slots.inject('conversation.composer.dock', () =>
-          ctx.slots.register({ name: 'conversation.composer.dock', id: 'htmlui-dock-bottom', order: 40 }, (props) =>
-            h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-bottom'] })),
+          ctx.slots.register(
+            { name: 'conversation.composer.dock', id: 'htmlui-dock-bottom', order: 40 },
+            guarded(ctx, (props) => h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-bottom'] }))),
           ),
         ),
       );
 
       disposers.push(
         ctx.slots.inject('shell.overlay', () =>
-          ctx.slots.register({ name: 'shell.overlay', id: 'htmlui-overlay', order: 30 }, (props) => h(HtmlUiOverlay, Object.assign({}, props, { ctx }))),
+          ctx.slots.register(
+            { name: 'shell.overlay', id: 'htmlui-overlay', order: 30 },
+            guarded(ctx, (props) => h(HtmlUiOverlay, Object.assign({}, props, { ctx }))),
+          ),
         ),
       );
 
       // The template drawer: a catalogue the user reaches without the model.
       disposers.push(
         ctx.slots.inject('conversation.input.right', () =>
-          ctx.slots.register({ name: 'conversation.input.right', id: 'htmlui-templates', order: 40 }, (props) =>
-            h(HtmlUiTemplateButton, Object.assign({}, props, { ctx })),
+          ctx.slots.register(
+            { name: 'conversation.input.right', id: 'htmlui-templates', order: 40 },
+            guarded(ctx, (props) => h(HtmlUiTemplateButton, Object.assign({}, props, { ctx }))),
           ),
         ),
       );
       disposers.push(
         ctx.slots.inject('conversation.input.dock', () =>
-          ctx.slots.register({ name: 'conversation.input.dock', id: 'htmlui-templates-dock', order: 41 }, (props) =>
-            h(HtmlUiTemplateDrawer, Object.assign({}, props, { ctx })),
+          ctx.slots.register(
+            { name: 'conversation.input.dock', id: 'htmlui-templates-dock', order: 41 },
+            guarded(ctx, (props) => h(HtmlUiTemplateDrawer, Object.assign({}, props, { ctx }))),
           ),
         ),
       );
@@ -1679,6 +1753,9 @@ window.__ModuleLoader__.load({
         LOCALE_NS,
         HtmlUiTemplateDrawer,
         HtmlUiTemplateButton,
+        HtmlUiBoundary,
+        guarded,
+        ReactComponent,
         dismissRecord,
         toggleCollapsed,
         openRightPane,
@@ -1693,6 +1770,7 @@ window.__ModuleLoader__.load({
         HtmlUiOverlay,
         resolveViewedSessionId,
         sessionIdOf,
+        resolveSessionId,
         argsOf,
         metaOf,
       },

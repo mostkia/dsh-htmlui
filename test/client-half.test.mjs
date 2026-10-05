@@ -583,6 +583,26 @@ test('session identity is read from the composer dock owner props', () => {
   assert.equal(__internals.sessionIdOf({}), undefined);
 });
 
+test('a seat that hands no session falls back to the one being viewed', () => {
+  // The input zones do not always carry a session. Relying on the props alone is how
+  // a docked interface rendered nowhere while the overlay and the drawer stayed up.
+  const ctx = {
+    sessions: {
+      list: {
+        getSnapshot: () => ({ current: 'session-viewed', byId: {} }),
+        subscribe: () => () => {},
+      },
+    },
+  };
+  assert.equal(__internals.resolveSessionId({ ctx }), 'session-viewed');
+  // The owner's own value still wins when it is there.
+  assert.equal(__internals.resolveSessionId({ ctx, session: { sessionId: 'session-own' } }), 'session-own');
+  assert.equal(__internals.resolveSessionId({ sessionId: 'session-direct', ctx }), 'session-direct');
+  // And a context that cannot answer is not a crash.
+  assert.equal(__internals.resolveSessionId({}), undefined);
+  assert.equal(__internals.resolveSessionId(undefined), undefined);
+});
+
 test('republishing an identical record notifies nobody', () => {
   __internals.state.byId.clear();
   __internals.state.bySession.clear();

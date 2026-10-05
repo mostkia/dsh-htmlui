@@ -21,6 +21,11 @@ import { test } from 'node:test';
 /** Deterministic hooks: enough to execute a branch, never to run an effect. */
 function stubReact() {
   return {
+    Component: class Component {
+      constructor(props) {
+        this.props = props;
+      }
+    },
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
     useEffect: () => {},
@@ -119,6 +124,20 @@ test('an inline frame renders its chrome and a loading body', () => {
   // The body is the ticket-less state until the effect resolves.
   assert.match(text, /Preparing interface/u);
   assert.ok(elements.length > 0);
+});
+
+test('a failing surface reports itself instead of rendering nothing', () => {
+  // Silence is the worst outcome for a seat: a dock that renders nothing looks exactly
+  // like a plugin that is not installed. The boundary turns it into a line to report.
+  const boundary = new __internals.HtmlUiBoundary({ ctx: undefined, children: null });
+  assert.equal(boundary.state.error, null, 'a healthy boundary holds no error');
+  const failed = new __internals.HtmlUiBoundary({ ctx: undefined, children: null });
+  failed.state = { error: new Error('boom') };
+  const text = walk(failed.render()).text.join('');
+  assert.match(text, /failed to render/u);
+  assert.match(text, /boom/u);
+  assert.equal(__internals.HtmlUiBoundary.getDerivedStateFromError(new Error('x')).error.message, 'x');
+  assert.match(__internals.CLIENT_ACTIVE_LINE, /client active/u);
 });
 
 test('the tool card asks for its own row to open, and tolerates an owner without one', () => {
