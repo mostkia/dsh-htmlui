@@ -45,7 +45,7 @@ attributed to the wrong surface.
 | `float` | `520×343, visible` for a requested `520x380+140+140` (343 = 380 minus its chrome); its ✕ drops the record from the host (`/ui/list` count 1 → 0) | works |
 | `fullscreen` | `1920×882, visible`; "Back to chat" leaves the layer and keeps the record (host count stays 1); ✕ deletes it | works |
 | `background` | `1920×919, visible` — the whole frame, because this layer has no chrome | works |
-| `inline` | renders into the tool call row; **this GUI does not show tool rows**, so the surface is invisible here | needs the `turn-tail` seat, below |
+| `inline` | `680×383, visible`, rendered in the newest turn's tail | works |
 
 Sizes depend on the window; the pairs are what matter. `dock-top`/`panel` are the
 same seat (1633 px wide here), `dock-bottom` is a different and narrower one
@@ -84,17 +84,17 @@ The one-at-a-time run found defects the earlier all-at-once run could not:
    entries competing for height, which is what a drawer "flattened to its title bar"
    was.
 
-## Still open
+## Seat notes
 
-`inline` had no visible seat in this GUI: it rendered inside the tool call row, and
-tool rows are not shown here. It now renders in the newest turn's tail
-(`conversation.chat.turnTail`), the shipped slot for in-flow contributions, with the
-tool row keeping a line that names it. That change is verified by the suites and by
-the slot registration itself (`htmlui-inline`, active), and was confirmed on screen in
-the run that followed. Scoping an interface to the turn that *created* it would need
-the record to carry that turn, which is a host change; rendering the session's inline
-interfaces in the newest tail needs neither and is what a reader expects of "the
-current interfaces".
+`inline` first rendered inside the tool call row, which **this GUI does not show**, so
+the surface existed and could not be seen. It now renders in the newest turn's tail
+(`conversation.chat.turnTail`), the slot every shipped in-flow feature uses, and the
+tool row keeps a line naming it. That is one seat drawing the document, so a GUI that
+does show tool rows cannot show two copies.
+
+Scoping an interface to the turn that *created* it would need the record to carry that
+turn, which is a host change. Rendering the session's inline interfaces in the newest
+tail needs neither, and it is what a reader expects of "the current interfaces".
 
 Two seat facts worth knowing, both measured rather than assumed:
 
