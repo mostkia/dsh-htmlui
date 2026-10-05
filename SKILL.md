@@ -117,6 +117,12 @@ come back after a reload, and they are the only storage this sandbox has.
 - **No host assumptions.** The document is an opaque-origin sandbox: no cookies,
   no `localStorage`, no parent DOM. `dshHTML` is the whole API surface. It is
   served in standards mode even when you write only a fragment.
+- **An `inline` document must not paint a full-page background.** The surface has no
+  chrome, no border and no background of its own so it reads as part of the
+  conversation; a `body { background: … }` puts a white box back in the transcript.
+  Give your own panels the background instead, and let the height be whatever the
+  content needs — the host measures the document and sizes the frame to it (up to a
+  cap, beyond which it scrolls).
 - **Relative URLs resolve against the carrier**, not your workspace: a relative
   `<img src="logo.png">` points at `/plugins/@mostkia/dsh-htmlui/ui/logo.png` and
   will 404. Reference media absolutely, as a data URL, or not at all.
