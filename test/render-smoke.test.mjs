@@ -465,6 +465,32 @@ test('a float window carries its own minimize, and a hidden one leaves the frame
   resetStore();
 });
 
+test('a float remembers where it was left, and a touch brings it to the front', () => {
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-66000001', sessionId: 'viewed', title: 'A', placement: 'float', size: { w: 400, h: 300, x: 40, y: 60 }, sizeText: '400x300+40+60', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-66000002', sessionId: 'viewed', title: 'B', placement: 'float', size: { w: 400, h: 300, x: 80, y: 100 }, sizeText: '400x300+80+100', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const [first, second] = __internals.recordsFor('viewed');
+  // The reader moves the first window; the component remembers it in module state, so
+  // hiding it later (which unmounts it) cannot lose the place.
+  __internals.state.geometry.set(first.uiId, { w: 420, h: 320, x: 500, y: 260 });
+  const restored = render(__internals.HtmlUiFrame, { record: first, theme: 'light', variant: 'float', onMinimize: () => {}, onDismiss: () => {} });
+  const box = restored.elements.map((element) => element.props?.style ?? {}).find((style) => style.position === 'fixed');
+  assert.equal(box.left, '500px', 'the remembered left edge is used');
+  assert.equal(box.top, '260px', 'and the remembered top edge');
+  assert.equal(box.width, '420px', 'as are its remembered dimensions');
+
+  // Stacking: untouched windows sit at the base, and the one touched comes forward.
+  const base = render(__internals.HtmlUiFrame, { record: second, theme: 'light', variant: 'float' });
+  const baseBox = base.elements.map((element) => element.props?.style ?? {}).find((style) => style.position === 'fixed');
+  assert.equal(baseBox.zIndex, 2, 'an untouched window sits at the base of the stack');
+  __internals.raiseFloat(second.uiId);
+  const raised = render(__internals.HtmlUiFrame, { record: second, theme: 'light', variant: 'float' });
+  const raisedBox = raised.elements.map((element) => element.props?.style ?? {}).find((style) => style.position === 'fixed');
+  assert.ok(raisedBox.zIndex > baseBox.zIndex, 'the touched window is drawn above');
+  resetStore();
+});
+
 test('the session page restores every form except the background layer', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000001', sessionId: 'session-1', title: '背景', placement: 'background', revision: 1, bytes: 5 }, undefined),

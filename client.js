@@ -80,6 +80,11 @@ window.__ModuleLoader__.load({
       tailSeq: new Map(),
       /** Interfaces the reader put away without deleting: floats, for now. */
       hidden: new Set(),
+      /** Where each float was left, so hiding and restoring it keeps its place. */
+      geometry: new Map(),
+      /** Float stacking: the last one touched is drawn on top. */
+      floatZ: new Map(),
+      floatZTop: 1,
       collapsed: new Map(),
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
@@ -937,15 +942,27 @@ window.__ModuleLoader__.load({
       const initial = props.initialSize ?? parseSizeText(record.sizeText) ?? {};
       const [size, setSize] = useState(() => {
         if (variant === 'float') {
+          // A reader's own placement outlives the mount: hiding a window unmounts it, and
+          // coming back to the declared corner instead of where it was left reads as a
+          // window that forgot. The remembered geometry is used first, the declared size
+          // second, and the default last.
+          const remembered = state.geometry.get(record.uiId);
           return {
-            w: initial.w ?? DEFAULT_FLOAT.w,
-            h: initial.h ?? DEFAULT_FLOAT.h,
-            x: initial.x ?? DEFAULT_FLOAT.x,
-            y: initial.y ?? DEFAULT_FLOAT.y,
+            w: remembered?.w ?? initial.w ?? DEFAULT_FLOAT.w,
+            h: remembered?.h ?? initial.h ?? DEFAULT_FLOAT.h,
+            x: remembered?.x ?? initial.x ?? DEFAULT_FLOAT.x,
+            y: remembered?.y ?? initial.y ?? DEFAULT_FLOAT.y,
           };
         }
         return { w: initial.w, h: initial.h };
       });
+
+      // Remember every move and resize for as long as the page lives.
+      useEffect(() => {
+        if (variant !== 'float') return undefined;
+        state.geometry.set(record.uiId, Object.assign({}, size));
+        return undefined;
+      }, [variant, record.uiId, size.w, size.h, size.x, size.y]);
 
       // A mount means React recreated this frame, which reloads the document and loses
       // whatever it held; a URL change logs separately, just below. Between them the
@@ -1145,7 +1162,11 @@ window.__ModuleLoader__.load({
               border: '1px solid var(--dsw-alias-border-l2, #ccc)',
               background: 'var(--dsw-alias-bg-overlay, #fff)',
               boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
+              // The last window touched is drawn on top of the others, which is what a
+              // click on a floating window is normally asking for.
+              zIndex: 2 + (state.floatZ.get(record.uiId) ?? 0),
             },
+            onPointerDownCapture: () => raiseFloat(record.uiId),
           },
           h(
             'div',
@@ -2331,6 +2352,15 @@ window.__ModuleLoader__.load({
       { value: 'background', key: 'placementBackground', fallback: 'Background layer' },
     ];
 
+    /** Bring one float to the front of the floating stack. */
+    function raiseFloat(uiId) {
+      const current = state.floatZ.get(uiId);
+      if (current !== undefined && current === state.floatZTop) return;
+      state.floatZTop += 1;
+      state.floatZ.set(uiId, state.floatZTop);
+      bump();
+    }
+
     /**
      * The user's own way to start an interface: what to start from, and where to put it.
      *
@@ -2807,6 +2837,7 @@ window.__ModuleLoader__.load({
         useOptionalDisclosure,
         ensureRightPaneTab,
         releaseRightPaneTab,
+        raiseFloat,
         HtmlUiRightPane,
         HtmlUiFrame,
         HtmlUiToolView,
