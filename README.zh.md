@@ -50,13 +50,15 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 改宿主半部（`index.js`）**不会**在运行中的宿主里热生效：加载器仍用它已激活的模块代际。改完宿主半部要冷启动 `dsh`；浏览器半部只需刷新页面。
 
+[docs/VERIFY.md](docs/VERIFY.md) 是真机验收清单：当前跑的是哪一代、每种形态该长什么样、回传模型时在对话里怎么体现、以及看到某个症状该查什么。
+
 ## 工作原理
 
 - **宿主半部**（`index.js`，纯 ESM，零依赖）：`html_ui` / `html_ui_template` 两个工具、`$DSH_HOME/htmlui` 下的存储、以及挂在 `/plugins/@mostkia/dsh-htmlui` 的 HTTP 载体（文档票据、拼装后的文档、POST 动作通道、SSE 事件流）。
 - **浏览器半部**（`client.js`，手写模块，无需构建）：注册工具卡片、输入框停靠区、整帧浮层，并把每份文档放进 iframe。
 - **桥**（`assets/bridge.js`，服务时注入）：暴露 `window.dshHTML`，提供 `send`、`state`、`resize`、`close`、`on(...)`。
 
-**模型永远拿不到文档正文**：它读到的是工具结果的紧凑摘要（`ui_id`/`placement`/`bytes`/revision），浏览器则通过工具结果的 presentation 投影拿到完整文档。大文档写进文件、用 `path` 引用，所以不会常驻模型上下文。
+**模型永远拿不到文档正文**：它读到的是工具结果的紧凑摘要（`ui_id`/`placement`/`bytes`/revision），文档本身由浏览器从载体的票据路由加载。大文档写进文件、用 `path` 引用，所以不会常驻模型上下文。
 
 ## 安全
 
@@ -105,7 +107,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 82 项断言：包完整性 12 + 文档契约 6 + 宿主 26 + 浏览器 21 + 桥 8 + 浅渲染 9
+npm test        # 83 项断言：包完整性 12 + 文档契约 7 + 宿主 26 + 浏览器 21 + 桥 8 + 浅渲染 9
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

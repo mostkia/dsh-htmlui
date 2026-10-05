@@ -11,7 +11,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -94,6 +95,24 @@ test('both READMEs promise the same install command and the same placements', ()
     for (const placement of list) {
       assert.ok(source.includes(placement), `${placement} must appear`);
     }
+  }
+});
+
+test('the operator documents stay complete and reachable', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  for (const file of ['PUBLISHING.md', 'VERIFY.md', 'marketplace-pr.md', 'awesome-dsh-plugin.yml']) {
+    assert.ok(existsSync(join(root, 'docs', file)), `docs/${file} must exist`);
+  }
+  const publishing = read('docs/PUBLISHING.md');
+  assert.ok(publishing.includes('VERIFY.md'), 'the release guide must point at the acceptance checklist');
+  assert.ok(publishing.includes('marketplace-pr.md'), 'and at the prepared pull request body');
+  for (const file of ['README.md', 'README.zh.md']) {
+    assert.ok(read(file).includes('docs/VERIFY.md'), `${file} must link the acceptance checklist`);
+    assert.ok(read(file).includes('docs/PUBLISHING.md'), `${file} must link the release guide`);
+  }
+  // The acceptance checklist has to name every placement it asks someone to try.
+  for (const placement of placements()) {
+    assert.ok(read('docs/VERIFY.md').includes(`\`${placement}\``), `VERIFY.md must cover ${placement}`);
   }
 });
 

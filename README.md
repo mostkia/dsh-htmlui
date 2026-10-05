@@ -58,6 +58,10 @@ Editing the host half (`index.js`) does **not** reload in a running host: the
 loader keeps the module generation it activated. Cold-start `dsh` after host-half
 changes; the browser half only needs a refresh.
 
+[docs/VERIFY.md](docs/VERIFY.md) is the live acceptance checklist: which
+generation is running, what each placement should look like, how the round trip
+to the model shows up, and how to read a symptom.
+
 ## How it works
 
 - **Host half** (`index.js`, plain ESM, no dependencies): the `html_ui` and
@@ -70,11 +74,10 @@ changes; the browser half only needs a refresh.
 - **Bridge** (`assets/bridge.js`, injected at serve time): exposes
   `window.dshHTML` with `send`, `state`, `resize`, `close`, and `on(...)`.
 
-The model never receives the document body: the tool result it reads is a compact
-summary (`ui_id`, `placement`, `bytes`, revision), while the browser gets the
-whole document through the tool result's presentation projection. Large documents
-belong in a file and are attached by `path`, so they never sit in the model
-context.
+The model never receives the document body: what it reads is a compact summary
+(`ui_id`, `placement`, `bytes`, revision), and the browser loads the document
+itself from the carrier's ticket route. Large documents belong in a file and are
+attached by `path`, so they never sit in the model context.
 
 ## Security
 
@@ -147,7 +150,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 82 assertions: 12 package, 6 doc contract, 26 host, 21 browser, 8 bridge, 9 render smoke
+npm test        # 83 assertions: 12 package, 7 doc contract, 26 host, 21 browser, 8 bridge, 9 render smoke
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

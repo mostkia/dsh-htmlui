@@ -5,8 +5,13 @@ machine paths, or tokens: fill those in from your own environment.
 
 ## 0. Preconditions
 
+Walk [VERIFY.md](VERIFY.md) on a live host before tagging: it is the acceptance
+checklist (which generation is running, what each placement looks like, how the
+round trip shows up, and how to read a symptom). A release that has not been
+looked at in a browser is not ready, however green the suites are.
+
 ```sh
-npm run check     # syntax + both suites (host half 20, browser half 16)
+npm run check     # syntax + all six suites
 npm pack --dry-run  # read the actual tarball contents before publishing
 ```
 
@@ -65,6 +70,8 @@ adds exactly one file:
 
 - Path: `data/plugins/mostkia__dsh-htmlui.yml`
 - Content: [`docs/awesome-dsh-plugin.yml`](awesome-dsh-plugin.yml) in this repository.
+- Pull request body: [`docs/marketplace-pr.md`](marketplace-pr.md) in this
+  repository, written so a reviewer does not have to reverse-engineer the plugin.
 
 Rules that bite:
 

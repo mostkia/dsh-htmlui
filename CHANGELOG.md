@@ -4,8 +4,23 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ## 0.1.1
 
+### Added
+
+- `docs/VERIFY.md`: the live acceptance checklist — which generation is running,
+  what each of the eight placements should look like, how the round trip to the
+  model shows up, and a triage table from symptom to check. The documentation
+  contract asserts that it covers every placement, and the release guide points
+  at it as a precondition.
+- `docs/marketplace-pr.md`: the prepared pull request body, stating what the
+  plugin adds, what it deliberately does not do (no install scripts, no
+  dependencies, no third-party egress), and the security posture a reviewer
+  should check.
+
 ### Fixed
 
+- The READMEs no longer claim the browser receives a document through the tool
+  result's presentation projection. It carries the record only; the document
+  itself is loaded from the carrier's ticket route.
 - A capability token no longer appears in any durable projection. The tool
   result, its presentation projection, the `/ui/list` response, and the record on
   disk all carry a token-free address now; the ticket route is the single place
