@@ -132,7 +132,7 @@ test('the packed host half activates and serves from its own files', { skip }, a
       harness.exec('session-packed'),
     );
     assert.equal(rendered.ok, true, rendered.error ?? 'the starter template must render');
-    assert.equal(rendered.placement, 'dock-top');
+    assert.equal(rendered.placement, 'dock-right');
     const listed = await harness.tool('html_ui_template').execute({ op: 'list' }, harness.exec('session-packed'));
     assert.ok(listed.summary.includes('starter'));
   } finally {

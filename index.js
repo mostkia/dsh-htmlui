@@ -46,15 +46,20 @@ const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
 const PLUGIN_VERSION = '0.1.1';
 
+/**
+ * Placements this plugin offers.
+ *
+ * `dock-top`, `dock-bottom` and `panel` were removed after a live acceptance pass:
+ * a surface that only squeezes the session view reads as a window parked inside the
+ * conversation, and the right column already provides a real split. What remains is
+ * one real split (`dock-right`), one in-flow form (`inline`), and three overlays.
+ */
 const PLACEMENTS = [
   'inline',
   'dock-right',
-  'dock-top',
-  'dock-bottom',
   'float',
   'background',
   'fullscreen',
-  'panel',
 ];
 
 const DEFAULT_MAX_INLINE_BYTES = 16 * 1024;
@@ -280,7 +285,7 @@ function mergeInlineParts(html, css, js) {
  * A document is the best place to say where it belongs, and a template should
  * carry that with it. Two forms are accepted, the head-scoped one first:
  *
- *   <meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">
+ *   <meta name="dsh-htmlui" content="placement=dock-right; size=520x360; title=Orders">
  *   <html data-dsh-htmlui-placement="float" data-dsh-htmlui-size="520x360">
  *
  * A tool argument always wins over a declaration, and an unusable value is
@@ -1808,7 +1813,7 @@ export function apply(ctx, config) {
             'When a request needs a real interactive surface — a dashboard, a form, a tool with its own layout, an app-like flow — author HTML/CSS/JS and attach it with the `html_ui` tool instead of describing it in prose.',
             'Rules:',
             '- Prefer `path`: write the document with the file tools, then attach it with `html_ui op=render path=...`. Inline `html` is capped and stays in the conversation context.',
-            '- Pick placement deliberately: `inline` (part of the transcript), `dock-top`/`dock-bottom` (full width around the composer), `dock-right` (session side panel), `float` (draggable window; give `size`), `fullscreen` (the interface takes the session view and offers a switch back to chat), `panel` (resident and updated in place), `background` (click-through layer).',
+            '- Pick placement deliberately: `inline` (part of the transcript, seamless and content-sized), `dock-right` (the session side panel: a real left/right split, the widest surface), `float` (draggable window; give `size`), `fullscreen` (the interface takes the session view and offers a switch back to chat), `background` (click-through layer).',
             '- Inside the document, `window.dshHTML` is available: `send(action, data)`, `state.get()/set(value)`, `close()`, `on("assistant"|"session"|"action"|"theme", handler)`. Only interactions that truly need the model should call `send`; keep selection, validation, filtering, and scoring local.',
             '- Re-read `html_ui` results: `ui_id` identifies the interface, and `html_ui op=update id=<ui_id>` replaces it in place. Each `send` arrives as a user message carrying `[html-ui:action]`.',
             '- Never ask for passwords, API keys, tokens, or recovery codes inside an interface, and never render secrets into it.',

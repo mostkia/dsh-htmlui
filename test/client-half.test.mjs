@@ -127,13 +127,12 @@ test('exposes the harness client contract', () => {
   assert.equal(typeof apply, 'function');
 });
 
-test('registers the tool card, both docks, the drawer, the overlay, and the right-pane body', () => {
+test('registers the tool card, the fallback dock, the drawer, the overlay, the turn tail and the right-pane body', () => {
   const context = createClientContext();
   const dispose = apply(context);
   assert.deepEqual(context.injections, [
     'tool.call.toolview',
     'conversation.input.dock',
-    'conversation.composer.dock',
     'shell.overlay',
     'conversation.chat.turnTail',
     'conversation.input.right',
@@ -144,7 +143,6 @@ test('registers the tool card, both docks, the drawer, the overlay, and the righ
   assert.deepEqual(byId, [
     'tool.call.toolview#html_ui',
     'conversation.input.dock#htmlui-dock',
-    'conversation.composer.dock#htmlui-dock-bottom',
     'shell.overlay#htmlui-overlay',
     'conversation.chat.turnTail#htmlui-inline',
     'conversation.input.right#htmlui-templates',
@@ -275,30 +273,31 @@ test('without a locale service the English literals stand, and a refusal is surv
 });
 
 test('dock-right keeps its fallback until the column can actually open a tab', () => {
-  // A registered tab type is not enough: without a controller the interface would
-  // have no seat at all, so the composer dock must keep claiming it.
-  const base = ['dock-top', 'panel'];
+  // A registered tab type is not enough: without a controller the interface would have
+  // no seat at all, so the wide dock has to keep claiming it, and let go the moment the
+  // column can take it — one seat draws a record, never two.
+  const base = ['dock-right'];
   resetRightPane();
   const registeredTab = { register: () => () => {} };
   apply(createClientContext({ tabs: registeredTab }));
   assert.equal(__internals.rightPaneReady(), false, 'a tab type alone cannot open a tab');
-  assert.ok(__internals.dockPlacements(base).includes('dock-right'), 'so the fallback holds');
+  assert.deepEqual(__internals.dockPlacements(base), ['dock-right'], 'so the fallback holds');
 
   // With the controller bound, the right column takes over and the dock lets go.
   resetRightPane();
   const controller = { openTab: () => {} };
   apply(createClientContext({ tabs: registeredTab, controller }));
   assert.equal(__internals.rightPaneReady(), true);
-  assert.ok(!__internals.dockPlacements(base).includes('dock-right'), 'the dock stops claiming it');
+  assert.deepEqual(__internals.dockPlacements(base), [], 'the dock stops claiming it');
 
   // A controller that cannot open a tab is no more use than none at all.
   resetRightPane();
   apply(createClientContext({ tabs: registeredTab, controller: {} }));
   assert.equal(__internals.rightPaneReady(), false);
-  assert.ok(__internals.dockPlacements(base).includes('dock-right'));
+  assert.deepEqual(__internals.dockPlacements(base), ['dock-right']);
 
-  // The bottom dock never claims dock-right, whichever state the column is in.
-  assert.ok(!__internals.dockPlacements(['dock-bottom']).includes('dock-right'));
+  // The dock claims nothing else: the vertical split forms are gone.
+  assert.deepEqual(__internals.dockPlacements(['float']), ['float']);
   resetRightPane();
 });
 
@@ -330,19 +329,23 @@ test('a theme switch does not reload an open document', async () => {
   }
 });
 
-test('dock-top and dock-bottom land in different seats', () => {
+test('one dock remains, and it is the fallback seat for dock-right', () => {
   resetRightPane();
   const context = createClientContext();
   apply(context);
-  const topDock = context.registrations.find((entry) => entry.options.id === 'htmlui-dock');
-  const bottomDock = context.registrations.find((entry) => entry.options.id === 'htmlui-dock-bottom');
-  assert.ok(topDock !== undefined && bottomDock !== undefined);
-  assert.equal(topDock.options.name, 'conversation.input.dock');
-  assert.equal(bottomDock.options.name, 'conversation.composer.dock');
-  // A record is claimed by exactly one dock: the seats do not overlap.
+  const dock = context.registrations.find((entry) => entry.options.id === 'htmlui-dock');
+  assert.ok(dock !== undefined, 'the fallback dock is registered');
+  assert.equal(dock.options.name, 'conversation.input.dock');
+  assert.equal(
+    context.registrations.some((entry) => entry.options.name === 'conversation.composer.dock'),
+    false,
+    'the seat below the composer was removed with the vertical split forms',
+  );
+  // Every remaining placement belongs to exactly one seat, and only dock-right is a
+  // dock's business.
   __internals.state.byId.clear();
   __internals.state.bySession.clear();
-  for (const placement of ['dock-top', 'dock-bottom', 'panel', 'dock-right']) {
+  for (const placement of ['inline', 'dock-right', 'float']) {
     __internals.publish(
       __internals.recordFromMeta(
         { htmlui: true, op: 'render', uiId: `ui-${placement.replace('-', '')}0000`, sessionId: 'session-dock', placement, revision: 1 },
@@ -350,10 +353,9 @@ test('dock-top and dock-bottom land in different seats', () => {
       ),
     );
   }
-  const top = __internals.recordsIn('session-dock', ['dock-top', 'panel']).map((record) => record.placement);
-  const bottom = __internals.recordsIn('session-dock', ['dock-bottom']).map((record) => record.placement);
-  assert.deepEqual(top.sort(), ['dock-top', 'panel']);
-  assert.deepEqual(bottom, ['dock-bottom']);
+  assert.deepEqual(__internals.recordsIn('session-dock', ['dock-right']).map((record) => record.placement), ['dock-right']);
+  assert.deepEqual(__internals.recordsIn('session-dock', ['inline']).map((record) => record.placement), ['inline']);
+  assert.deepEqual(__internals.recordsIn('session-dock', ['float']).map((record) => record.placement), ['float']);
 });
 
 /** The module keeps its store across `apply` calls, so tests reset what they assert. */
@@ -826,29 +828,26 @@ test('a reloaded page rebuilds every seat from the host list alone', () => {
   const hostRecord = (uiId, placement, extra) =>
     Object.assign({ uiId, sessionId: 'session-reload', title: `t-${uiId}`, placement, revision: 1, bytes: 10, sizeText: '' }, extra);
   __internals.convergeSession('session-reload', [
-    hostRecord('ui-aaaa0001', 'dock-top'),
-    hostRecord('ui-aaaa0002', 'panel'),
-    hostRecord('ui-aaaa0003', 'dock-bottom'),
-    hostRecord('ui-aaaa0004', 'dock-right'),
-    hostRecord('ui-aaaa0005', 'background'),
-    hostRecord('ui-aaaa0006', 'fullscreen'),
-    hostRecord('ui-aaaa0007', 'float', { size: { w: 500, h: 400, x: 20, y: 20 }, sizeText: '500x400+20+20' }),
-    hostRecord('ui-aaaa0008', 'inline'),
+    hostRecord('ui-aaaa0001', 'dock-right'),
+    hostRecord('ui-aaaa0002', 'float', { size: { w: 500, h: 400, x: 20, y: 20 }, sizeText: '500x400+20+20' }),
+    hostRecord('ui-aaaa0003', 'background'),
+    hostRecord('ui-aaaa0004', 'fullscreen'),
+    hostRecord('ui-aaaa0005', 'inline'),
   ]);
-  assert.equal(__internals.recordsFor('session-reload').length, 8);
+  assert.equal(__internals.recordsFor('session-reload').length, 5);
   // The right pane is reset here, so the fallback is active and the dock claims
-  // dock-right as well as its own two seats.
+  // dock-right — the only placement that has a second possible seat.
   assert.deepEqual(
-    __internals.recordsIn('session-reload', __internals.dockPlacements(['dock-top', 'panel'])).map((entry) => entry.placement).sort(),
-    ['dock-right', 'dock-top', 'panel'],
+    __internals.recordsIn('session-reload', __internals.dockPlacements(['dock-right'])).map((entry) => entry.placement).sort(),
+    ['dock-right'],
   );
-  assert.equal(__internals.recordsIn('session-reload', ['dock-bottom']).length, 1);
+  assert.equal(__internals.recordsIn('session-reload', ['inline']).length, 1);
   assert.equal(__internals.recordsIn('session-reload', ['dock-right']).length, 1);
   assert.equal(__internals.recordsIn('session-reload', ['background']).length, 1);
   assert.equal(__internals.recordsIn('session-reload', ['float']).length, 1);
   const fullscreen = __internals.activeFullscreen(__internals.recordsFor('session-reload'));
-  assert.equal(fullscreen === undefined ? undefined : fullscreen.uiId, 'ui-aaaa0006', 'the layer finds its record');
-  assert.equal(fullscreen.title, 't-ui-aaaa0006', 'and the title the client renders is a string');
+  assert.equal(fullscreen === undefined ? undefined : fullscreen.uiId, 'ui-aaaa0004', 'the layer finds its record');
+  assert.equal(fullscreen.title, 't-ui-aaaa0004', 'and the title the client renders is a string');
 });
 
 test('a superseded card stops claiming the interface', () => {

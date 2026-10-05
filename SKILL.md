@@ -21,9 +21,10 @@ in a sandboxed iframe; the document talks back through `window.dshHTML`.
 Large documents belong in a file, not in the conversation:
 
 1. Write the document with the file tools (`write`).
-2. Attach it: `html_ui { "op": "render", "path": "ui/dashboard.html", "title": "订单看板", "placement": "dock-top" }`.
+2. Attach it to the session's right column, where it gets the most room:
+   `html_ui { "op": "render", "path": "ui/dashboard.html", "title": "订单看板", "placement": "dock-right" }`.
    With `inline` (the default) the document appears at the end of the turn that
-   attached it, and the tool row keeps a line naming it.
+   attached it, seamlessly, in the conversation flow.
 
 Inline `html` is capped (16 KiB by default) and stays in the conversation
 context forever, so use it only for small sketches.
@@ -36,13 +37,15 @@ is replaced in place, and the browser surface refreshes without a new card.
 
 | `placement` | Where it lives |
 |---|---|
-| `inline` (default) | In the transcript, as part of the tool call |
-| `dock-top` / `dock-bottom` | Full width above / below the composer |
-| `panel` | The same dock, meant to be updated in place |
-| `dock-right` | The session's right column, as its own tab; falls back to the dock above the composer when the column is unavailable |
+| `inline` (default) | In the transcript, at the end of the turn that attached it. Seamless: no chrome, no border, no background, and the height comes from the document — do not paint a page background |
+| `dock-right` | The session's right column: a real left/right split, and the widest surface. Falls back to the wide dock above the composer when the column is unavailable |
 | `float` | A draggable, resizable window; give `size`, e.g. `"520x360+80+60"` |
 | `background` | A click-through layer over the frame (decorative) |
 | `fullscreen` | Covers the session and offers a built-in "切回聊天" switch |
+
+The vertical docks (`dock-top` / `dock-bottom`) and `panel` were removed: a surface that
+only squeezes the session view reads as a window parked inside the conversation, and
+`dock-right` already gives a real split.
 
 Give `size` as `"WxH"` or `"WxH+X+Y"`.
 
@@ -52,7 +55,7 @@ A document is the best place to say where it belongs, and a template should carr
 that with it. Declare it in the head:
 
 ```html
-<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">
+<meta name="dsh-htmlui" content="placement=dock-right; size=520x360; title=Orders">
 ```
 
 or on the root element:
@@ -139,7 +142,7 @@ status=ok
 op=render
 ui_id=ui-1a2b3c4d
 title="订单看板"
-placement=dock-top
+placement=dock-right
 size=520x360
 bytes=4821
 revision=1
@@ -150,7 +153,7 @@ The document body never returns to the model — only this summary. When a user
 interaction arrives, it looks like:
 
 ```
-[html-ui:action] ui=ui-1a2b3c4d action="refresh" title="订单看板" placement=dock-top
+[html-ui:action] ui=ui-1a2b3c4d action="refresh" title="订单看板" placement=dock-right
 payload={"range":"7d"}
 ```
 

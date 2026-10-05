@@ -23,14 +23,11 @@ conversation needs it.
 
 | `placement` | Where it lives |
 |---|---|
-| `inline` | In the transcript, at the end of the turn that attached it (the tool row keeps a line naming it) |
-| `dock-top` | Full width above the composer card |
-| `dock-bottom` | Below the composer card, in that card's own dock. It is a narrower seat than the one above the input — measured 293 px against 769 px on a 1920 px viewport — so keep its content compact |
-| `panel` | The same dock, updated in place |
+| `inline` | In the transcript, at the end of the turn that attached it: seamless — no chrome, no border, no background, height taken from the document itself |
+| `dock-right` | The session's right column: a real left/right split (the widest surface), as a tab hosting this session's right-placed interfaces. Falls back to the wide dock above the composer while the column cannot open a tab |
 | `float` | A draggable, resizable window (`size: "520x360+80+60"`) |
 | `background` | A click-through layer over the frame |
 | `fullscreen` | Covers the session, with a built-in switch back to chat |
-| `dock-right` | The session's right column, as a tab that hosts this session's right-placed interfaces (falls back to the dock above the composer while the column cannot open a tab) |
 
 A document can declare its own placement instead of the caller naming it — useful
 for a template, which then carries its home with it:

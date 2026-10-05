@@ -40,7 +40,7 @@ will see a protocol block back:
 status=ok
 op=render
 ui_id=ui-xxxxxxxx
-placement=dock-top
+placement=dock-right
 next=update it later with html_ui op=update id=ui-xxxxxxxx
 ```
 
@@ -50,20 +50,17 @@ Attach one of each and confirm it appears where its placement promises:
 
 | Placement | What to look for |
 |---|---|
-| `inline` | The document renders at the end of the turn that attached it, and the tool row keeps a line naming it. A GUI that shows tool rows shows the line there, never a second copy of the document |
-| `dock-top` | A 769 px-wide surface above the composer card (that was the width on a 1920 px viewport) |
-| `dock-bottom` | A surface below the composer card, in that card's own dock — a narrower seat (293 px on the same viewport), not a second stack above |
-| `panel` | The same seat as `dock-top`, and it updates in place after `html_ui op=update` |
-| `dock-right` | The session's right column opens a tab hosting it (851×830 measured); while that column cannot open a tab (no controller bound) it falls back to the dock above the composer |
-| `float` | A window that drags by its header and resizes from the corner (arrows work on the focused handle); `size` sets where it starts |
-| `fullscreen` | The surface covers the session (1920×845 measured: one chrome row of its own), and "Back to chat" or Escape gives the chat back and keeps it closed |
-| `background` | A click-through layer over the frame (1920×919 measured): the page under it still receives clicks |
+| `inline` | The document renders at the end of the turn that attached it, seamlessly: no chrome, no border, no background, height taken from the document (680×383 measured). It scrolls only past the height cap |
+| `dock-right` | The session's right column opens a tab hosting it (851×830 measured) and the surface is seamless there too — the tab already carries the title. While that column cannot open a tab (no controller bound) it falls back to the wide dock above the composer, never to both |
+| `float` | A window that drags by its **title text** and resizes from the corner (arrows work on the focused handle); `size` sets where it starts. The ✕ closes it for good: the record leaves the host store |
+| `fullscreen` | The surface covers the session (1920×882 measured: exactly one chrome row), and "Back to chat" gives the chat back while **keeping** the record |
+| `background` | A click-through layer over the frame (1920×919 measured, the whole frame because it has no chrome): the page under it still receives clicks |
 
 Two constraints of the host layout, worth knowing before judging a failure:
 
-- `dock-bottom` and `panel` are rendered by the composer dock, which the product
-  mounts only while a composer for that session is on screen. In a state without
-  one, those records have no seat and are simply not visible.
+- The fallback dock is rendered by the input dock, which the product mounts only
+  while a composer for that session is on screen. In a state without one, a
+  `dock-right` record has no seat and is simply not visible.
 - A record created or closed *somewhere else* — another tab, or the model updating
   an interface whose card is scrolled out of the virtualized transcript — is picked
   up when the page loads its records (`/ui/list`), not live: the page keeps no

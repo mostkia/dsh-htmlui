@@ -5,7 +5,7 @@
  * its record says it belongs:
  *
  *   inline                 the tool card that carried it, inside the transcript
- *   dock-top / dock-bottom the full-width dock above the composer
+ *   dock-right      the session side panel (a real left/right split)
  *   panel                  the same dock, refreshed in place
  *   float                  a draggable, resizable window over the frame
  *   background             a click-through layer over the frame
@@ -1517,14 +1517,16 @@ window.__ModuleLoader__.load({
     // ------------------------------------------------------------------- docks
 
     /**
-     * Which placements one dock claims. dock-right belongs to the right column only
-     * while that column can actually open a tab: the type registering is not enough,
-     * because the interface would then be in no seat at all. Until the controller is
-     * bound, the composer dock keeps claiming it, and only that dock claims it so a
-     * record never renders twice.
+     * Which placements a dock claims.
+     *
+     * `dock-right` belongs to the right column, but only while that column can actually
+     * open a tab: registering the type is not enough, because the interface would then
+     * be in no seat at all. Until the controller is bound, the wide dock above the
+     * composer keeps claiming it, and only one seat ever claims a record, so it never
+     * renders twice.
      */
     function dockPlacements(base) {
-      return base.includes('dock-top') && !rightPaneReady() ? [...base, 'dock-right'] : base;
+      return base.includes('dock-right') && rightPaneReady() ? [] : base;
     }
 
     function HtmlUiDock(props) {
@@ -1568,7 +1570,7 @@ window.__ModuleLoader__.load({
       }, []);
 
       if (sessionId === undefined) return null;
-      const base = Array.isArray(props.placements) ? props.placements : ['dock-top', 'panel'];
+      const base = Array.isArray(props.placements) ? props.placements : ['dock-right'];
       const placements = dockPlacements(base);
       const records = recordsIn(sessionId, placements);
       if (records.length === 0) return null;
@@ -2026,22 +2028,15 @@ window.__ModuleLoader__.load({
         ),
       );
 
+      // One dock, and it is the fallback: `dock-right` lives in the right column while
+      // that column can open a tab, and in this wide band above the composer when it
+      // cannot. The vertical split seats were removed — a surface that only squeezes
+      // the session view reads as a window parked inside the conversation.
       disposers.push(
         ctx.slots.inject('conversation.input.dock', () =>
           ctx.slots.register(
             { name: 'conversation.input.dock', id: 'htmlui-dock', order: 40 },
-            guarded(ctx, (props) => h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-top', 'panel'] }))),
-          ),
-        ),
-      );
-
-      // The seat below the composer card is what makes dock-bottom a real split
-      // rather than a second stack above the input.
-      disposers.push(
-        ctx.slots.inject('conversation.composer.dock', () =>
-          ctx.slots.register(
-            { name: 'conversation.composer.dock', id: 'htmlui-dock-bottom', order: 40 },
-            guarded(ctx, (props) => h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-bottom'] }))),
+            guarded(ctx, (props) => h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-right'] }))),
           ),
         ),
       );

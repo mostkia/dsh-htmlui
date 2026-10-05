@@ -23,8 +23,11 @@ needs it, with reusable templates.
 
 - Two tools: `html_ui` (`render` / `update` / `close` / `list`) and
   `html_ui_template` (`save` / `list` / `show` / `remove`).
-- Eight placements covering seven requested forms: `inline`, `dock-top`,
-  `dock-bottom`, `dock-right`, `float`, `background`, `fullscreen`, `panel`.
+- Five placements, each live-verified by a document that measured itself: `inline`
+  (seamless, in the conversation flow, height taken from the document), `dock-right`
+  (a real left/right split, and the widest surface), `float`, `background` and
+  `fullscreen`. The vertical docks were removed after acceptance: a surface that only
+  squeezes the session view reads as a window parked inside the conversation.
 - An injected `window.dshHTML` bridge: `send`, `state`, `resize`, `close`,
   `on('assistant' | 'session' | 'action' | 'ui' | 'theme' | 'ready')`.
 - Host-side storage under `$DSH_HOME/htmlui`, with hand-written

@@ -38,8 +38,8 @@ attributed to the wrong surface.
 
 | Placement | Reading | Verdict |
 |---|---|---|
-| `dock-top` | `1633×321, visible` | works |
-| `dock-bottom` | `325×321, visible` (a narrower seat, as measured) | works |
+| `dock-top` | `1633×321, visible` | works, **since removed** |
+| `dock-bottom` | `325×321, visible` (a narrower seat, as measured) | works, **since removed** |
 | `dock-right` | `851×830, visible`; the tab opens itself | works |
 | `panel` | `1633×321, visible` | works |
 | `float` | `520×343, visible` for a requested `520x380+140+140` (343 = 380 minus its chrome); its ✕ drops the record from the host (`/ui/list` count 1 → 0) | works |
@@ -47,8 +47,17 @@ attributed to the wrong surface.
 | `background` | `1920×919, visible` — the whole frame, because this layer has no chrome | works |
 | `inline` | `680×383, visible`, rendered in the newest turn's tail | works |
 
-Sizes depend on the window; the pairs are what matter. `dock-top`/`panel` are the
-same seat (1633 px wide here), `dock-bottom` is a different and narrower one
+Sizes depend on the window; the pairs are what matter. `dock-top`/`panel` were the
+same seat (1633 px wide here) and `dock-bottom` was a different and narrower one
+
+## Removed after acceptance
+
+`dock-top`, `dock-bottom` and `panel` are gone. They worked, and the user judged them
+unsuitable: a surface that only takes height from the session view reads as a window
+parked inside the conversation rather than part of it, and the same content is better
+placed in the right column, which is a real left/right split. `inline` was reworked
+instead — seamless, content-sized, rendered at the end of its turn — and `dock-right`
+was made seamless too, since its tab already carries the title.
 (325 px), and the two overlay layers differ by exactly one chrome row: `background`
 fills all 919 px, `fullscreen` gives up 37 px to its title bar. That last number is
 also the evidence for the single-title-bar fix: the same layer measured 845 px

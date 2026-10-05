@@ -24,7 +24,7 @@ function placements() {
   const block = /const PLACEMENTS = \[([\s\S]*?)\];/u.exec(read('index.js'));
   assert.ok(block !== null, 'the placement list must stay declared in index.js');
   const list = [...block[1].matchAll(/'([^']+)'/gu)].map((match) => match[1]);
-  assert.ok(list.length >= 7, 'every requested form must stay declared');
+  assert.ok(list.length >= 5, 'every requested form must stay declared');
   return list;
 }
 

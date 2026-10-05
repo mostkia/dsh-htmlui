@@ -275,7 +275,7 @@ test('a file-backed document is read from disk and merged with css and js', asyn
   const file = join(scratch, 'panel.html');
   writeFileSync(file, '<!doctype html><html><head><title>t</title></head><body><div id="app"></div></body></html>', 'utf8');
   const result = await tool('html_ui').execute(
-    { op: 'render', path: 'panel.html', css: '#app{color:red}', js: 'console.log(1)', placement: 'dock-top' },
+    { op: 'render', path: 'panel.html', css: '#app{color:red}', js: 'console.log(1)', placement: 'dock-right' },
     exec(),
   );
   assert.equal(result.ok, true);
@@ -772,11 +772,11 @@ test('a capability token never reaches a durable projection', async () => {
 
 test('a document can declare where it belongs, and an argument outranks it', async () => {
   const declared = `<!doctype html><html><head>
-    <meta name="dsh-htmlui" content="placement=dock-top; size=520x360+40+40; title=自述位置">
+    <meta name="dsh-htmlui" content="placement=dock-right; size=520x360+40+40; title=自述位置">
     </head><body><p>declared</p></body></html>`;
   const byMeta = await tool('html_ui').execute({ op: 'render', html: declared }, exec('session-declare'));
   assert.equal(byMeta.ok, true);
-  assert.equal(byMeta.placement, 'dock-top', 'the meta declaration is honoured');
+  assert.equal(byMeta.placement, 'dock-right', 'the meta declaration is honoured');
   assert.equal(byMeta.size, '520x360+40+40');
   assert.equal(byMeta.title, '自述位置');
 
@@ -803,15 +803,15 @@ test('a document can declare where it belongs, and an argument outranks it', asy
 
   // An update whose document declares nothing keeps what the record already had.
   const moved = await tool('html_ui').execute({ op: 'update', id: byMeta.uiId, html: '<p>quiet</p>' }, exec('session-declare'));
-  assert.equal(moved.placement, 'dock-top', 'an undeclared update keeps the record placement');
+  assert.equal(moved.placement, 'dock-right', 'an undeclared update keeps the record placement');
   assert.equal(moved.title, '自述位置');
 
   // Declaring a new one moves it.
   const renamed = await tool('html_ui').execute(
-    { op: 'update', id: byMeta.uiId, html: '<meta name="dsh-htmlui" content="placement=panel; title=Moved">' },
+    { op: 'update', id: byMeta.uiId, html: '<meta name="dsh-htmlui" content="placement=float; title=Moved">' },
     exec('session-declare'),
   );
-  assert.equal(renamed.placement, 'panel');
+  assert.equal(renamed.placement, 'float');
   assert.equal(renamed.title, 'Moved');
 });
 
@@ -830,7 +830,7 @@ test('the template shipped with the package renders like any other', async () =>
     exec('session-starter'),
   );
   assert.equal(rendered.ok, true);
-  assert.equal(rendered.placement, 'dock-top', 'the shipped template declares its own placement');
+  assert.equal(rendered.placement, 'dock-right', 'the shipped template declares its own placement');
   const entry = await callRoute(route(), {
     method: 'POST',
     url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
@@ -915,7 +915,7 @@ test('the page can list templates and apply one without the model', async () => 
   assert.equal(applied.status, 200);
   const record = JSON.parse(applied.text).ui;
   assert.equal(record.sessionId, 'session-drawer');
-  assert.equal(record.placement, 'dock-top', 'the template declares its own placement');
+  assert.equal(record.placement, 'dock-right', 'the template declares its own placement');
   assert.ok(!record.url.includes('t='), 'the record projection stays token-free');
   // It is a real record: the model can list and close it like any other.
   const listedAgain = await tool('html_ui').execute({ op: 'list' }, exec('session-drawer'));
