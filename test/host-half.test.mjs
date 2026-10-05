@@ -1,0 +1,461 @@
+/**
+ * Host-half regression tests for @mostkia/dsh-htmlui.
+ *
+ * The host half is plain Node, so it runs against a fake Cordis context: no
+ * harness, no profile, no browser. Everything the tests touch lives in a
+ * throwaway directory, so a developer machine's real plugin data is never read
+ * or written.
+ *
+ * Run: node --test test/host-half.test.mjs
+ */
+
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, test } from 'node:test';
+
+const scratch = mkdtempSync(join(tmpdir(), 'dsh-htmlui-test-'));
+process.env.DSH_HTMLUI_ROOT = join(scratch, 'data');
+
+const { apply } = await import('../index.js');
+
+/** Minimal Cordis context stand-in: inject, effect, on, get, logger. */
+function createContext(services) {
+  const disposed = [];
+  const listeners = new Map();
+
+  /** Run one registration factory eagerly; collect whatever disposer it yields. */
+  function runEffect(factory) {
+    if (typeof factory !== 'function') return undefined;
+    if (factory.constructor.name === 'GeneratorFunction') {
+      const iterator = factory();
+      for (const disposer of iterator) {
+        if (typeof disposer === 'function') disposed.push(disposer);
+      }
+      return () => {};
+    }
+    const result = factory();
+    if (typeof result === 'function') disposed.push(result);
+    return result;
+  }
+
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    get(key) {
+      return services[key];
+    },
+    inject(keys, callback) {
+      const scope = {
+        logger: ctx.logger,
+        get: (key) => (keys.includes(key) ? services[key] : undefined),
+        reflect: { get: (key) => (keys.includes(key) ? services[key] : undefined) },
+        effect: runEffect,
+        on: ctx.on,
+      };
+      // An injected Cordis scope exposes each requested service as a property.
+      for (const key of keys) {
+        if (services[key] !== undefined) scope[key] = services[key];
+      }
+      callback(scope);
+    },
+    on(name, handler) {
+      const bucket = listeners.get(name) ?? [];
+      bucket.push(handler);
+      listeners.set(name, bucket);
+      return () => {};
+    },
+    effect: runEffect,
+    emit(name, ...args) {
+      for (const handler of listeners.get(name) ?? []) handler(...args);
+    },
+  };
+  return { ctx, disposed, listeners };
+}
+
+function createFakeServer() {
+  const routes = [];
+  return {
+    routes,
+    register(route) {
+      routes.push(route);
+      return () => {};
+    },
+  };
+}
+
+function createFakeSessionController() {
+  const prompts = [];
+  return {
+    prompts,
+    async prompt(request) {
+      prompts.push(request);
+      return { accepted: true };
+    },
+  };
+}
+
+/** Drive the registered route handler with a fake request/response pair. */
+function callRoute(route, { method = 'GET', url = '/', headers = {}, body = undefined }) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    const res = {
+      statusCode: 0,
+      headers: {},
+      body: '',
+      writeHead(status, headers_) {
+        this.statusCode = status;
+        this.headers = headers_ ?? {};
+      },
+      write(chunk) {
+        chunks.push(String(chunk));
+        return true;
+      },
+      end(chunk) {
+        if (chunk !== undefined) chunks.push(String(chunk));
+        resolve({ status: this.statusCode, headers: this.headers, text: chunks.join('') });
+      },
+      flushHeaders() {},
+    };
+    const listeners = new Map();
+    const req = {
+      method,
+      url,
+      headers,
+      on(name, handler) {
+        const bucket = listeners.get(name) ?? [];
+        bucket.push(handler);
+        listeners.set(name, bucket);
+        return req;
+      },
+      destroy() {},
+    };
+    route.handler(req, res);
+    queueMicrotask(() => {
+      if (body !== undefined) {
+        for (const handler of listeners.get('data') ?? []) handler(Buffer.from(body, 'utf8'));
+      }
+      for (const handler of listeners.get('end') ?? []) handler();
+    });
+  });
+}
+
+let harness;
+before(() => {
+  const server = createFakeServer();
+  const sessionController = createFakeSessionController();
+  const tools = { registered: [], register(definition) { this.registered.push(definition); return () => {}; } };
+  const systemPrompt = { sections: [], section(section) { this.sections.push(section); return () => {}; }, getSectionOrder() { return 10; } };
+  harness = {
+    server,
+    sessionController,
+    tools,
+    systemPrompt,
+    ...createContext({ webServer: server, tools, systemPrompt, sessionController }),
+  };
+  apply(harness.ctx, {});
+});
+
+after(() => {
+  for (const dispose of harness.disposed) {
+    try {
+      dispose();
+    } catch {
+      /* cleanup is best effort */
+    }
+  }
+  rmSync(scratch, { recursive: true, force: true });
+});
+
+const route = () => harness.server.routes[0];
+
+function tool(name) {
+  const found = harness.tools.registered.find((definition) => definition.name === name);
+  assert.ok(found, `tool ${name} must be registered`);
+  return found;
+}
+
+function exec(sessionId = 'session-test') {
+  return { agent: { session: { id: sessionId, header: { cwd: scratch } } } };
+}
+
+test('registers the http carrier, both tools, and the prompt contract', () => {
+  assert.equal(harness.server.routes.length, 1);
+  assert.equal(route().kind, 'prefix');
+  assert.equal(route().path, '/plugins/@mostkia/dsh-htmlui');
+  assert.deepEqual(
+    harness.tools.registered.map((definition) => definition.name).sort(),
+    ['html_ui', 'html_ui_template'],
+  );
+  assert.equal(harness.systemPrompt.sections.length, 1);
+});
+
+test('render accepts an inline document and reports a machine-independent id', async () => {
+  const result = await tool('html_ui').execute(
+    { op: 'render', html: '<h1>hello</h1>', title: 'Hello', placement: 'float', size: '520x360+40+40' },
+    exec(),
+  );
+  assert.equal(result.ok, true);
+  assert.match(result.uiId, /^ui-[0-9a-f]{8}$/u);
+  assert.equal(result.placement, 'float');
+  assert.equal(result.size, '520x360+40+40');
+  assert.equal(result.sessionId, 'session-test');
+  assert.match(result.url, /^\/plugins\/@mostkia\/dsh-htmlui\/ui\/ui-[0-9a-f]{8}\?t=/u);
+  assert.ok(existsSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', result.uiId, 'index.html')));
+});
+
+test('the tool ack the model sees carries no document body', async () => {
+  const definition = tool('html_ui');
+  const value = await definition.execute({ op: 'render', html: '<p>secret body</p>', placement: 'inline' }, exec());
+  const blocks = definition.output.render({}, value);
+  const text = blocks.map((block) => block.text ?? '').join('\n');
+  assert.match(text, /^\[html-ui\]/u);
+  assert.match(text, /status=ok/u);
+  assert.ok(!text.includes('secret body'), 'the document body must not return to the model');
+  const meta = definition.output.presentationMeta({}, value);
+  assert.equal(meta.htmlui, true);
+  assert.equal(meta.uiId, value.uiId);
+  assert.equal(meta.sessionId, 'session-test');
+});
+
+test('inline html over the configured cap is refused with a next step', async () => {
+  const result = await tool('html_ui').execute({ op: 'render', html: `<p>${'x'.repeat(40_000)}</p>` }, exec());
+  assert.equal(result.ok, false);
+  assert.match(result.error, /maxInlineBytes/u);
+  assert.match(result.hint, /path/u);
+});
+
+test('a file-backed document is read from disk and merged with css and js', async () => {
+  const file = join(scratch, 'panel.html');
+  writeFileSync(file, '<!doctype html><html><head><title>t</title></head><body><div id="app"></div></body></html>', 'utf8');
+  const result = await tool('html_ui').execute(
+    { op: 'render', path: 'panel.html', css: '#app{color:red}', js: 'console.log(1)', placement: 'dock-top' },
+    exec(),
+  );
+  assert.equal(result.ok, true);
+  const served = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', result.uiId, 'index.html'), 'utf8');
+  assert.ok(served.includes('<div id="app"></div>'), 'the authored body survives');
+  assert.ok(served.includes('#app{color:red}'), 'inline css is merged');
+  assert.ok(served.includes('console.log(1)'), 'inline js is merged');
+});
+
+test('update replaces a document in place and bumps the revision', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>v1</p>' }, exec());
+  const updated = await tool('html_ui').execute({ op: 'update', id: created.uiId, html: '<p>v2</p>' }, exec());
+  assert.equal(updated.ok, true);
+  assert.equal(updated.uiId, created.uiId);
+  assert.equal(updated.revision, 2);
+  const served = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', created.uiId, 'index.html'), 'utf8');
+  assert.ok(served.includes('v2'));
+});
+
+test('list reports only the calling session and close removes the document', async () => {
+  const mine = await tool('html_ui').execute({ op: 'render', html: '<p>mine</p>', title: 'Mine' }, exec('session-a'));
+  await tool('html_ui').execute({ op: 'render', html: '<p>other</p>', title: 'Other' }, exec('session-b'));
+  const listed = await tool('html_ui').execute({ op: 'list' }, exec('session-a'));
+  assert.equal(listed.ok, true);
+  assert.ok(listed.count >= 1);
+  assert.ok(listed.summary.includes('Mine'));
+  assert.ok(!listed.summary.includes('Other'));
+  const closed = await tool('html_ui').execute({ op: 'close', id: mine.uiId }, exec('session-a'));
+  assert.equal(closed.ok, true);
+  assert.equal(existsSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', mine.uiId)), false);
+});
+
+test('unknown ids and unsupported ops fail with actionable hints', async () => {
+  const missing = await tool('html_ui').execute({ op: 'close', id: 'ui-00000000' }, exec());
+  assert.equal(missing.ok, false);
+  assert.match(missing.hint, /op=list/u);
+  const unsupported = await tool('html_ui').execute({ op: 'sing' }, exec());
+  assert.equal(unsupported.ok, false);
+  assert.match(unsupported.hint, /render/u);
+});
+
+test('templates save, render with variables, list, and remove', async () => {
+  const saved = await tool('html_ui_template').execute(
+    { op: 'save', name: 'Counter', html: '<button id="b">{{label}}</button>', description: 'demo' },
+    exec(),
+  );
+  assert.equal(saved.ok, true);
+  assert.equal(saved.name, 'counter');
+  const listed = await tool('html_ui_template').execute({ op: 'list' }, exec());
+  assert.ok(listed.summary.includes('counter'));
+  const rendered = await tool('html_ui').execute({ op: 'render', template: 'counter', variables: { label: '加一' } }, exec());
+  assert.equal(rendered.ok, true);
+  const served = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', rendered.uiId, 'index.html'), 'utf8');
+  assert.ok(served.includes('加一'), 'variables are substituted');
+  const removed = await tool('html_ui_template').execute({ op: 'remove', name: 'counter' }, exec());
+  assert.equal(removed.ok, true);
+  const missing = await tool('html_ui').execute({ op: 'render', template: 'counter' }, exec());
+  assert.equal(missing.ok, false);
+});
+
+test('the document route demands a capability token and injects the bridge', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>doc</p>' }, exec());
+  const denied = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}` });
+  assert.equal(denied.status, 403);
+
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId, theme: 'dark' }),
+  });
+  assert.equal(entry.status, 200);
+  const ticket = JSON.parse(entry.text);
+  assert.equal(ticket.ok, true);
+  assert.match(ticket.url, /theme=dark/u);
+
+  const document = await callRoute(route(), { url: ticket.url, headers: { host: '127.0.0.1:3080' } });
+  assert.equal(document.status, 200);
+  assert.ok(document.text.includes('window.__DSH_HTMLUI__='), 'runtime config is injected');
+  assert.ok(document.text.includes('/assets/bridge.js'), 'the bridge is injected');
+  assert.ok(document.text.includes('<p>doc</p>'), 'the authored document survives');
+  assert.match(document.headers['content-security-policy'], /connect-src http:\/\/127\.0\.0\.1:3080/u);
+});
+
+test('a cross-origin page cannot reach the carrier, an opaque frame can with a token', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>x</p>' }, exec());
+  const foreign = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: 'evil.example', origin: 'http://evil.example' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  assert.equal(foreign.status, 403);
+
+  const crossSite = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'sec-fetch-site': 'cross-site' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  assert.equal(crossSite.status, 403);
+
+  const opaqueWithoutToken = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+    body: JSON.stringify({ uiId: created.uiId, op: 'state', value: 1 }),
+  });
+  assert.equal(opaqueWithoutToken.status, 403);
+});
+
+test('an action from the frame becomes a user prompt in the owning session', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>x</p>', title: 'Panel' }, exec('session-action'));
+  // A capability token can only be minted by the host, so ask for it through the ticket route.
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const ticket = JSON.parse(entry.text);
+  const capability = /t=([A-Za-z0-9_-]+)/u.exec(ticket.url)[1];
+  assert.equal(typeof capability, 'string');
+
+  const rpc = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+    body: JSON.stringify({ t: capability, uiId: created.uiId, op: 'action', action: 'refresh', data: { range: '7d' } }),
+  });
+  assert.equal(rpc.status, 200);
+  const value = JSON.parse(rpc.text);
+  assert.equal(value.ok, true);
+  assert.equal(harness.sessionController.prompts.length, 1);
+  const prompt = harness.sessionController.prompts[0];
+  assert.equal(prompt.sessionId, 'session-action');
+  assert.equal(prompt.mode, 'queue');
+  assert.match(prompt.content[0].text, /\[html-ui:action\] ui=ui-[0-9a-f]{8} action="refresh"/u);
+  assert.match(prompt.content[0].text, /"range":"7d"/u);
+});
+
+test('state written by a frame survives a host restart', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>x</p>' }, exec('session-state'));
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const capability = /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+  const written = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+    body: JSON.stringify({ t: capability, uiId: created.uiId, op: 'state', value: { step: 3 } }),
+  });
+  assert.equal(written.status, 200);
+  const reloaded = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}?t=${capability}` });
+  assert.ok(reloaded.text.includes('"step":3'), 'the persisted state is re-injected on reload');
+});
+
+test('the SSE stream applies the same origin policy as the rest of the carrier', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>x</p>' }, exec());
+  const denied = await callRoute(route(), {
+    url: `/plugins/@mostkia/dsh-htmlui/events?uiId=${created.uiId}&t=wrong`,
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+  });
+  assert.equal(denied.status, 403);
+});
+
+test('a per-document rate limit protects the model from a runaway frame', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>x</p>' }, exec('session-rate'));
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const capability = /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+  let limited = 0;
+  for (let index = 0; index < 14; index += 1) {
+    const response = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/rpc',
+      headers: { host: '127.0.0.1:3080', origin: 'null' },
+      body: JSON.stringify({ t: capability, uiId: created.uiId, op: 'action', action: 'tick' }),
+    });
+    if (response.status === 429) limited += 1;
+  }
+  assert.ok(limited > 0, 'the bucket must eventually refuse');
+});
+
+test('every presentation projection stays lossless JSON', async () => {
+  // The registry rejects a projection carrying `undefined`, including a bare
+  // `undefined` return, so this guards the fix for that failure.
+  const definition = tool('html_ui');
+  const values = [
+    await definition.execute({ op: 'list' }, exec()),
+    await definition.execute({ op: 'render', html: '<p>x</p>' }, exec()),
+    await definition.execute({ op: 'close', id: 'ui-00000000' }, exec()),
+    await definition.execute({ op: 'sing' }, exec()),
+  ];
+  for (const value of values) {
+    const meta = definition.output.presentationMeta({}, value);
+    assert.notEqual(meta, undefined, 'a projection must be an object, never undefined');
+    for (const [key, member] of Object.entries(meta)) {
+      assert.notEqual(member, undefined, `projection member ${key} must not be undefined`);
+    }
+    assert.deepEqual(JSON.parse(JSON.stringify(meta)), meta, 'the projection must round-trip losslessly');
+  }
+  const template = tool('html_ui_template');
+  for (const value of [
+    await template.execute({ op: 'list' }, exec()),
+    await template.execute({ op: 'save', name: 'lossless', html: '<p>x</p>' }, exec()),
+  ]) {
+    const meta = template.output.presentationMeta({}, value);
+    assert.notEqual(meta, undefined);
+    assert.deepEqual(JSON.parse(JSON.stringify(meta)), meta);
+  }
+});
+
+test('every stored document keeps the authored document free of plugin markup on disk', async () => {
+  const file = join(scratch, 'clean.html');
+  writeFileSync(file, '<!doctype html><html><head></head><body><p>clean</p></body></html>', 'utf8');
+  const created = await tool('html_ui').execute({ op: 'render', path: file }, exec());
+  const stored = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', created.uiId, 'index.html'), 'utf8');
+  assert.ok(!stored.includes('__DSH_HTMLUI__'), 'injection happens at serve time, not on disk');
+  assert.ok(!stored.includes('bridge.js'));
+});

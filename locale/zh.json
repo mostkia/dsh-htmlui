@@ -1,0 +1,4 @@
+{
+  "title": "DSH HTML UI",
+  "description": "由模型编写 HTML/CSS/JS，在会话内以沙箱 iframe 渲染，并通过 POST + SSE 与模型互通。"
+}

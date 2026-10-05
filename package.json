@@ -1,0 +1,90 @@
+{
+  "name": "@mostkia/dsh-htmlui",
+  "version": "0.1.0",
+  "description": "HTML session UI for DeepSeek Harness: the agent authors HTML/CSS/JS, the plugin renders it in sandboxed iframes placed inline, docked, floating, or fullscreen, and relays interaction back to the model over POST + SSE.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "assets",
+    "locale/*.json",
+    "templates",
+    "SKILL.md",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "html",
+    "iframe",
+    "generative-ui",
+    "sse"
+  ],
+  "license": "MIT",
+  "author": "mostkia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mostkia/dsh-htmlui.git"
+  },
+  "homepage": "https://github.com/mostkia/dsh-htmlui",
+  "bugs": {
+    "url": "https://github.com/mostkia/dsh-htmlui/issues"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "meta": {
+    "title": "DSH HTML UI",
+    "description": "Agent-authored HTML/CSS/JS rendered in sandboxed iframes inside the conversation."
+  },
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5.0.0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.7-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.7-0",
+    "@deepseek-ai/dsh-client-ui-tool": ">=0.1.7-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.7-0",
+    "@deepseek-ai/dsh-client-ui-layout": ">=0.1.7-0",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-tool": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-conversation": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-layout": {
+      "optional": true
+    }
+  }
+}

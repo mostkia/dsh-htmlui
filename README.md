@@ -1,0 +1,118 @@
+# @mostkia/dsh-htmlui
+
+English | [中文](README.zh.md)
+
+**HTML session UI for [DeepSeek Harness](https://github.com/deepseek-ai).** The
+model authors HTML/CSS/JS, the plugin renders it in a sandboxed iframe attached
+to the conversation, and interaction flows back to the model over POST + SSE.
+
+`dsh-genui` renders a fixed, whitelisted component vocabulary from JSON. This
+plugin renders the real thing: any HTML, any CSS, any script — placed where the
+conversation needs it.
+
+## What it looks like
+
+| You ask for | You get |
+|---|---|
+| "a dashboard for this month's orders" | A real HTML dashboard, live in the transcript, with its own tables and charts |
+| "a form that files the report for me" | A form whose submit crosses to the model, with everything else validated locally |
+| "keep this beside the chat while we work" | The same document docked above the composer, or floating as a draggable window |
+| "just make it the app" | Fullscreen mode: the document takes the session and offers a switch back to chat |
+
+## Placements
+
+| `placement` | Where it lives |
+|---|---|
+| `inline` | In the transcript, part of the tool call that created it |
+| `dock-top` / `dock-bottom` | Full width above / below the composer |
+| `panel` | The same dock, updated in place |
+| `float` | A draggable, resizable window (`size: "520x360+80+60"`) |
+| `background` | A click-through layer over the frame |
+| `fullscreen` | Covers the session, with a built-in switch back to chat |
+| `dock-right` | Reserved for the session side panel (falls back to the dock today) |
+
+## Install
+
+```sh
+dsh plugin --profile web add @mostkia/dsh-htmlui
+```
+
+Requires DSH `>=0.1.7-0` (the pre-release line is included on purpose, so `0.1.7-rc.*`
+installs). Then hard-refresh the page. A working client half logs
+`[dsh-htmlui] client active` in the browser console.
+
+## How it works
+
+- **Host half** (`index.js`, plain ESM, no dependencies): the `html_ui` and
+  `html_ui_template` tools, storage under `$DSH_HOME/htmlui`, and an HTTP carrier
+  at `/plugins/@mostkia/dsh-htmlui` — document tickets, the composed document, a
+  POST action channel, and an SSE stream.
+- **Browser half** (`client.js`, hand-written module, no build step): registers
+  the tool view, the composer dock, and the frame-wide overlay, and hosts every
+  document in an iframe.
+- **Bridge** (`assets/bridge.js`, injected at serve time): exposes
+  `window.dshHTML` with `send`, `state`, `resize`, `close`, and `on(...)`.
+
+The model never receives the document body: the tool result it reads is a compact
+summary (`ui_id`, `placement`, `bytes`, revision), while the browser gets the
+whole document through the tool result's presentation projection. Large documents
+belong in a file and are attached by `path`, so they never sit in the model
+context.
+
+## Security
+
+Documents run in an iframe with `sandbox="allow-scripts allow-forms allow-modals
+allow-popups allow-downloads allow-pointer-lock"`, i.e. **without**
+`allow-same-origin`: an opaque origin with no cookies, no storage, and no access
+to the host page. Every document carries a per-document capability token (HMAC of
+a plugin-local secret) that gates its document, action, state, and SSE routes.
+
+The carrier's own policy: only loopback Host/Origin pairs are trusted, an
+opaque-origin frame is accepted only with a valid token, cross-site ticket
+requests are refused, mutating routes are POST-only, and each document gets a
+small token bucket so a runaway script cannot flood the model. No secrets belong
+in a document, and the plugin never asks for any.
+
+## Configuration
+
+Optional row config (nothing here needs a machine-specific path):
+
+```yaml
+- insert:
+    - id: dsh-htmlui
+      name: '@mostkia/dsh-htmlui'
+      config:
+        root: ''              # storage root; default $DSH_HOME/htmlui
+        maxInlineBytes: 16384 # largest inline html/css/js accepted per part
+        actionPrompt: ''      # sentence appended to an [html-ui:action] message
+```
+
+Runtime state lives under `$DSH_HOME/htmlui`: `ui/<id>/index.html` (the authored
+document, kept clean and portable — nothing is injected on disk),
+`templates/<name>/`, `state/<session>.json`, and a `secret` used for capability
+tokens.
+
+## Templates
+
+```
+html_ui_template { "op": "save", "name": "orders-dashboard", "ui_id": "ui-1a2b3c4d" }
+html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title": "本周订单" } }
+```
+
+`{{token}}` placeholders are substituted from `variables`. Templates persist
+across sessions; `templates/starter` ships with the package as a readable
+example.
+
+## Development
+
+```sh
+node test/host-half.test.mjs      # host half: 16 assertions, no harness needed
+```
+
+The client half has no build step: edit `client.js`, refresh the page. Both
+halves are plain JavaScript with no runtime dependency on the harness module
+graph.
+
+## License
+
+MIT

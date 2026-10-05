@@ -1,0 +1,4 @@
+{
+  "title": "DSH HTML UI",
+  "description": "Agent-authored HTML/CSS/JS rendered in sandboxed iframes inside the conversation, with POST + SSE back to the model."
+}

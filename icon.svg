@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="HTML UI">
+  <rect x="4" y="10" width="56" height="44" rx="8" fill="none" stroke="currentColor" stroke-width="4"/>
+  <path d="M4 22h56" stroke="currentColor" stroke-width="4" fill="none"/>
+  <circle cx="13" cy="16" r="2.5" fill="currentColor"/>
+  <circle cx="22" cy="16" r="2.5" fill="currentColor"/>
+  <path d="M20 32l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M44 32l6 6-6 6" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M35 30l-6 16" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+</svg>

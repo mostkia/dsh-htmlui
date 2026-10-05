@@ -1,0 +1,15 @@
+# @mostkia/dsh-htmlui bundle patch: mounts the plugin into a profile layer stack.
+#
+# Optional row config (all fields optional; defaults keep every path machine
+# independent):
+#
+#   - insert:
+#       - id: dsh-htmlui
+#         name: '@mostkia/dsh-htmlui'
+#         config:
+#           root: ''              # storage root; default $DSH_HOME/htmlui
+#           maxInlineBytes: 16384 # largest inline html/css/js accepted per part
+#
+- insert:
+    - id: dsh-htmlui
+      name: '@mostkia/dsh-htmlui'
