@@ -154,7 +154,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 84 assertions: 12 package, 7 doc contract, 26 host, 21 browser, 9 bridge, 9 render smoke
+npm test        # 94 assertions: 12 package, 7 doc contract, 26 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

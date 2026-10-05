@@ -843,7 +843,14 @@ export function apply(ctx, config) {
    */
   function readOwnedUi(id, sessionId) {
     const key = String(id ?? '');
-    const current = key.length > 0 ? store.readUi(key) : undefined;
+    let current;
+    try {
+      current = key.length > 0 ? store.readUi(key) : undefined;
+    } catch {
+      // An id that is not an id is simply not a record: caller-supplied input must
+      // not steer control flow through an exception.
+      current = undefined;
+    }
     if (current === undefined) return { error: `unknown ui id: ${key}`, hint: 'call html_ui op=list' };
     if (sessionId === undefined) return { error: 'no session in tool context', hint: 'this tool must run inside a session' };
     if (current.meta.sessionId !== sessionId) {
@@ -1460,8 +1467,29 @@ export function apply(ctx, config) {
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
 
+  /**
+   * Route every carrier request through one containment boundary: a route owner
+   * shares the web server with the rest of the application, so a bug here must
+   * not throw into the carrier or leave a request unanswered.
+   */
   function createHandler() {
     return function handler(req, res) {
+      try {
+        dispatch(req, res);
+      } catch (error) {
+        logger?.warn?.(`dsh-htmlui: carrier request failed: ${error?.message ?? error}`);
+        try {
+          if (res.headersSent === true) res.end();
+          else sendJson(res, 500, { ok: false, error: 'internal error' });
+        } catch {
+          /* the socket is already gone */
+        }
+      }
+    };
+  }
+
+  function dispatch(req, res) {
+    {
       const method = requestMethod(req);
       if (method === 'OPTIONS') {
         res.writeHead(204, corsHeaders());
@@ -1529,7 +1557,7 @@ export function apply(ctx, config) {
         return handleRpc(req, res);
       }
       sendJson(res, 404, { ok: false, error: 'not found' });
-    };
+    }
   }
 
   // ---------------------------------------------------------------- wiring

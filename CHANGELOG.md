@@ -6,6 +6,17 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `test/robustness.test.mjs` plus `test/harness.mjs`: the host half is now fed
+  what a broken document, a hostile page, or a clumsy model would send —
+  malformed bodies, object ids, traversal-shaped names and paths, over-cap
+  payloads, prototype-polluting keys, nonsense sizes, and a socket that stops
+  accepting writes. The contract is asserted rather than assumed: a status
+  instead of a throw, `ok: false` instead of a throw, a dead stream released,
+  and nothing written outside the data root.
+- Every carrier request now runs inside one containment boundary, so a bug in
+  this route owner cannot throw into the web server or leave a request
+  unanswered; `readOwnedUi` reports an unusable id as unknown instead of letting
+  the store's validation steer control flow through an exception.
 - `docs/COMPATIBILITY.md`, and the peer range widened to admit the 0.2
   pre-release lines. Each pre-release line needs its own branch because semver
   only admits a pre-release when a comparator names that same

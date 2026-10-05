@@ -47,3 +47,6 @@ jobs:
 
       - name: Render smoke
         run: node test/render-smoke.test.mjs
+
+      - name: Adversarial input
+        run: node test/robustness.test.mjs
