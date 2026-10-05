@@ -1082,6 +1082,54 @@ test('the catalogue reads the directory the reader chose', async () => {
   assert.ok(!after.summary.includes('mine'), 'and it is gone once the directory is cleared');
 });
 
+test('a copied-in folder is adopted with the manifest the reader filled in', async () => {
+  const own = mkdtempSync(join(tmpdir(), 'dsh-htmlui-adopt-'));
+  writeFileSync(join(process.env.DSH_HTMLUI_ROOT, 'settings.json'), JSON.stringify({ templatesDir: own, templatesAsked: true }), 'utf8');
+  // A folder the reader filled themselves: html inside, no manifest, so it lists nowhere.
+  mkdirSync(join(own, '我的页面'), { recursive: true });
+  writeFileSync(join(own, '我的页面', 'page.html'), '<p>hello</p>', 'utf8');
+
+  const before = await tool('html_ui_template').execute({ op: 'list' }, exec('session-adopt'));
+  assert.ok(!before.summary.includes('我的页面'), 'it is not a project yet');
+
+  const adopted = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/templates/adopt',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({
+      name: '我的页面',
+      meta: { slug: 'my-page', name: '我的页面', description: '一个自己拷进来的页面', placement: 'float' },
+    }),
+  });
+  assert.equal(adopted.status, 200);
+  const saved = JSON.parse(adopted.text);
+  assert.equal(saved.slug, 'my-page', 'the id the reader chose is used');
+  const meta = JSON.parse(readFileSync(join(own, '我的页面', 'meta.json'), 'utf8'));
+  assert.equal(meta.name, '我的页面');
+  assert.equal(meta.description, '一个自己拷进来的页面');
+  assert.equal(meta.placement, 'float');
+  // The differently named html file is copied to index.html so the folder reads as one
+  // project, and the reader's own file is left where they put it.
+  assert.ok(existsSync(join(own, '我的页面', 'index.html')));
+  assert.ok(existsSync(join(own, '我的页面', 'page.html')), 'the original is untouched');
+
+  const listed = await tool('html_ui_template').execute({ op: 'list' }, exec('session-adopt'));
+  assert.ok(listed.summary.includes('my-page'), 'and it is a project from then on');
+  const rendered = await tool('html_ui').execute({ op: 'render', template: 'my-page' }, exec('session-adopt'));
+  assert.equal(rendered.ok, true, rendered.error ?? 'it renders');
+  assert.equal(rendered.placement, 'float', 'the manifest placement is honoured');
+
+  // A traversal-shaped name is refused: only names inside the directory are adoptable.
+  const refused = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/templates/adopt',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ name: '../../escape' }),
+  });
+  assert.equal(refused.status, 400);
+  clearTemplatesDir();
+});
+
 test('every tool renders content blocks, not a bare string', () => {
   // The harness takes `output.render`'s return value as the result's `content` and
   // calls `.some()` on it. A tool that returned a string therefore failed every single

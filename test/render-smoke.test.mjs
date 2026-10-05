@@ -442,6 +442,17 @@ test('the create dialog asks what to start from and where to put it', () => {
   assert.match(withCandidates.text, /my-folder/u);
   assert.match(withCandidates.text, /我的页面\.html/u);
   assert.match(withCandidates.text, /Adopt/u);
+
+  // Adopting asks for the manifest instead of writing one behind the reader's back:
+  // the slug is what a template is addressed by, so it is filled in and confirmed.
+  __internals.state.adopt = { open: true, source: 'my-folder', slug: 'my-folder', name: 'my-folder', description: '', placement: 'dock-right', busy: false };
+  const adopting = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  for (const text of ['Project details for my-folder', 'Project id (used by template=)', 'Display name', 'Description', 'Where it opens', 'Write the manifest']) {
+    assert.ok(adopting.text.includes(text), `the adopt form offers ${text}`);
+  }
+  const slugBox = adopting.elements.find((element) => element.props?.type === 'text' && element.props.value === 'my-folder');
+  assert.ok(slugBox !== undefined, 'the id is prefilled from the folder name');
+  __internals.state.adopt = { open: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
   __internals.state.templates.candidates = [];
   // The chosen place is the one the placement has to name.
   assert.equal(__internals.state.create.placement, 'dock-right');

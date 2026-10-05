@@ -546,7 +546,35 @@ function createStore(root) {
     if (ownMeta !== undefined && existsSync(ownDocument)) {
       return { meta: ownMeta, documentPath: ownDocument, source: readFileSync(ownDocument, 'utf8') };
     }
+    const byManifest = readTemplateByDeclaredSlug(root, slug);
+    if (byManifest !== undefined) return byManifest;
     return readBareTemplate(root, slug);
+  }
+
+  /**
+   * Find a project whose folder is not named after its id.
+   *
+   * The adopt form lets the reader keep their folder name — `我的页面` — and choose the
+   * slug themselves, so the folder has to be found by the manifest rather than by name.
+   */
+  function readTemplateByDeclaredSlug(root, slug) {
+    const name = String(slug ?? '');
+    if (!TEMPLATE_SLUG_RE.test(name)) return undefined;
+    let entries = [];
+    try {
+      entries = readdirSync(root, { withFileTypes: true });
+    } catch {
+      return undefined;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const meta = readJson(join(root, entry.name, 'meta.json'), undefined);
+      if (meta === undefined || meta.slug !== name) continue;
+      const documentPath = join(root, entry.name, 'index.html');
+      if (!existsSync(documentPath)) continue;
+      return { meta, documentPath, source: readFileSync(documentPath, 'utf8') };
+    }
+    return undefined;
   }
 
   /**
@@ -618,11 +646,16 @@ function createStore(root) {
       if (!existsSync(root)) return;
       for (const entry of readdirSync(root, { withFileTypes: true })) {
         if (entry.isDirectory()) {
-          if (!TEMPLATE_SLUG_RE.test(entry.name) || seen.has(entry.name)) continue;
+          // A folder is addressed by the slug in its manifest, and only falls back to its
+          // own name — which is what lets a folder called `我的页面` carry the id chosen
+          // for it in the adopt form.
           const meta = readJson(join(root, entry.name, 'meta.json'), undefined);
           if (meta === undefined) continue;
-          out.push(bundled ? { ...meta, bundled: true } : meta);
-          seen.add(entry.name);
+          const declared = typeof meta.slug === 'string' && TEMPLATE_SLUG_RE.test(meta.slug) ? meta.slug : undefined;
+          const slug = declared ?? (TEMPLATE_SLUG_RE.test(entry.name) ? entry.name : undefined);
+          if (slug === undefined || seen.has(slug)) continue;
+          out.push(bundled ? { ...meta, slug, bundled: true } : { ...meta, slug });
+          seen.add(slug);
           continue;
         }
         const match = /^([a-z0-9][a-z0-9._-]{0,63})\.html$/u.exec(entry.name);
@@ -688,17 +721,22 @@ function createStore(root) {
    * A folder keeps its files where they are and gains a `meta.json`; a loose file is
    * copied into a folder of its own, which is the layout every other project already
    * has — and the copy means nothing the reader wrote is moved or lost.
+   *
+   * `input` is the manifest the reader filled in, so adopting is a decision rather than
+   * a side effect: the slug is what `html_ui op=render template=` addresses, the name is
+   * what the dialog lists, and the placement is where it opens by default.
    */
-  function adoptTemplateCandidate(input) {
+  function adoptTemplateCandidate(raw, input) {
     const root = templatesDir();
     if (root === undefined) return { ok: false, error: 'no templates directory is set' };
-    const raw = typeof input === 'string' ? input : '';
-    if (raw.length === 0 || raw.includes('..') || raw.includes('/') || raw.includes('\\')) {
-      return { ok: false, error: `not a name in the templates directory: ${raw}` };
+    const name = typeof raw === 'string' ? raw : '';
+    if (name.length === 0 || name.includes('..') || name.includes('/') || name.includes('\\')) {
+      return { ok: false, error: `not a name in the templates directory: ${name}` };
     }
-    const target = join(root, raw);
-    if (!existsSync(target)) return { ok: false, error: `not found: ${raw}` };
-    let slug = slugify(raw.replace(/\.html?$/iu, ''));
+    const target = join(root, name);
+    if (!existsSync(target)) return { ok: false, error: `not found: ${name}` };
+    const wanted = input !== null && typeof input === 'object' ? input : {};
+    let slug = slugify(typeof wanted.slug === 'string' && wanted.slug.length > 0 ? wanted.slug : name.replace(/\.html?$/iu, ''));
     if (slug === undefined) slug = `project-${Date.now().toString(36)}`;
     const taken = new Set(listTemplates().map((template) => template.slug));
     if (taken.has(slug)) {
@@ -706,32 +744,44 @@ function createStore(root) {
       while (taken.has(`${slug}-${index}`)) index += 1;
       slug = `${slug}-${index}`;
     }
+    const displayName =
+      typeof wanted.name === 'string' && wanted.name.trim().length > 0 ? wanted.name.trim().slice(0, 200) : name.replace(/\.html?$/iu, '');
+    const description = typeof wanted.description === 'string' ? wanted.description.slice(0, 400) : '';
+    const placement = normalizePlacement(wanted.placement);
     const info = statSync(target);
     if (info.isDirectory()) {
       const dir = target;
-      const files = readdirSync(dir).filter((name) => /\.html?$/iu.test(name));
+      const files = readdirSync(dir).filter((candidate) => /\.html?$/iu.test(candidate));
       const entry = files.includes('index.html') ? 'index.html' : files[0];
-      if (entry === undefined) return { ok: false, error: `no html file in ${raw}` };
+      if (entry === undefined) return { ok: false, error: `no html file in ${name}` };
       if (entry !== 'index.html') {
         // `readTemplate` looks for index.html, so a differently named file is copied to
         // it; the original stays where the reader put it.
         writeTextAtomic(join(dir, 'index.html'), readFileSync(join(dir, entry), 'utf8'));
       }
       const source = readFileSync(join(dir, 'index.html'), 'utf8');
-      writeJsonAtomic(join(dir, 'meta.json'), { slug, name: raw, description: '', bytes: byteLength(source), updatedAt: Date.now() });
-      return { ok: true, name: raw, slug, kind: 'dir' };
+      writeJsonAtomic(join(dir, 'meta.json'), {
+        slug,
+        name: displayName,
+        description,
+        placement,
+        bytes: byteLength(source),
+        updatedAt: Date.now(),
+      });
+      return { ok: true, name, slug, kind: 'dir' };
     }
     const dir = ensureDir(join(root, slug));
     const source = readFileSync(target, 'utf8');
     writeTextAtomic(join(dir, 'index.html'), source);
     writeJsonAtomic(join(dir, 'meta.json'), {
       slug,
-      name: raw.replace(/\.html?$/iu, ''),
-      description: '',
+      name: displayName,
+      description,
+      placement,
       bytes: byteLength(source),
       updatedAt: Date.now(),
     });
-    return { ok: true, name: raw, slug, kind: 'file' };
+    return { ok: true, name, slug, kind: 'file' };
   }
 
   function statePath(sessionId) {
@@ -1172,7 +1222,7 @@ export function apply(ctx, config) {
       for (const [key, value] of Object.entries(variables)) {
         source = source.split(`{{${key}}}`).join(String(value));
       }
-      return { source, origin: 'template', template: templateName };
+      return { source, origin: 'template', template: templateName, templatePlacement: template.meta?.placement };
     }
     if (typeof args.path === 'string' && args.path.trim().length > 0) {
       const path = resolveHtmlInputPath(args.path, cwd);
@@ -1388,7 +1438,10 @@ export function apply(ctx, config) {
               : typeof declared.title === 'string'
                 ? declared.title.slice(0, 200)
                 : undefined,
-          placement: normalizePlacement(args?.placement) ?? normalizePlacement(declared.placement),
+          // The request wins, then what the document declares, then the project's own
+          // manifest — which is where the reader's answer in the adopt form lands.
+          placement:
+            normalizePlacement(args?.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(source.templatePlacement),
           size: normalizeSize(args?.size) ?? normalizeSize(declared.size),
           origin: source.origin,
           template: source.template,
@@ -1664,7 +1717,7 @@ export function apply(ctx, config) {
   function handleTemplatesAdopt(req, res) {
     readJsonBody(req, MAX_BODY_BYTES)
       .then((body) => {
-        const result = store.adoptTemplateCandidate(typeof body.name === 'string' ? body.name : '');
+        const result = store.adoptTemplateCandidate(typeof body.name === 'string' ? body.name : '', body.meta);
         if (result.ok !== true) {
           sendJson(res, 400, { ok: false, error: result.error });
           return;
@@ -1711,7 +1764,10 @@ export function apply(ctx, config) {
               : typeof declared.title === 'string'
                 ? declared.title.slice(0, 200)
                 : String(template.meta.name ?? slug),
-          placement: normalizePlacement(body.placement) ?? normalizePlacement(declared.placement),
+          // The request wins, then what the document declares, then the project's own
+          // manifest — which is where the reader's answer in the adopt form lands.
+          placement:
+            normalizePlacement(body.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(template.meta.placement),
           size: normalizeSize(body.size) ?? normalizeSize(declared.size),
           origin: 'template',
           template: slug,

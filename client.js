@@ -656,6 +656,12 @@ window.__ModuleLoader__.load({
         candidateDir: 'folder',
         candidateFile: 'file',
         candidateAdopt: 'Adopt',
+        adoptTitle: 'Project details for',
+        adoptSlug: 'Project id (used by template=)',
+        adoptName: 'Display name',
+        adoptDescription: 'Description',
+        adoptPlacement: 'Where it opens',
+        adoptConfirm: 'Write the manifest',
         adopted: 'It is a project now.',
         createPlacement: 'Where',
         placementDockRight: 'Right column (a real split)',
@@ -724,6 +730,12 @@ window.__ModuleLoader__.load({
         candidateDir: '文件夹',
         candidateFile: '文件',
         candidateAdopt: '设为项目',
+        adoptTitle: '补全项目信息：',
+        adoptSlug: '项目标识（template= 用它）',
+        adoptName: '显示名称',
+        adoptDescription: '描述',
+        adoptPlacement: '默认生成位置',
+        adoptConfirm: '写入清单',
         adopted: '已成为项目。',
         createPlacement: '生成位置',
         placementDockRight: '右侧栏（真正的左右分屏）',
@@ -808,6 +820,20 @@ window.__ModuleLoader__.load({
           text = text.split(`{${name}}`).join(String(replacement));
         }
       }
+      return text;
+    }
+
+    /**
+     * The same slug rule the host applies, so the value shown in the adopt form is the
+     * one that will actually be written.
+     */
+    function slugifyClient(value) {
+      const text = String(value ?? '')
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/gu, '-')
+        .replace(/^[^a-z0-9]+/u, '')
+        .replace(/[-._]+$/u, '')
+        .slice(0, 64);
       return text;
     }
 
@@ -2694,13 +2720,133 @@ window.__ModuleLoader__.load({
                       {
                         type: 'button',
                         style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
-                        disabled: state.templates.adopting === candidate.name,
-                        onClick: () => adoptTemplate(candidate.name),
+                        onClick: () => {
+                          const stem = candidate.name.replace(/\.html?$/iu, '');
+                          state.adopt = {
+                            open: true,
+                            source: candidate.name,
+                            slug: slugifyClient(stem),
+                            name: stem,
+                            description: '',
+                            placement: 'dock-right',
+                            busy: false,
+                          };
+                          bump();
+                        },
                       },
-                      state.templates.adopting === candidate.name ? tr('creating', 'Creating…') : tr('candidateAdopt', 'Adopt'),
+                      tr('candidateAdopt', 'Adopt'),
                     ),
                   ),
                 ),
+                // Filling in the manifest, rather than having one written behind the
+                // reader's back: the slug is what a template is addressed by, so it is a
+                // decision, not a detail.
+                state.adopt !== undefined && state.adopt.open === true
+                  ? h(
+                      'div',
+                      {
+                        style: {
+                          margin: '6px 0 2px',
+                          padding: '8px 10px',
+                          border: '1px solid var(--dsw-alias-border-l1, #ddd)',
+                          borderRadius: '10px',
+                          background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))',
+                        },
+                      },
+                      h('div', { style: { fontSize: '12px', fontWeight: 600, marginBottom: '6px' } }, `${tr('adoptTitle', 'Project details for')} ${state.adopt.source}`),
+                      ...[
+                        { key: 'slug', label: tr('adoptSlug', 'Project id (used by template=)'), hint: 'lowercase letters, digits, dot, dash, underscore' },
+                        { key: 'name', label: tr('adoptName', 'Display name'), hint: '' },
+                        { key: 'description', label: tr('adoptDescription', 'Description'), hint: '' },
+                      ].map((field) =>
+                        h(
+                          'div',
+                          { key: field.key, style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' } },
+                          h('span', { style: { flex: '0 0 150px', fontSize: '11.5px' } }, field.label),
+                          h('input', {
+                            type: 'text',
+                            value: state.adopt[field.key],
+                            placeholder: field.hint,
+                            onChange: (event) => {
+                              state.adopt[field.key] = event.target.value;
+                              bump();
+                            },
+                            style: {
+                              flex: '1 1 auto',
+                              minWidth: '0',
+                              font: 'inherit',
+                              fontSize: '12px',
+                              padding: '3px 7px',
+                              borderRadius: '7px',
+                              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
+                              background: 'var(--dsw-alias-bg-base, #fff)',
+                              color: 'inherit',
+                            },
+                          }),
+                        ),
+                      ),
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' } },
+                        h('span', { style: { flex: '0 0 150px', fontSize: '11.5px' } }, tr('adoptPlacement', 'Where it opens')),
+                        h(
+                          'select',
+                          {
+                            value: state.adopt.placement,
+                            onChange: (event) => {
+                              state.adopt.placement = event.target.value;
+                              bump();
+                            },
+                            style: {
+                              flex: '1 1 auto',
+                              minWidth: '0',
+                              font: 'inherit',
+                              fontSize: '12px',
+                              padding: '3px 7px',
+                              borderRadius: '7px',
+                              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
+                              background: 'var(--dsw-alias-bg-base, #fff)',
+                              color: 'inherit',
+                            },
+                          },
+                          ...CREATE_PLACEMENTS.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.key, entry.fallback)} · ${entry.value}`)),
+                        ),
+                      ),
+                      h(
+                        'div',
+                        { style: { display: 'flex', justifyContent: 'flex-end', gap: '6px' } },
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            style: buttonStyle,
+                            onClick: () => {
+                              state.adopt = { open: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+                              bump();
+                            },
+                          },
+                          tr('cancel', 'Cancel'),
+                        ),
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            style: Object.assign({}, buttonStyle, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
+                            disabled: state.adopt.busy === true,
+                            onClick: () => {
+                              adoptTemplate(state.adopt.source, {
+                                slug: state.adopt.slug,
+                                name: state.adopt.name,
+                                description: state.adopt.description,
+                                placement: state.adopt.placement,
+                              });
+                            },
+                          },
+                          state.adopt.busy === true ? tr('creating', 'Creating…') : tr('adoptConfirm', 'Write the manifest'),
+                        ),
+                      ),
+                    )
+                  : null,
               )
             : null,
           h(
