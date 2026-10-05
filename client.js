@@ -1893,10 +1893,36 @@ window.__ModuleLoader__.load({
      * parameters are not needed, because the session arrives in the standard
      * props every session-scoped body receives.
      */
+    /** Whether the column's body is on screen, and the pending close it may owe. */
+    const rightPaneBody = { mounted: 0, timer: null };
+
     function HtmlUiRightPane(props) {
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
+      // Closing this tab is how a reader says they are done with these interfaces. The
+      // records have to go with it, or the session page keeps listing surfaces nothing
+      // can show — an interface with no seat, which reads as a ghost.
+      //
+      // The check is delayed and counts mounts, because hiding the column unmounts this
+      // body too, and only a body that never comes back was really closed. A session
+      // switch remounts it at once, so switching sessions cannot delete anything.
+      useEffect(() => {
+        rightPaneBody.mounted += 1;
+        if (rightPaneBody.timer !== null) {
+          clearTimeout(rightPaneBody.timer);
+          rightPaneBody.timer = null;
+        }
+        return () => {
+          rightPaneBody.mounted -= 1;
+          if (rightPaneBody.mounted > 0 || rightPaneBody.timer !== null) return;
+          rightPaneBody.timer = setTimeout(() => {
+            rightPaneBody.timer = null;
+            if (rightPaneBody.mounted > 0) return;
+            for (const record of recordsIn(sessionId, ['dock-right'])) dismissRecord(record.uiId);
+          }, 500);
+        };
+      }, [sessionId]);
       // Nothing to show means showing nothing: an explanatory line in an open column
       // costs the reader half the frame for no content. The column itself is not ours
       // to open or close — it may host other plugins' tabs — so the plugin simply never
@@ -1913,13 +1939,13 @@ window.__ModuleLoader__.load({
               key: record.uiId,
               style: { flex: '1 1 auto', minHeight: '0', display: 'flex', flexDirection: 'column' },
             },
+            // No controls of its own here: the tab carries the close, and a second ✕
+            // inside the surface was one control too many for a page that is already a
+            // panel of the shell.
             h(HtmlUiFrame, {
               record,
               theme: state.theme,
               variant: 'dock',
-              collapsed: state.collapsed.get(record.uiId) === true,
-              onToggleCollapse: toggleCollapsed,
-              onDismiss: dismissRecord,
             }),
           ),
         ),
