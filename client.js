@@ -23,8 +23,16 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
 
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
-    /** Printed once on activation: the installed half can be confirmed from the console. */
-    const CLIENT_ACTIVE_LINE = '[dsh-htmlui] client active (0.1.1)';
+    /**
+     * The client's activation marker.
+     *
+     * The build tag is not decoration: during acceptance it was repeatedly unclear
+     * whether a page was running the current browser half, and each wrong guess cost a
+     * round. The tag is logged *and* shown in the create dialog, so the answer is one
+     * glance instead of one assumption.
+     */
+    const CLIENT_BUILD = 'adopt-form-2';
+    const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (0.1.1 · ${CLIENT_BUILD})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its
      * document, and during acceptance that was indistinguishable from a URL change
@@ -672,6 +680,7 @@ window.__ModuleLoader__.load({
         placementBackground: 'Background layer',
         cancel: 'Cancel',
         createMore: 'More template actions',
+        buildTagHint: 'The browser half this page is running',
         newBlank: 'Blank canvas',
         newBlankHint: 'Start an empty interface in the right column (no model round trip)',
         newBlankDescription: 'An empty space in the right column, to fill as you like',
@@ -747,6 +756,7 @@ window.__ModuleLoader__.load({
         placementBackground: '背景层',
         cancel: '取消',
         createMore: '更多模板操作',
+        buildTagHint: '当前页面运行的浏览器半部版本',
         newBlank: '空白画布',
         newBlankHint: '在右侧栏新建一块空白界面（不经过模型）',
         newBlankDescription: '右侧栏里的空白空间，随你填什么',
@@ -2873,6 +2883,14 @@ window.__ModuleLoader__.load({
                 },
               },
               tr('createMore', 'More template actions'),
+            ),
+            h(
+              'span',
+              {
+                style: { fontSize: '10.5px', fontFamily: 'ui-monospace, Consolas, monospace', color: 'var(--dsw-alias-label-secondary, #888)', opacity: 0.8 },
+                title: tr('buildTagHint', 'The browser half this page is running'),
+              },
+              CLIENT_BUILD,
             ),
             h(
               'div',
