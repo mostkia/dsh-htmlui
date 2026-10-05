@@ -831,6 +831,9 @@ window.__ModuleLoader__.load({
       const onPointerDown = useCallback(
         (event) => {
           if (variant !== 'float' || event.button !== 0) return;
+          // A control inside the grip keeps its own click, whatever else is draggable.
+          const target = event.target;
+          if (target !== event.currentTarget && typeof target?.closest === 'function' && target.closest('button') !== null) return;
           dragRef.current = { dx: event.clientX - (size.x ?? 0), dy: event.clientY - (size.y ?? 0) };
           if (typeof event.currentTarget.setPointerCapture === 'function') {
             try {
@@ -952,14 +955,25 @@ window.__ModuleLoader__.load({
           },
           h(
             'div',
-            {
-              style: Object.assign({}, surfaceChrome, { cursor: 'grab', touchAction: 'none' }),
-              onPointerDown,
-              onPointerMove,
-              onPointerUp,
-              onPointerCancel: onPointerUp,
-            },
-            h('span', { style: titleStyle }, `${record.title !== undefined && record.title.length > 0 ? record.title : record.uiId} · float`),
+            { style: Object.assign({}, surfaceChrome) },
+            h(
+              'span',
+              {
+                style: Object.assign({}, titleStyle, {
+                  flex: '1 1 auto',
+                  // The grip is the title, not the row. Dragging from the row took a
+                  // pointer capture over the whole header, and a captured row swallows
+                  // the click its own buttons need: the ✕ never fired.
+                  cursor: 'grab',
+                  touchAction: 'none',
+                }),
+                onPointerDown,
+                onPointerMove,
+                onPointerUp,
+                onPointerCancel: onPointerUp,
+              },
+              `${record.title !== undefined && record.title.length > 0 ? record.title : record.uiId} · float`,
+            ),
             props.onDismiss !== undefined
               ? h(
                 'button',
