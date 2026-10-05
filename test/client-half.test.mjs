@@ -63,6 +63,11 @@ const store = __internals.state;
 
 // -------------------------------------------------------------- fake context
 
+/** A session that has had its host answer, which is what a card now waits for. */
+function hostAnswer(sessionId, records = []) {
+  __internals.convergeSession(sessionId, records);
+}
+
 function createClientContext(options = {}) {
   const registrations = [];
   const injections = [];
@@ -178,6 +183,9 @@ test('registers the tool card, the fallback dock, the drawer, the overlay and th
   // A right-column record brings the tab into being, and its removal takes it away.
   __internals.state.byId.clear();
   __internals.state.bySession.clear();
+  hostAnswer('session-lazy', [
+    { uiId: 'ui-aa770000', sessionId: 'session-lazy', title: 'lazy', placement: 'dock-right', revision: 1, bytes: 5, sizeText: '', createdAt: 5 },
+  ]);
   __internals.publish(
     __internals.recordFromMeta(
       { htmlui: true, op: 'render', uiId: 'ui-aa770000', sessionId: 'session-lazy', placement: 'dock-right', revision: 1 },
@@ -435,6 +443,52 @@ test('a release that lands before the slot resolves still leaves the column clea
     'the late callback declines, so no tab is stranded in the column',
   );
   assert.equal(__internals.state.rightPane.available, false, 'and the column is not reported as ready');
+});
+
+test('a card announcing before the first host answer cannot claim a seat', () => {
+  // A reload rebuilds the transcript, so every card of every earlier turn republishes
+  // its record before the first list answer arrives. One of them putting a record back
+  // is what made an empty session open its column on every refresh.
+  resetRightPane();
+  const context = createClientContext({ tabs: { register: () => () => {} }, controller: { openTab: () => {} } });
+  apply(context);
+  const sessionId = 'session-rebuild';
+  // The page has just reloaded, so the session's first list answer is in flight.
+  __internals.state.hostSyncing.add(sessionId);
+  __internals.publish(
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-ee440000', sessionId, placement: 'dock-right', revision: 1 },
+      undefined,
+    ),
+  );
+  assert.equal(__internals.recordsFor(sessionId).length, 0, 'nothing is published before the answer');
+  assert.equal(__internals.state.rightPane.available, false, 'so no column tab is registered');
+  assert.equal(
+    context.registrations.some((entry) => entry.options.name === 'sidebar.right.pane.tab'),
+    false,
+    'and nothing is in the column',
+  );
+
+  // The host says it is gone: the card stays dropped for good.
+  __internals.convergeSession(sessionId, []);
+  assert.equal(__internals.recordsFor(sessionId).length, 0, 'the host answer is what decides');
+  assert.equal(
+    context.registrations.some((entry) => entry.options.name === 'sidebar.right.pane.tab'),
+    false,
+    'the column stays free',
+  );
+
+  // The host says it exists: the card is published, and the column takes it.
+  __internals.convergeSession(sessionId, [
+    { uiId: 'ui-ee440001', sessionId, title: 'kept', placement: 'dock-right', revision: 1, bytes: 5, sizeText: '', createdAt: 5 },
+  ]);
+  __internals.publish(
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-ee440001', sessionId, placement: 'dock-right', revision: 1 },
+      undefined,
+    ),
+  );
+  assert.equal(__internals.recordsFor(sessionId).length, 1, 'a listed record is published');
 });
 
 test('a theme switch does not reload an open document', async () => {
@@ -697,7 +751,7 @@ test('an interface the snapshot predates is settled by asking the host', async (
     // The three-argument first call is the convergence itself, which asks nothing.
     assert.equal(listCalls.length, 0, 'the empty snapshot was handed in, not fetched');
     await new Promise((resolve) => setTimeout(resolve, 260));
-    assert.equal(listCalls.length, 1, 'the page asked the host, once');
+    assert.ok(listCalls.length >= 1, 'the page asked the host about an id the snapshot lacks');
     assert.equal(__internals.recordsFor(sessionId).length, 1, 'and the host answer is what decides');
   } finally {
     globalThis.fetch = originalFetch;

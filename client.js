@@ -72,6 +72,8 @@ window.__ModuleLoader__.load({
       hostListed: new Map(),
       hostSynced: new Set(),
       hostSyncedAt: new Map(),
+      /** Sessions whose list answer is in flight right now. */
+      hostSyncing: new Set(),
       /** The conversation column's own left edge and width, measured from our seats. */
       column: { left: 0, width: 0 },
       /** The newest turn tail seen per session, where inline interfaces render. */
@@ -173,6 +175,36 @@ window.__ModuleLoader__.load({
       }, 120);
     }
 
+    /** Records a card announced before its session had a host answer, by session. */
+    const heldRecords = new Map();
+    /** The most a session may hold while waiting; a transcript cannot exceed it much. */
+    const MAX_HELD_PER_SESSION = 32;
+
+    function holdForHostAnswer(sessionId, record) {
+      const uiId = String(record.uiId ?? '');
+      let held = heldRecords.get(sessionId);
+      if (held === undefined) {
+        held = new Map();
+        heldRecords.set(sessionId, held);
+      }
+      if (!held.has(uiId) && held.size >= MAX_HELD_PER_SESSION) return;
+      held.set(uiId, record);
+    }
+
+    /**
+     * Settle what the cards announced: the host's list decides, exactly as it does for a
+     * card that arrives after a sync. Asked once per record, and never twice.
+     */
+    function settleHeld(sessionId) {
+      const held = heldRecords.get(sessionId);
+      if (held === undefined) return;
+      heldRecords.delete(sessionId);
+      const listed = state.hostListed.get(sessionId);
+      for (const [uiId, record] of held) {
+        if (listed !== undefined && listed.has(uiId)) publish(record, { fromHost: true });
+      }
+    }
+
     function publish(record, options) {
       if (record === null || typeof record !== 'object') return;
       const uiId = String(record.uiId ?? '');
@@ -180,6 +212,21 @@ window.__ModuleLoader__.load({
       if (state.dismissed.has(uiId)) return;
       const fromHost = options !== undefined && options.fromHost === true;
       const sessionId = typeof record.sessionId === 'string' ? record.sessionId : undefined;
+      if (
+        !fromHost &&
+        sessionId !== undefined &&
+        !state.hostSynced.has(sessionId) &&
+        state.hostSyncing.has(sessionId)
+      ) {
+        // A reload rebuilds the whole transcript, so every tool card of every earlier
+        // turn mounts again and republishes its record — while the first list answer for
+        // that session is still in flight. Publishing then would put a page back into
+        // the column for a record the host may no longer have. These wait instead, and
+        // the answer decides. (A card that slips in before the ask even starts is
+        // retired by the convergence that follows, so the column never keeps it.)
+        holdForHostAnswer(sessionId, record);
+        return;
+      }
       if (!fromHost && sessionId !== undefined && state.hostSynced.has(sessionId)) {
         const listed = state.hostListed.get(sessionId);
         const syncedAt = state.hostSyncedAt.get(sessionId) ?? 0;
@@ -285,6 +332,9 @@ window.__ModuleLoader__.load({
       state.hostListed.set(sessionId, seen);
       state.hostSynced.add(sessionId);
       state.hostSyncedAt.set(sessionId, Date.now());
+      // Whatever cards announced while this answer was in flight is settled now: the
+      // list above is the only thing that can bring a record back.
+      settleHeld(sessionId);
       for (const known of recordsFor(sessionId)) {
         if (!seen.has(known.uiId)) retire(known.uiId, sessionId);
       }
@@ -311,10 +361,17 @@ window.__ModuleLoader__.load({
       const cached = state.sessionSync.get(sessionId);
       const now = Date.now();
       if (!force && cached !== undefined && now - cached.at < SESSION_SYNC_TTL_MS) return cached.promise;
-      const promise = postJson('/ui/list', { sessionId }).then((value) => {
-        if (value !== null && value.ok === true) convergeSession(sessionId, value.uis);
-        return value;
-      });
+      // While this answer is in flight, a transcript card may not claim a seat from a
+      // record the host could have dropped: it waits, and the answer decides.
+      state.hostSyncing.add(sessionId);
+      const promise = postJson('/ui/list', { sessionId })
+        .then((value) => {
+          if (value !== null && value.ok === true) convergeSession(sessionId, value.uis);
+          return value;
+        })
+        .finally(() => {
+          state.hostSyncing.delete(sessionId);
+        });
       state.sessionSync.set(sessionId, { at: now, promise });
       return promise;
     }
