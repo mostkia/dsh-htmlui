@@ -2482,8 +2482,12 @@ window.__ModuleLoader__.load({
               style: {
                 position: 'fixed',
                 inset: '0',
+                // Decoration: the layer does not take clicks.
                 pointerEvents: 'none',
-                opacity: 0.35,
+                // No opacity here. A wrapper that dims the document cannot be undone from
+                // inside it, so a document that wanted to paint a fully opaque background
+                // — a wallpaper, a backdrop — could never get there. Transparency is the
+                // document's own decision: set it in its CSS, where it can also be left out.
                 zIndex: 1,
               },
             },

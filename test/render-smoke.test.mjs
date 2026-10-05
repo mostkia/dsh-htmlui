@@ -544,6 +544,22 @@ test('the sandbox follows the project, and only unsafe touches the origin', () =
   assert.ok(__internals.sandboxFor('unsafe').includes('allow-same-origin'), 'unsafe is the one that drops isolation');
 });
 
+test('a background layer is not dimmed by its wrapper', () => {
+  // A wrapper that dims the document cannot be undone from inside it, so a document that
+  // wanted to be fully opaque — a wallpaper — could never get there. Transparency is the
+  // document's own decision, made in its CSS.
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-88000002', sessionId: 'viewed', title: '壁纸', placement: 'background', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const ctx = { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } };
+  const overlay = render(__internals.HtmlUiOverlay, { ctx });
+  const layer = overlay.elements.find((element) => element.props?.style?.position === 'fixed' && element.props?.style?.zIndex === 1);
+  assert.ok(layer !== undefined, 'the background layer is on screen');
+  assert.equal(layer.props.style.opacity, undefined, 'and carries no opacity of its own');
+  assert.equal(layer.props.style.pointerEvents, 'none', 'it is still decoration rather than a click target');
+  resetStore();
+});
+
 test('a float window carries its own minimize, and a hidden one leaves the frame', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-88000001', sessionId: 'viewed', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
