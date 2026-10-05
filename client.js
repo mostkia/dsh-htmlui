@@ -40,6 +40,8 @@ window.__ModuleLoader__.load({
       byId: new Map(),
       bySession: new Map(),
       tickets: new Map(),
+      /** One shared /ui/list answer per session, so the seats do not each ask. */
+      sessionSync: new Map(),
       collapsed: new Map(),
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
@@ -192,17 +194,36 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** How long one session's list answer is shared between the seats that ask. */
+    const SESSION_SYNC_TTL_MS = 2_000;
+
     /**
-     * Pull the session's stored records once, so a reloaded page rebuilds surfaces
-     * whose originating tool call has scrolled out of the transcript.
+     * Pull the session's stored records, so a reloaded page rebuilds surfaces whose
+     * originating tool call has scrolled out of the transcript. Five seats ask for
+     * the same answer at the same moment on every page load, so they share one
+     * request; `force` bypasses the share for an explicit refresh.
      */
+    function syncSession(sessionId, options) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return Promise.resolve();
+      const force = options !== undefined && options.force === true;
+      const cached = state.sessionSync.get(sessionId);
+      const now = Date.now();
+      if (!force && cached !== undefined && now - cached.at < SESSION_SYNC_TTL_MS) return cached.promise;
+      const promise = postJson('/ui/list', { sessionId }).then((value) => {
+        if (value !== null && value.ok === true) convergeSession(sessionId, value.uis);
+        return value;
+      });
+      state.sessionSync.set(sessionId, { at: now, promise });
+      return promise;
+    }
+
     function useSessionSync(sessionId) {
       useEffect(() => {
         if (sessionId === undefined) return undefined;
         let cancelled = false;
-        postJson('/ui/list', { sessionId }).then((value) => {
-          if (cancelled) return;
-          if (value !== null && value.ok === true) convergeSession(sessionId, value.uis);
+        syncSession(sessionId).then((value) => {
+          if (cancelled) return undefined;
+          return value;
         });
         return () => {
           cancelled = true;
@@ -1741,6 +1762,7 @@ window.__ModuleLoader__.load({
         publish,
         retire,
         convergeSession,
+        syncSession,
         activeFullscreen,
         isCurrentRevision,
         loadTemplates,

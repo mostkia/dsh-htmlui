@@ -643,6 +643,39 @@ test('a session converges on what the host reports', () => {
   assert.equal(__internals.recordsFor('session-c').length, 2);
 });
 
+test('the seats share one list answer instead of each asking', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return Promise.resolve({
+      json: () => Promise.resolve({ ok: true, count: 1, uis: [{ uiId: 'ui-10100000', sessionId: 'session-sync', title: 'one', placement: 'panel', revision: 1, bytes: 1, sizeText: '' }] }),
+    });
+  };
+  try {
+    __internals.state.byId.clear();
+    __internals.state.bySession.clear();
+    __internals.state.sessionSync.clear();
+    // Five seats render at once on a page load; they must make one request.
+    await Promise.all([
+      __internals.syncSession('session-sync'),
+      __internals.syncSession('session-sync'),
+      __internals.syncSession('session-sync'),
+    ]);
+    assert.equal(calls.filter((call) => call.url.endsWith('/ui/list')).length, 1, 'one request for the session');
+    assert.equal(__internals.recordsFor('session-sync').length, 1, 'and the seats all see the answer');
+    // An explicit refresh asks again.
+    await __internals.syncSession('session-sync', { force: true });
+    assert.equal(calls.filter((call) => call.url.endsWith('/ui/list')).length, 2);
+    // A session with no id is not a request at all.
+    await __internals.syncSession(undefined);
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.sessionSync.clear();
+  }
+});
+
 test('a reloaded page rebuilds every seat from the host list alone', () => {
   // After F5 the transcript may be virtualized, so the tool cards are not rendered:
   // every surface has to come back from /ui/list, whose records carry no `htmlui`
