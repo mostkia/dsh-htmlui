@@ -568,6 +568,7 @@ window.__ModuleLoader__.load({
         managerView: 'HTML UI',
         managerTitle: 'HTML interfaces in this session',
         managerClose: 'Remove',
+        managerOpen: 'Open column',
         managerCloseAll: 'Remove all',
         managerEmpty: 'This session has no HTML interface.',
         create: 'Create',
@@ -618,6 +619,7 @@ window.__ModuleLoader__.load({
         managerView: 'HTML 界面',
         managerTitle: '本会话的 HTML 界面',
         managerClose: '关闭',
+        managerOpen: '打开右栏',
         managerCloseAll: '全部关闭',
         managerEmpty: '本会话没有 HTML 界面。',
         create: '创建',
@@ -1435,6 +1437,16 @@ window.__ModuleLoader__.load({
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
       const records = sessionId === undefined ? [] : recordsFor(sessionId);
+      const controller = state.rightPane.controller;
+      const diagnostics = [
+        `rec=${records.length}`,
+        `session=${sessionId === undefined ? 'none' : String(sessionId).slice(-8)}`,
+        `tabType=${state.rightPane.available === true ? 'yes' : 'no'}`,
+        `openTab=${controller !== undefined && typeof controller.openTab === 'function' ? 'yes' : 'no'}`,
+        `ready=${rightPaneReady() ? 'yes' : 'no'}`,
+        `opened=${state.rightPane.opened.size}`,
+        `column=${state.column.left}+${state.column.width}`,
+      ].join(' · ');
       const rows = records.map((record) =>
         h(
           'div',
@@ -1452,6 +1464,11 @@ window.__ModuleLoader__.load({
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}${record.sizeText !== undefined && record.sizeText.length > 0 ? ` · ${record.sizeText}` : ''}`),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),
+          // The column is opened on demand — the same call the reveal makes, offered as a
+          // control so a reader whose column was closed can bring their interface back.
+          record.placement === 'dock-right'
+            ? h('button', { type: 'button', style: buttonStyle, onClick: () => openRightPane(record.uiId) }, tr('managerOpen', 'Open column'))
+            : null,
           h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
         ),
       );
@@ -1479,6 +1496,20 @@ window.__ModuleLoader__.load({
         records.length === 0
           ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML interface.'))
           : h('div', null, ...rows),
+        h(
+          'div',
+          {
+            style: {
+              marginTop: 'auto',
+              paddingTop: '10px',
+              fontSize: '11px',
+              fontFamily: 'ui-monospace, Consolas, monospace',
+              color: 'var(--dsw-alias-label-secondary, #888)',
+              wordBreak: 'break-all',
+            },
+          },
+          diagnostics,
+        ),
       );
     }
 
@@ -2293,7 +2324,20 @@ window.__ModuleLoader__.load({
                     bump();
                     applyTemplate(state.create.source, sessionId, state.create.placement).then((created) => {
                       state.create.busy = false;
-                      if (created === true) state.create.open = false;
+                      if (created === true) {
+                        state.create.open = false;
+                        // The reader asked for it, so open the column for it — now, and
+                        // again shortly after, because the tab type registers
+                        // asynchronously and the first attempt can arrive too early.
+                        const latest = recordsFor(sessionId);
+                        const mine = latest.length > 0 ? latest[latest.length - 1] : undefined;
+                        if (mine !== undefined && mine.placement === 'dock-right') {
+                          openRightPane(mine.uiId);
+                          for (const delay of [150, 500, 1200]) {
+                            setTimeout(() => openRightPane(mine.uiId), delay);
+                          }
+                        }
+                      }
                       bump();
                     });
                   },
