@@ -25,6 +25,7 @@
 
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -1207,6 +1208,34 @@ export function apply(ctx, config) {
     };
   }
 
+  /**
+   * Every creation passes through here, so this is where a creation is recorded.
+   *
+   * An interface reappeared after being closed, twice, and both times the only honest
+   * answer was "something created it" with no way to say what — the client's own create
+   * paths are all clicks, the store held a genuine new record, and the guesswork cost
+   * rounds. One append-only line per creation turns the next occurrence into a lookup:
+   * when, which placement, which project, which session, and which entry point asked.
+   */
+  function auditCreation(meta, source) {
+    try {
+      const file = join(stateRoot, 'created.jsonl');
+      const line = JSON.stringify({
+        at: new Date(meta.createdAt ?? Date.now()).toISOString(),
+        id: meta.id,
+        placement: meta.placement ?? 'inline',
+        template: meta.template ?? '',
+        origin: meta.origin ?? 'inline',
+        sessionId: meta.sessionId ?? '',
+        source: source ?? 'unknown',
+      });
+      appendFileSync(file, `${line}\n`, 'utf8');
+    } catch (error) {
+      // An audit that breaks a render is worse than no audit.
+      logger?.warn?.(`dsh-htmlui: creation audit unavailable: ${error?.message ?? error}`);
+    }
+  }
+
   function createUi(input) {
     const id = `ui-${randomUUID().replace(/-/gu, '').slice(0, 8)}`;
     const now = Date.now();
@@ -1541,6 +1570,7 @@ export function apply(ctx, config) {
           source: source.source,
         };
         const meta = op === 'update' ? updateUi(String(args.id), input) : createUi(input);
+      if (op !== 'update') auditCreation(meta, 'tool');
         return {
           ok: true,
           op,
@@ -1875,6 +1905,7 @@ export function apply(ctx, config) {
           template: slug,
           source,
         });
+        auditCreation(meta, 'templates/render');
         sendJson(res, 200, { ok: true, ui: publicRecord(meta) });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
