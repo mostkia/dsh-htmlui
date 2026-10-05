@@ -355,10 +355,29 @@ function createStore(root) {
   function readTemplate(slug) {
     const dir = templatePath(slug);
     const meta = readJson(join(dir, 'meta.json'), undefined);
-    if (meta === undefined) return readBundledTemplate(slug);
     const documentPath = join(dir, 'index.html');
-    if (!existsSync(documentPath)) return readBundledTemplate(slug);
-    return { meta, documentPath, source: readFileSync(documentPath, 'utf8') };
+    if (meta !== undefined && existsSync(documentPath)) {
+      return { meta, documentPath, source: readFileSync(documentPath, 'utf8') };
+    }
+    const bare = readBareTemplate(templateRoot, slug);
+    if (bare !== undefined) return bare;
+    return readBundledTemplate(slug);
+  }
+
+  /**
+   * Read a hand-written template: an `.html` file dropped straight into the
+   * templates directory. This is the whole point of "reuse it yourself later" —
+   * copy a document in, address it by its file name, no manifest to write.
+   */
+  function readBareTemplate(root, slug) {
+    if (!TEMPLATE_SLUG_RE.test(String(slug ?? ''))) return undefined;
+    const documentPath = join(root, `${slug}.html`);
+    if (!existsSync(documentPath)) return undefined;
+    return {
+      meta: { slug, name: slug, description: '', bare: true },
+      documentPath,
+      source: readFileSync(documentPath, 'utf8'),
+    };
   }
 
   /** Read one template shipped inside the package (read-only fallback). */
@@ -367,8 +386,10 @@ function createStore(root) {
     const dir = join(bundledTemplateRoot, slug);
     const meta = readJson(join(dir, 'meta.json'), undefined);
     const documentPath = join(dir, 'index.html');
-    if (meta === undefined || !existsSync(documentPath)) return undefined;
-    return { meta: { ...meta, bundled: true }, documentPath, source: readFileSync(documentPath, 'utf8') };
+    if (meta !== undefined && existsSync(documentPath)) {
+      return { meta: { ...meta, bundled: true }, documentPath, source: readFileSync(documentPath, 'utf8') };
+    }
+    return readBareTemplate(bundledTemplateRoot, slug);
   }
 
   function writeTemplate(meta, source) {
@@ -379,28 +400,50 @@ function createStore(root) {
   }
 
   function removeTemplate(slug) {
+    // Remove whatever is in force for this name: the managed template first,
+    // then the hand-written file it may be covering.
     const dir = templatePath(slug);
-    if (!existsSync(dir)) return false;
-    rmSync(dir, { recursive: true, force: true });
-    return true;
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+      return true;
+    }
+    const bare = join(templateRoot, `${slug}.html`);
+    if (existsSync(bare)) {
+      rmSync(bare, { force: true });
+      return true;
+    }
+    return false;
   }
 
   function listTemplates() {
     const out = [];
     const seen = new Set();
-    for (const entry of existsSync(templateRoot) ? readdirSync(templateRoot, { withFileTypes: true }) : []) {
-      if (!entry.isDirectory() || !TEMPLATE_SLUG_RE.test(entry.name)) continue;
-      const meta = readJson(join(templateRoot, entry.name, 'meta.json'), undefined);
-      if (meta !== undefined) {
-        out.push(meta);
-        seen.add(entry.name);
+    const collect = (root, bundled) => {
+      if (!existsSync(root)) return;
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (!TEMPLATE_SLUG_RE.test(entry.name) || seen.has(entry.name)) continue;
+          const meta = readJson(join(root, entry.name, 'meta.json'), undefined);
+          if (meta === undefined) continue;
+          out.push(bundled ? { ...meta, bundled: true } : meta);
+          seen.add(entry.name);
+          continue;
+        }
+        const match = /^([a-z0-9][a-z0-9._-]{0,63})\.html$/u.exec(entry.name);
+        if (match === null || seen.has(match[1])) continue;
+        out.push({
+          slug: match[1],
+          name: match[1],
+          description: '',
+          bytes: entry.isFile() ? (() => { try { return statSync(join(root, entry.name)).size; } catch { return 0; } })() : 0,
+          bare: true,
+          ...(bundled ? { bundled: true } : {}),
+        });
+        seen.add(match[1]);
       }
-    }
-    for (const entry of existsSync(bundledTemplateRoot) ? readdirSync(bundledTemplateRoot, { withFileTypes: true }) : []) {
-      if (!entry.isDirectory() || !TEMPLATE_SLUG_RE.test(entry.name) || seen.has(entry.name)) continue;
-      const meta = readJson(join(bundledTemplateRoot, entry.name, 'meta.json'), undefined);
-      if (meta !== undefined) out.push({ ...meta, bundled: true });
-    }
+    };
+    collect(templateRoot, false);
+    collect(bundledTemplateRoot, true);
     out.sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
     return out;
   }

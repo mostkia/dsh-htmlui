@@ -128,4 +128,6 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 
 `{{name}}` tokens in the template are replaced by `variables`. Templates are
 stored host-side, so they survive sessions — check `html_ui_template op=list`
-before inventing a new one.
+before inventing a new one. A hand-written `templates/<name>.html` file in the
+plugin data root is a template too, so the user's own documents are already
+addressable by file name; prefer reusing one over rebuilding it.

@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -587,6 +587,32 @@ test('the SSE stream delivers model output and interface lifecycle for its sessi
   // A closed request leaves the hub, so a long-lived host does not accumulate streams.
   stream.emit('close');
   assert.equal(await sseClients(), before, 'a closed stream is released');
+});
+
+test('a hand-written template is just an html file in the templates directory', async () => {
+  const directory = join(process.env.DSH_HTMLUI_ROOT, 'templates');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'my-panel.html'), '<h1>{{title}}</h1>', 'utf8');
+
+  const listed = await tool('html_ui_template').execute({ op: 'list' }, exec());
+  assert.ok(listed.summary.includes('my-panel'), 'a dropped file is listed as a template');
+  const rendered = await tool('html_ui').execute({ op: 'render', template: 'my-panel', variables: { title: '手写模板' } }, exec());
+  assert.equal(rendered.ok, true);
+  const served = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', rendered.uiId, 'index.html'), 'utf8');
+  assert.ok(served.includes('手写模板'), 'variables apply to a hand-written template too');
+
+  // A managed template of the same name takes precedence while it exists.
+  await tool('html_ui_template').execute({ op: 'save', name: 'my-panel', html: '<p>managed</p>' }, exec());
+  const managed = await tool('html_ui').execute({ op: 'render', template: 'my-panel' }, exec());
+  assert.ok(readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', managed.uiId, 'index.html'), 'utf8').includes('managed'));
+
+  // Removing the managed one uncovers the hand-written file, then removes it.
+  await tool('html_ui_template').execute({ op: 'remove', name: 'my-panel' }, exec());
+  const uncovered = await tool('html_ui').execute({ op: 'render', template: 'my-panel' }, exec());
+  assert.equal(uncovered.ok, true, 'the hand-written file is in force again');
+  assert.ok(readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', uncovered.uiId, 'index.html'), 'utf8').includes('{{title}}'));
+  assert.equal((await tool('html_ui_template').execute({ op: 'remove', name: 'my-panel' }, exec())).ok, true);
+  assert.equal((await tool('html_ui').execute({ op: 'render', template: 'my-panel' }, exec())).ok, false);
 });
 
 test('every presentation projection stays lossless JSON', async () => {

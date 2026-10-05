@@ -78,7 +78,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
         actionPrompt: ''      # 追加在 [html-ui:action] 消息末尾的指令句
 ```
 
-运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`templates/<name>/`、`state/<session>.json`，以及用于能力令牌的 `secret`。
+运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`templates/<name>/`（托管模板）或 `templates/<name>.html`（手写模板）、`state/<session>.json`，以及用于能力令牌的 `secret`。
 
 ## 模板
 
@@ -89,10 +89,12 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 
 `{{token}}` 占位符由 `variables` 替换。模板跨会话存活；包内自带 `templates/starter` 作为可直接读的示例。
 
+**手写的文档也是模板**：把 `my-panel.html` 直接丢进 `<root>/templates/`，就能用 `template: "my-panel"` 调用，不用写任何清单文件。同名托管模板存在时优先，删掉它又会露出那个手写文件。
+
 ## 开发
 
 ```sh
-npm test        # 宿主半部 21 项 + 浏览器半部 17 项断言
+npm test        # 宿主半部 22 项 + 浏览器半部 17 项断言
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

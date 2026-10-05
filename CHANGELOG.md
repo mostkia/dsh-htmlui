@@ -18,6 +18,11 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- A hand-written `templates/<name>.html` file in the data root is a usable
+  template: no manifest, no subdirectory, addressable as `template: "<name>"`.
+  A managed template of the same name takes precedence, and removing it uncovers
+  the file. This is the "reuse your own document later" path that needs no model
+  round trip to set up.
 - The SSE carrier is covered end to end: a stream's hello frame, forwarded model
   text, session events, interface lifecycle frames, per-session isolation, and
   the hub releasing a closed stream.

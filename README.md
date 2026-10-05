@@ -106,7 +106,8 @@ Optional row config (nothing here needs a machine-specific path):
 
 Runtime state lives under `$DSH_HOME/htmlui`: `ui/<id>/index.html` (the authored
 document, kept clean and portable — nothing is injected on disk),
-`templates/<name>/`, `state/<session>.json`, and a `secret` used for capability
+`templates/<name>/` for managed templates or `templates/<name>.html` for
+hand-written ones, `state/<session>.json`, and a `secret` used for capability
 tokens.
 
 ## Templates
@@ -120,10 +121,15 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 across sessions; `templates/starter` ships with the package as a readable
 example.
 
+A hand-written document is a template too. Drop `my-panel.html` into
+`<root>/templates/` and address it as `template: "my-panel"` — no manifest to
+write. A managed template of the same name takes precedence while it exists, and
+removing it uncovers the file again.
+
 ## Development
 
 ```sh
-npm test        # 21 host-half assertions + 17 browser-half assertions
+npm test        # 22 host-half assertions + 17 browser-half assertions
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 
