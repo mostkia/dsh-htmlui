@@ -25,6 +25,9 @@ window.__ModuleLoader__.load({
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
     /** Printed once on activation: the installed half can be confirmed from the console. */
     const CLIENT_ACTIVE_LINE = '[dsh-htmlui] client active (0.1.1)';
+    /** Right-sidebar tab type: its `id` is also the key its body registers under. */
+    const TAB_ID = '@mostkia/dsh-htmlui/panel';
+    const TAB_KIND = 'dsh-htmlui-panel';
     const FRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock';
     const INLINE_MAX_HEIGHT = 560;
     const DOCK_MIN_HEIGHT = 140;
@@ -39,6 +42,8 @@ window.__ModuleLoader__.load({
       tickets: new Map(),
       collapsed: new Map(),
       fullscreen: null,
+      /** Right-sidebar availability: the native split needs the column's tab service. */
+      rightPane: { available: false, controller: undefined, opened: new Set() },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -129,6 +134,44 @@ window.__ModuleLoader__.load({
       return recordsFor(sessionId).filter((record) => placements.includes(record.placement));
     }
 
+    /**
+     * Pull the session's stored records once, so a reloaded page rebuilds surfaces
+     * whose originating tool call has scrolled out of the transcript.
+     */
+    function useSessionSync(sessionId) {
+      useEffect(() => {
+        if (sessionId === undefined) return undefined;
+        let cancelled = false;
+        postJson('/ui/list', { sessionId }).then((value) => {
+          if (cancelled) return;
+          if (value !== null && value.ok === true && Array.isArray(value.uis)) {
+            for (const record of value.uis) publish(record);
+          }
+        });
+        return () => {
+          cancelled = true;
+        };
+      }, [sessionId]);
+    }
+
+    /**
+     * Reveal the right-sidebar tab that hosts this session's dock-right interfaces.
+     * Returns false when the column exposes no tab service, in which case the
+     * caller keeps its fallback (the composer dock).
+     */
+    function openRightPane(uiId) {
+      const controller = state.rightPane.controller;
+      if (controller === undefined || typeof controller.openTab !== 'function') return false;
+      try {
+        controller.openTab(TAB_KIND, { params: { uiId, source: '@mostkia/dsh-htmlui' } });
+        if (typeof uiId === 'string' && uiId.length > 0) state.rightPane.opened.add(uiId);
+        return true;
+      } catch (error) {
+        logWarn(undefined, '[dsh-htmlui] right pane refused the tab', error);
+        return false;
+      }
+    }
+
     // ----------------------------------------------------------------- helpers
 
     function parseSizeText(value) {
@@ -178,6 +221,17 @@ window.__ModuleLoader__.load({
         /* keep the default */
       }
       return 'light';
+    }
+
+    /** Prefer the host logger when the caller has a context; the console is the fallback. */
+    function logWarn(ctx, message, error) {
+      const detail = error === undefined || error === null ? '' : `: ${error.message ?? String(error)}`;
+      if (ctx !== undefined && ctx !== null && ctx.logger !== undefined && typeof ctx.logger.warn === 'function') {
+        ctx.logger.warn(`${message}${detail}`);
+        return;
+      }
+      if (error === undefined) console.warn(message);
+      else console.warn(message, error);
     }
 
     function postJson(path, body) {
@@ -589,6 +643,7 @@ window.__ModuleLoader__.load({
       const args = argsOf(block);
       const meta = metaOf(block);
       const sessionId = typeof meta?.sessionId === 'string' && meta.sessionId.length > 0 ? meta.sessionId : undefined;
+      const record = recordFromMeta(meta, sessionId);
 
       useEffect(() => {
         const next = recordFromMeta(meta, sessionId);
@@ -601,6 +656,13 @@ window.__ModuleLoader__.load({
         publish(next);
       }, [meta, sessionId]);
 
+      // A dock-right interface lives in the right column: reveal its tab once.
+      useEffect(() => {
+        if (record === undefined || record.placement !== 'dock-right') return;
+        if (state.rightPane.opened.has(record.uiId)) return;
+        openRightPane(record.uiId);
+      }, [record === undefined ? undefined : record.uiId, record === undefined ? undefined : record.placement]);
+
       if (phase === 'preparing') {
         return h(
           'div',
@@ -609,7 +671,6 @@ window.__ModuleLoader__.load({
         );
       }
 
-      const record = recordFromMeta(meta, sessionId);
       if (record === undefined) {
         const placement = typeof args?.placement === 'string' ? args.placement : 'inline';
         const target = typeof args?.path === 'string' ? args.path : typeof args?.title === 'string' ? args.title : '';
@@ -663,19 +724,22 @@ window.__ModuleLoader__.load({
         placement === 'fullscreen'
           ? h('button', { type: 'button', style: buttonStyle, onClick: openFullscreen }, '打开')
           : null,
-        h(
-          'button',
-          {
-            type: 'button',
-            style: buttonStyle,
-            onClick: () => {
-              retire(record.uiId);
-              postJson('/rpc', { uiId: record.uiId, op: 'close' });
-            },
-          },
-          '关闭',
-        ),
+        placement === 'dock-right' && state.rightPane.available
+          ? h('button', { type: 'button', style: buttonStyle, onClick: () => openRightPane(record.uiId) }, '在右侧栏打开')
+          : null,
+        h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, '关闭'),
       );
+    }
+
+    /** Remove one surface locally and tell the host to drop its record. */
+    function dismissRecord(uiId) {
+      retire(uiId);
+      postJson('/rpc', { uiId, op: 'close' });
+    }
+
+    function toggleCollapsed(uiId) {
+      state.collapsed.set(uiId, state.collapsed.get(uiId) !== true);
+      bump();
     }
 
     // ------------------------------------------------------------------- docks
@@ -684,23 +748,15 @@ window.__ModuleLoader__.load({
       useStore();
       const sessionId = sessionIdOf(props);
       const [height, setHeight] = useState(360);
-
-      useEffect(() => {
-        if (sessionId === undefined) return undefined;
-        let cancelled = false;
-        postJson('/ui/list', { sessionId }).then((value) => {
-          if (cancelled) return;
-          if (value !== null && value.ok === true && Array.isArray(value.uis)) {
-            for (const record of value.uis) publish(record);
-          }
-        });
-        return () => {
-          cancelled = true;
-        };
-      }, [sessionId]);
+      useSessionSync(sessionId);
 
       if (sessionId === undefined) return null;
-      const records = recordsIn(sessionId, ['dock-top', 'dock-bottom', 'panel', 'dock-right']);
+      // dock-right belongs to the right column whenever that column exposes its
+      // tab service; the composer dock remains its fallback.
+      const placements = state.rightPane.available
+        ? ['dock-top', 'dock-bottom', 'panel']
+        : ['dock-top', 'dock-bottom', 'panel', 'dock-right'];
+      const records = recordsIn(sessionId, placements);
       if (records.length === 0) return null;
 
       const resizeRef = useRef(null);
@@ -722,14 +778,8 @@ window.__ModuleLoader__.load({
         resizeRef.current = null;
       }, []);
 
-      const dismiss = (uiId) => {
-        retire(uiId);
-        postJson('/rpc', { uiId, op: 'close' });
-      };
-      const toggle = (uiId) => {
-        state.collapsed.set(uiId, state.collapsed.get(uiId) !== true);
-        bump();
-      };
+      const dismiss = dismissRecord;
+      const toggle = toggleCollapsed;
 
       return h(
         'div',
@@ -765,6 +815,101 @@ window.__ModuleLoader__.load({
           ),
         ),
       );
+    }
+
+    // --------------------------------------------------------------- right pane
+
+    /**
+     * Body of the right column's `dsh-htmlui-panel` tab: it hosts every
+     * dock-right interface of the mounted session. The tab's own navigation
+     * parameters are not needed, because the session arrives in the standard
+     * props every session-scoped body receives.
+     */
+    function HtmlUiRightPane(props) {
+      useStore();
+      const sessionId = sessionIdOf(props);
+      useSessionSync(sessionId);
+      if (sessionId === undefined) return null;
+      const records = recordsIn(sessionId, ['dock-right']);
+      if (records.length === 0) {
+        return h('div', { style: emptyStyle }, '这个会话还没有右侧栏界面。');
+      }
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '8px', height: '100%', minHeight: '0', padding: '6px' } },
+        ...records.map((record) =>
+          h(
+            'div',
+            {
+              key: record.uiId,
+              style: { flex: '1 1 auto', minHeight: '0', display: 'flex', flexDirection: 'column' },
+            },
+            h(HtmlUiFrame, {
+              record,
+              theme: state.theme,
+              variant: 'dock',
+              collapsed: state.collapsed.get(record.uiId) === true,
+              onToggleCollapse: toggleCollapsed,
+              onDismiss: dismissRecord,
+            }),
+          ),
+        ),
+      );
+    }
+
+    /**
+     * Wire the right column: stage one registers the tab type, stage two the body.
+     * Every step is contained — a column that exposes no tab service (or refuses
+     * the definition) leaves dock-right on its composer-dock fallback instead of
+     * taking the whole browser half down with it.
+     */
+    function wireRightPane(ctx, disposers) {
+      disposers.push(
+        ctx.slots.inject('sidebar.right.pane.tab', () =>
+          ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, (props) =>
+            h(HtmlUiRightPane, Object.assign({}, props, { ctx })),
+          ),
+        ),
+      );
+      if (typeof ctx.inject !== 'function') return;
+      ctx.inject(['sidebarRightTabs'], (scope) => {
+        try {
+          const tabs = scope.sidebarRightTabs;
+          if (tabs === undefined || typeof tabs.register !== 'function') return;
+          scope.effect(() => {
+            // The registry owns the registration's lifecycle; this effect owns
+            // only the flag other components read, and clears it on teardown so
+            // dock-right moves back to its fallback instead of vanishing.
+            tabs.register({
+              id: TAB_ID,
+              kind: TAB_KIND,
+              multiple: false,
+              title: () => 'HTML UI',
+            });
+            state.rightPane.available = true;
+            bump();
+            return () => {
+              state.rightPane.available = false;
+              bump();
+            };
+          }, 'dsh-htmlui: right-pane tab type');
+        } catch (error) {
+          logWarn(ctx, 'dsh-htmlui: right-pane tab type unavailable', error);
+        }
+      });
+      ctx.inject(['sidebarRight'], (scope) => {
+        const controller = scope.sidebarRight;
+        if (controller === undefined || typeof controller.openTab !== 'function') return;
+        state.rightPane.controller = controller;
+        bump();
+        scope.effect(
+          () => () => {
+            if (state.rightPane.controller === controller) state.rightPane.controller = undefined;
+            bump();
+          },
+          'dsh-htmlui: right-pane controller',
+        );
+      });
     }
 
     // ------------------------------------------------------------------ overlay
@@ -828,10 +973,7 @@ window.__ModuleLoader__.load({
           ? records.find((record) => record.uiId === state.fullscreen)
           : records.find((record) => record.placement === 'fullscreen');
 
-      const dismiss = (uiId) => {
-        retire(uiId);
-        postJson('/rpc', { uiId, op: 'close' });
-      };
+      const dismiss = dismissRecord;
 
       const layers = [];
 
@@ -924,6 +1066,14 @@ window.__ModuleLoader__.load({
         ),
       );
 
+      // The right column is optional: wire it in its own guard so a deployment
+      // without that column keeps every other surface working.
+      try {
+        wireRightPane(ctx, disposers);
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: right pane wiring skipped', error);
+      }
+
       if (ctx.logger !== undefined && typeof ctx.logger.info === 'function') {
         ctx.logger.info(CLIENT_ACTIVE_LINE);
       } else {
@@ -954,6 +1104,8 @@ window.__ModuleLoader__.load({
         FRAME_SANDBOX,
         ROUTE_BASE,
         CLIENT_ACTIVE_LINE,
+        TAB_ID,
+        TAB_KIND,
         state,
         parseSizeText,
         recordFromMeta,
@@ -961,6 +1113,11 @@ window.__ModuleLoader__.load({
         recordsIn,
         publish,
         retire,
+        dismissRecord,
+        toggleCollapsed,
+        openRightPane,
+        wireRightPane,
+        HtmlUiRightPane,
         resolveViewedSessionId,
         sessionIdOf,
         argsOf,

@@ -37,7 +37,7 @@ is replaced in place, and the browser surface refreshes without a new card.
 | `inline` (default) | In the transcript, as part of the tool call |
 | `dock-top` / `dock-bottom` | Full width above / below the composer |
 | `panel` | The same dock, meant to be updated in place |
-| `dock-right` | Reserved for the session side panel (falls back to the dock today) |
+| `dock-right` | The session's right column, as its own tab; falls back to the dock above the composer when the column is unavailable |
 | `float` | A draggable, resizable window; give `size`, e.g. `"520x360+80+60"` |
 | `background` | A click-through layer over the frame (decorative) |
 | `fullscreen` | Covers the session and offers a built-in "切回聊天" switch |

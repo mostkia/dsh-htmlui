@@ -63,14 +63,19 @@ const store = __internals.state;
 
 // -------------------------------------------------------------- fake context
 
-function createClientContext() {
+function createClientContext(options = {}) {
   const registrations = [];
   const injections = [];
   const logs = [];
+  const effects = [];
+  const services = {};
+  if (options.tabs !== undefined) services.sidebarRightTabs = options.tabs;
+  if (options.controller !== undefined) services.sidebarRight = options.controller;
   const context = {
     registrations,
     injections,
     logs,
+    effects,
     logger: {
       info: (message) => logs.push(message),
       warn: (message) => logs.push(message),
@@ -81,10 +86,23 @@ function createClientContext() {
         const dispose = callback();
         return typeof dispose === 'function' ? dispose : () => {};
       },
-      register(options, component) {
-        registrations.push({ options, component });
+      register(options_, component) {
+        registrations.push({ options: options_, component });
         return () => {};
       },
+    },
+    inject(keys, callback) {
+      const scope = {
+        effect(factory) {
+          const result = typeof factory === 'function' ? factory() : undefined;
+          effects.push(typeof result === 'function' ? result : () => {});
+          return result;
+        },
+      };
+      for (const key of keys) {
+        if (services[key] !== undefined) scope[key] = services[key];
+      }
+      callback(scope);
     },
     sessions: {
       list: {
@@ -103,13 +121,122 @@ test('exposes the harness client contract', () => {
   assert.equal(typeof apply, 'function');
 });
 
-test('registers the tool card, the composer dock, and the frame overlay', () => {
+test('registers the tool card, the composer dock, the frame overlay, and the right-pane body', () => {
   const context = createClientContext();
   const dispose = apply(context);
-  assert.deepEqual(context.injections, ['tool.call.toolview', 'conversation.input.dock', 'shell.overlay']);
+  assert.deepEqual(context.injections, ['tool.call.toolview', 'conversation.input.dock', 'shell.overlay', 'sidebar.right.pane.tab']);
   const byId = context.registrations.map((entry) => `${entry.options.name}#${entry.options.key ?? entry.options.id}`);
-  assert.deepEqual(byId, ['tool.call.toolview#html_ui', 'conversation.input.dock#htmlui-dock', 'shell.overlay#htmlui-overlay']);
+  assert.deepEqual(byId, [
+    'tool.call.toolview#html_ui',
+    'conversation.input.dock#htmlui-dock',
+    'shell.overlay#htmlui-overlay',
+    `sidebar.right.pane.tab#${__internals.TAB_ID}`,
+  ]);
   assert.equal(typeof dispose, 'function');
+});
+
+/** The module keeps its store across `apply` calls, so tests reset what they assert. */
+function resetRightPane() {
+  __internals.state.rightPane.available = false;
+  __internals.state.rightPane.controller = undefined;
+  __internals.state.rightPane.opened.clear();
+}
+
+test('dock-right falls back to the composer dock when the column has no tab service', () => {
+  resetRightPane();
+  const context = createClientContext();
+  apply(context);
+  assert.equal(__internals.state.rightPane.available, false);
+  assert.equal(__internals.state.rightPane.controller, undefined);
+  // Without a controller the reveal is refused rather than thrown.
+  assert.equal(__internals.openRightPane('ui-1a2b3c4d'), false);
+});
+
+test('dock-right registers its tab type and reveals it through the column', () => {
+  const registered = [];
+  const opened = [];
+  const context = createClientContext({
+    tabs: {
+      register(definition) {
+        registered.push(definition);
+        return () => {};
+      },
+    },
+    controller: {
+      openTab(kind, options) {
+        opened.push({ kind, options });
+      },
+    },
+  });
+  apply(context);
+  assert.equal(__internals.state.rightPane.available, true);
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].id, __internals.TAB_ID);
+  assert.equal(registered[0].kind, __internals.TAB_KIND);
+  assert.equal(registered[0].multiple, false);
+  assert.equal(registered[0].title(), 'HTML UI');
+
+  __internals.state.rightPane.opened.clear();
+  assert.equal(__internals.openRightPane('ui-1a2b3c4d'), true);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].kind, __internals.TAB_KIND);
+  assert.equal(opened[0].options.params.uiId, 'ui-1a2b3c4d');
+  assert.ok(__internals.state.rightPane.opened.has('ui-1a2b3c4d'));
+});
+
+test('a tab service that refuses the definition keeps the fallback intact', () => {
+  resetRightPane();
+  const context = createClientContext({
+    tabs: {
+      register() {
+        throw new Error('kind already registered');
+      },
+    },
+  });
+  assert.doesNotThrow(() => apply(context));
+  assert.equal(__internals.state.rightPane.available, false);
+  assert.ok(context.logs.some((line) => line.includes('right-pane tab type unavailable')));
+});
+
+test('tearing the tab type down returns dock-right to its fallback', () => {
+  resetRightPane();
+  const context = createClientContext({
+    tabs: { register: () => () => {} },
+  });
+  apply(context);
+  assert.equal(__internals.state.rightPane.available, true);
+  assert.ok(context.effects.length > 0, 'the tab type is owned by an effect');
+  for (const dispose of context.effects) dispose();
+  assert.equal(__internals.state.rightPane.available, false);
+});
+
+test('dismissing a surface closes it locally and tells the host', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    calls.push({ url, body: init === undefined ? undefined : JSON.parse(init.body) });
+    return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
+  };
+  try {
+    __internals.state.byId.clear();
+    __internals.state.bySession.clear();
+    __internals.publish(
+      __internals.recordFromMeta(
+        { htmlui: true, op: 'render', uiId: 'ui-dddd4444', sessionId: 'session-d', placement: 'float', revision: 1 },
+        undefined,
+      ),
+    );
+    __internals.dismissRecord('ui-dddd4444');
+    await Promise.resolve();
+    assert.equal(__internals.state.byId.get('ui-dddd4444'), undefined);
+    assert.equal(__internals.recordsFor('session-d').length, 0);
+    const close = calls.find((call) => call.body !== undefined && call.body.op === 'close');
+    assert.ok(close !== undefined, 'the host must be told to drop the record');
+    assert.equal(close.body.uiId, 'ui-dddd4444');
+    assert.ok(close.url.endsWith('/rpc'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('the activation line names the installed version', () => {

@@ -29,7 +29,7 @@ conversation needs it.
 | `float` | A draggable, resizable window (`size: "520x360+80+60"`) |
 | `background` | A click-through layer over the frame |
 | `fullscreen` | Covers the session, with a built-in switch back to chat |
-| `dock-right` | Reserved for the session side panel (falls back to the dock today) |
+| `dock-right` | The session's right column, as a tab that hosts this session's right-placed interfaces (falls back to the dock above the composer when the column exposes no tab service) |
 
 ## Install
 

@@ -14,6 +14,9 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `dock-right` now uses the session's right column: the plugin registers a
+  `dsh-htmlui-panel` tab type, reveals it when a right-placed interface appears,
+  and drops back to the composer dock when that column exposes no tab service.
 - `GET /plugins/@mostkia/dsh-htmlui/health` reports the running plugin version,
   the supported placements, and interface/template/stream counts, so an operator
   can confirm which generation a live host is running without reading logs. It
