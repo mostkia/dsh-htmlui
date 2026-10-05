@@ -50,6 +50,11 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `test/package.test.mjs`: the release checks are now automated — the manifest
+  the loader and the marketplace read, the files the package promises, the
+  entries the loader resolves by itself, the two import rules, the version stated
+  in four places, the skill's frontmatter, the prepared marketplace entry, and a
+  scan that refuses any machine-specific path or address in the repository.
 - `test/render-smoke.test.mjs`: every browser-half component is executed for
   each of its branches against a stub hook runtime and its element tree is
   walked, so the render path has executable coverage for the first time. It is a

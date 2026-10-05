@@ -30,6 +30,9 @@ jobs:
           node --check client.js
           node --check assets/bridge.js
 
+      - name: Package integrity
+        run: node test/package.test.mjs
+
       - name: Host half
         run: node test/host-half.test.mjs
 
