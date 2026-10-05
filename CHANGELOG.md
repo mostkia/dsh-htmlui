@@ -14,6 +14,15 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- The SSE carrier is covered end to end: a stream's hello frame, forwarded model
+  text, session events, interface lifecycle frames, per-session isolation, and
+  the hub releasing a closed stream.
+- Mutating tool paths are scoped to the calling session: another session can no
+  longer rewrite, remove, or freeze an interface by guessing its id.
+- Attaching or freezing a document by path accepts only `.html`, `.htm`, or
+  `.xhtml` files.
+- `docs/PUBLISHING.md` and `docs/awesome-dsh-plugin.yml` prepare the release and
+  the marketplace submission.
 - `dock-right` now uses the session's right column: the plugin registers a
   `dsh-htmlui-panel` tab type, reveals it when a right-placed interface appears,
   and drops back to the composer dock when that column exposes no tab service.

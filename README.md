@@ -123,7 +123,7 @@ example.
 ## Development
 
 ```sh
-npm test        # 18 host-half assertions + 11 browser-half assertions
+npm test        # 21 host-half assertions + 16 browser-half assertions
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

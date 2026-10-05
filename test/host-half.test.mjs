@@ -95,50 +95,96 @@ function createFakeSessionController() {
   };
 }
 
+/**
+ * Build one fake request/response exchange. `callRoute` awaits the end; a stream
+ * route never ends, so its caller inspects the recorded chunks instead.
+ */
+function createExchange({ method = 'GET', url = '/', headers = {}, body = undefined }) {
+  const chunks = [];
+  const listeners = new Map();
+  const res = {
+    statusCode: 0,
+    headers: {},
+    ended: false,
+    writeHead(status, headers_) {
+      this.statusCode = status;
+      this.headers = headers_ ?? {};
+    },
+    write(chunk) {
+      chunks.push(String(chunk));
+      return true;
+    },
+    end(chunk) {
+      if (chunk !== undefined) chunks.push(String(chunk));
+      this.ended = true;
+      if (typeof this.onEnd === 'function') this.onEnd();
+    },
+    flushHeaders() {},
+    on(name, handler) {
+      const bucket = listeners.get(name) ?? [];
+      bucket.push(handler);
+      listeners.set(name, bucket);
+      return res;
+    },
+    once(name, handler) {
+      return res.on(name, handler);
+    },
+  };
+  const req = {
+    method,
+    url,
+    headers,
+    on(name, handler) {
+      const bucket = listeners.get(name) ?? [];
+      bucket.push(handler);
+      listeners.set(name, bucket);
+      return req;
+    },
+    destroy() {
+      res.ended = true;
+    },
+  };
+  return {
+    req,
+    res,
+    chunks,
+    text: () => chunks.join(''),
+    /** Fire one lifecycle event at both ends, as node would on socket close. */
+    emit(name) {
+      for (const handler of listeners.get(name) ?? []) handler();
+    },
+    /** Feed the body after the handler has subscribed. */
+    start() {
+      queueMicrotask(() => {
+        if (body !== undefined) {
+          for (const handler of listeners.get('data') ?? []) handler(Buffer.from(body, 'utf8'));
+        }
+        for (const handler of listeners.get('end') ?? []) handler();
+      });
+    },
+  };
+}
+
 /** Drive the registered route handler with a fake request/response pair. */
-function callRoute(route, { method = 'GET', url = '/', headers = {}, body = undefined }) {
+function callRoute(route, options) {
+  const exchange = createExchange(options ?? {});
   return new Promise((resolve) => {
-    const chunks = [];
-    const res = {
-      statusCode: 0,
-      headers: {},
-      body: '',
-      writeHead(status, headers_) {
-        this.statusCode = status;
-        this.headers = headers_ ?? {};
-      },
-      write(chunk) {
-        chunks.push(String(chunk));
-        return true;
-      },
-      end(chunk) {
-        if (chunk !== undefined) chunks.push(String(chunk));
-        resolve({ status: this.statusCode, headers: this.headers, text: chunks.join('') });
-      },
-      flushHeaders() {},
-    };
-    const listeners = new Map();
-    const req = {
-      method,
-      url,
-      headers,
-      on(name, handler) {
-        const bucket = listeners.get(name) ?? [];
-        bucket.push(handler);
-        listeners.set(name, bucket);
-        return req;
-      },
-      destroy() {},
-    };
-    route.handler(req, res);
-    queueMicrotask(() => {
-      if (body !== undefined) {
-        for (const handler of listeners.get('data') ?? []) handler(Buffer.from(body, 'utf8'));
-      }
-      for (const handler of listeners.get('end') ?? []) handler();
-    });
+    exchange.res.onEnd = () =>
+      resolve({ status: exchange.res.statusCode, headers: exchange.res.headers, text: exchange.text() });
+    route.handler(exchange.req, exchange.res);
+    exchange.start();
   });
 }
+
+/** Open a response that stays open (an SSE stream) and return its live recorder. */
+function startRoute(route, options) {
+  const exchange = createExchange(options ?? {});
+  route.handler(exchange.req, exchange.res);
+  exchange.start();
+  return exchange;
+}
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 let harness;
 before(() => {
@@ -476,6 +522,71 @@ test('only documents can be attached or frozen by path', async () => {
   writeFileSync(join(scratch, 'panel.htm'), '<p>htm</p>', 'utf8');
   const accepted = await tool('html_ui').execute({ op: 'render', path: 'panel.htm' }, exec());
   assert.equal(accepted.ok, true);
+});
+
+test('the SSE stream delivers model output and interface lifecycle for its session only', async () => {
+  const sseClients = async () =>
+    JSON.parse(
+      (
+        await callRoute(route(), {
+          url: '/plugins/@mostkia/dsh-htmlui/health',
+          headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+        })
+      ).text,
+    ).counts.sseClients;
+  const before = await sseClients();
+
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>stream</p>', title: 'Stream' }, exec('session-sse'));
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const capability = /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+
+  const stream = startRoute(route(), {
+    url: `/plugins/@mostkia/dsh-htmlui/events?uiId=${created.uiId}&t=${capability}`,
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+  });
+  assert.equal(stream.res.statusCode, 200);
+  assert.match(stream.res.headers['content-type'], /text\/event-stream/u);
+  await tick();
+  assert.match(stream.text(), /event: hello/u, 'the stream opens with a hello frame');
+  assert.ok(stream.text().includes(`"uiId":"${created.uiId}"`));
+  assert.equal(await sseClients(), before + 1, 'an open stream is tracked by the hub');
+
+  // The model's streamed text is what an interface subscribes for.
+  harness.ctx.emit('agent/assistant-stream', {
+    agent: { session: { id: 'session-sse' } },
+    frame: { type: 'chunk', chunk: { text: 'hello from the model' } },
+  });
+  await tick();
+  assert.match(stream.text(), /event: assistant/u);
+  assert.ok(stream.text().includes('"text":"hello from the model"'));
+
+  // Another session's traffic must never reach this document.
+  harness.ctx.emit('agent/assistant-stream', {
+    agent: { session: { id: 'session-elsewhere' } },
+    frame: { type: 'chunk', chunk: { text: 'private' } },
+  });
+  await tick();
+  assert.ok(!stream.text().includes('private'), 'a stream is scoped to its own session');
+
+  // Durable session events and interface lifecycle frames ride the same stream.
+  harness.ctx.emit('session/event', { id: 'session-sse' }, { seq: 41, type: 'message' });
+  await tick();
+  assert.match(stream.text(), /event: session/u);
+  assert.ok(stream.text().includes('"seq":41'));
+
+  await tool('html_ui').execute({ op: 'update', id: created.uiId, html: '<p>stream2</p>' }, exec('session-sse'));
+  await tick();
+  assert.match(stream.text(), /event: ui/u);
+  assert.ok(stream.text().includes('"action":"update"'));
+
+  // A closed request leaves the hub, so a long-lived host does not accumulate streams.
+  stream.emit('close');
+  assert.equal(await sseClients(), before, 'a closed stream is released');
 });
 
 test('every presentation projection stays lossless JSON', async () => {

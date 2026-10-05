@@ -92,7 +92,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 宿主半部 18 项 + 浏览器半部 11 项断言
+npm test        # 宿主半部 21 项 + 浏览器半部 16 项断言
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 
