@@ -272,6 +272,62 @@ test('without a locale service the English literals stand, and a refusal is surv
   assert.ok(refusing.logs.some((line) => String(line).includes('locale service refused')));
 });
 
+test('dock-right keeps its fallback until the column can actually open a tab', () => {
+  // A registered tab type is not enough: without a controller the interface would
+  // have no seat at all, so the composer dock must keep claiming it.
+  const base = ['dock-top', 'panel'];
+  resetRightPane();
+  const registeredTab = { register: () => () => {} };
+  apply(createClientContext({ tabs: registeredTab }));
+  assert.equal(__internals.rightPaneReady(), false, 'a tab type alone cannot open a tab');
+  assert.ok(__internals.dockPlacements(base).includes('dock-right'), 'so the fallback holds');
+
+  // With the controller bound, the right column takes over and the dock lets go.
+  resetRightPane();
+  const controller = { openTab: () => {} };
+  apply(createClientContext({ tabs: registeredTab, controller }));
+  assert.equal(__internals.rightPaneReady(), true);
+  assert.ok(!__internals.dockPlacements(base).includes('dock-right'), 'the dock stops claiming it');
+
+  // A controller that cannot open a tab is no more use than none at all.
+  resetRightPane();
+  apply(createClientContext({ tabs: registeredTab, controller: {} }));
+  assert.equal(__internals.rightPaneReady(), false);
+  assert.ok(__internals.dockPlacements(base).includes('dock-right'));
+
+  // The bottom dock never claims dock-right, whichever state the column is in.
+  assert.ok(!__internals.dockPlacements(['dock-bottom']).includes('dock-right'));
+  resetRightPane();
+});
+
+test('a theme switch does not reload an open document', async () => {
+  resetRightPane();
+  const tickets = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    if (url.endsWith('/ui/ticket')) {
+      const body = JSON.parse(init.body);
+      tickets.push(body);
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, url: `http://127.0.0.1:3080/ui/${body.uiId}?t=abc&theme=${body.theme}` }) });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
+  };
+  try {
+    __internals.state.tickets.clear();
+    const first = await __internals.ensureTicket('ui-77770000', 'light');
+    assert.match(first, /theme=light/u);
+    // The same document under a different theme keeps its URL: the frame's theme
+    // arrives over postMessage, and changing src would reload the document and
+    // lose everything it holds in memory.
+    const second = await __internals.ensureTicket('ui-77770000', 'dark');
+    assert.equal(second, first);
+    assert.equal(tickets.length, 1, 'exactly one ticket was minted');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.tickets.clear();
+  }
+});
+
 test('dock-top and dock-bottom land in different seats', () => {
   resetRightPane();
   const context = createClientContext();

@@ -53,10 +53,21 @@ Attach one of each and confirm it appears where its placement promises:
 | `inline` | The document renders inside the tool row, scrolls with the transcript, and its chrome shows the title |
 | `dock-top` | A full-width surface above the composer card |
 | `dock-bottom` | A full-width surface below the composer card (a different seat, not a second stack above) |
-| `dock-right` | The session's right column opens a tab hosting it; without that column it falls back to the dock above the composer |
-| `float` | A window that drags by its header and resizes from the corner; `size` sets where it starts |
-| `fullscreen` | The surface covers the session, and "切回聊天" gives the chat back and keeps it closed |
+| `dock-right` | The session's right column opens a tab hosting it; while that column cannot open a tab (no controller bound) it falls back to the dock above the composer |
+| `float` | A window that drags by its header and resizes from the corner (arrows work on the focused handle); `size` sets where it starts |
+| `fullscreen` | The surface covers the session, and "Back to chat" (or Escape) gives the chat back and keeps it closed |
 | `background` | A click-through layer: the page under it still receives clicks |
+
+Two constraints of the host layout, worth knowing before judging a failure:
+
+- `dock-bottom` and `panel` are rendered by the composer dock, which the product
+  mounts only while a composer for that session is on screen. In a state without
+  one, those records have no seat and are simply not visible.
+- A record created or closed *somewhere else* — another tab, or the model updating
+  an interface whose card is scrolled out of the virtualized transcript — is picked
+  up when the page loads its records (`/ui/list`), not live: the page keeps no
+  session-level event stream. Inside a document, the model's output still streams
+  live over that document's own SSE channel.
 | `panel` | The same surface updates in place after `html_ui op=update` |
 
 ## 3. The template drawer
@@ -81,7 +92,9 @@ Inside a document, click a control wired to `dshHTML.send('name', {...})`.
 - A control that only calls local logic must not produce such a message.
 
 Then update the interface with `html_ui op=update`: the surface must reload and
-show the new document without a manual refresh.
+show the new document without a manual refresh, in the tab that ran the call. A
+tab that did *not* run it converges on its next `/ui/list` (page load), for the
+reason noted under Forms.
 
 ## 5. Theme
 

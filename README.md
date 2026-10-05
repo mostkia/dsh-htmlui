@@ -29,7 +29,7 @@ conversation needs it.
 | `float` | A draggable, resizable window (`size: "520x360+80+60"`) |
 | `background` | A click-through layer over the frame |
 | `fullscreen` | Covers the session, with a built-in switch back to chat |
-| `dock-right` | The session's right column, as a tab that hosts this session's right-placed interfaces (falls back to the dock above the composer when the column exposes no tab service) |
+| `dock-right` | The session's right column, as a tab that hosts this session's right-placed interfaces (falls back to the dock above the composer while the column cannot open a tab) |
 
 A document can declare its own placement instead of the caller naming it — useful
 for a template, which then carries its home with it:
@@ -193,7 +193,7 @@ close it.
 ## Development
 
 ```sh
-npm test        # 118 assertions: 12 package, 10 doc contract, 35 host, 25 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 120 assertions: 12 package, 10 doc contract, 35 host, 27 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

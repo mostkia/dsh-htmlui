@@ -211,11 +211,21 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The right column is usable only when both halves are there: the tab type is
+     * registered, and a controller can actually open it. Anything less leaves a
+     * dock-right interface with no seat, so the fallback has to hold.
+     */
+    function rightPaneReady() {
+      return state.rightPane.available === true && typeof state.rightPane.controller?.openTab === 'function';
+    }
+
+    /**
      * Reveal the right-sidebar tab that hosts this session's dock-right interfaces.
      * Returns false when the column exposes no tab service, in which case the
      * caller keeps its fallback (the composer dock).
      */
-    function openRightPane(uiId) {      const controller = state.rightPane.controller;
+    function openRightPane(uiId) {
+      const controller = state.rightPane.controller;
       if (controller === undefined || typeof controller.openTab !== 'function') return false;
       try {
         controller.openTab(TAB_KIND, { params: { uiId, source: '@mostkia/dsh-htmlui' } });
@@ -302,11 +312,15 @@ window.__ModuleLoader__.load({
     }
 
     function ensureTicket(uiId, theme) {
+      // The URL is not theme-specific. A frame's theme travels over the init and
+      // theme messages, so a theme switch must not mint a new URL: changing `src`
+      // reloads the document and throws away everything the interface holds
+      // (form input, scroll position, a chart's own state).
       const cached = state.tickets.get(uiId);
-      if (cached !== undefined && cached.theme === theme) return Promise.resolve(cached.url);
+      if (cached !== undefined) return Promise.resolve(cached.url);
       return postJson('/ui/ticket', { uiId, theme }).then((value) => {
         if (value === null || value.ok !== true || typeof value.url !== 'string') return undefined;
-        state.tickets.set(uiId, { url: value.url, theme });
+        state.tickets.set(uiId, { url: value.url });
         if (value.ui !== undefined) publish(value.ui);
         return value.url;
       });
@@ -418,6 +432,9 @@ window.__ModuleLoader__.load({
         toModel: 'Ask the model',
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
+        expand: 'Show',
+        retry: 'Retry',
+        resizeHandle: 'Resize the panel',
         bundled: 'bundled',
         loading: 'Reading templates…',
         empty: 'No templates yet: have the model save one with html_ui_template, or drop your own .html into the templates directory.',
@@ -441,6 +458,9 @@ window.__ModuleLoader__.load({
         toModel: '交给模型',
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
+        expand: '展开',
+        retry: '重试',
+        resizeHandle: '调整面板高度',
         bundled: '自带',
         loading: '正在读取模板…',
         empty: '还没有模板：让模型用 html_ui_template 存一个，或把你的 .html 放进模板目录。',
@@ -600,6 +620,7 @@ window.__ModuleLoader__.load({
       const { record, theme, variant } = props;
       const [url, setUrl] = useState(undefined);
       const [status, setStatus] = useState('loading');
+      const [attempt, setAttempt] = useState(0);
       const frameRef = useRef(null);
       const nonceRef = useRef(newNonce());
       const initial = props.initialSize ?? parseSizeText(record.sizeText) ?? {};
@@ -629,7 +650,7 @@ window.__ModuleLoader__.load({
         return () => {
           cancelled = true;
         };
-      }, [record.uiId, record.revision, record.placement, theme]);
+      }, [record.uiId, record.revision, record.placement, attempt]);
 
       const handshake = useCallback(() => {
         const frame = frameRef.current;
@@ -729,7 +750,27 @@ window.__ModuleLoader__.load({
 
       const body = useMemo(() => {
         if (status === 'error') {
-          return h('div', { style: emptyStyle }, 'HTML UI unavailable — the document could not be loaded.');
+          // A ticket can legitimately fail once (rate limited, or the interface was
+          // closed in another tab). Without a way back the surface would stay broken
+          // until the page is reloaded, so the failure is recoverable.
+          return h(
+            'div',
+            { style: Object.assign({}, emptyStyle, { display: 'flex', alignItems: 'center', gap: '8px' }) },
+            h('span', null, tr('unavailable', 'HTML UI unavailable — the document could not be loaded.')),
+            h(
+              'button',
+              {
+                type: 'button',
+                style: buttonStyle,
+                onClick: () => {
+                  state.tickets.delete(record.uiId);
+                  setStatus('loading');
+                  setAttempt((current) => current + 1);
+                },
+              },
+              tr('retry', 'Retry'),
+            ),
+          );
         }
         if (url === undefined) {
           return h('div', { style: emptyStyle }, 'Preparing interface…');
@@ -744,7 +785,7 @@ window.__ModuleLoader__.load({
           onLoad: handshake,
           style: frameStyle,
         });
-      }, [url, status, record.uiId, record.title, handshake]);
+      }, [url, status, record.uiId, record.title, handshake, attempt]);
 
       if (variant === 'float') {
         const w = size.w ?? DEFAULT_FLOAT.w;
@@ -779,7 +820,17 @@ window.__ModuleLoader__.load({
             },
             h('span', { style: titleStyle }, `${record.title !== undefined && record.title.length > 0 ? record.title : record.uiId} · float`),
             props.onDismiss !== undefined
-              ? h('button', { type: 'button', style: buttonStyle, onClick: () => props.onDismiss(record.uiId), title: 'Remove' }, '✕')
+              ? h(
+                'button',
+                {
+                  type: 'button',
+                  style: buttonStyle,
+                  onClick: () => props.onDismiss(record.uiId),
+                  title: tr('close', 'Close'),
+                  'aria-label': tr('close', 'Close'),
+                },
+                '✕',
+              )
               : null,
           ),
           h('div', { style: { position: 'relative', flex: '1 1 auto', minHeight: '0', background: 'var(--dsw-alias-bg-base, #fff)' } }, body),
@@ -798,6 +849,21 @@ window.__ModuleLoader__.load({
             onPointerDown: onResizeDown,
             onPointerMove: onResizeMove,
             onPointerUp: onResizeUp,
+            role: 'separator',
+            tabIndex: 0,
+            'aria-label': tr('resizeHandle', 'Resize the panel'),
+            onKeyDown: (event) => {
+              const dx = event.key === 'ArrowLeft' ? -24 : event.key === 'ArrowRight' ? 24 : 0;
+              const dy = event.key === 'ArrowUp' ? -24 : event.key === 'ArrowDown' ? 24 : 0;
+              if (dx === 0 && dy === 0) return;
+              event.preventDefault();
+              setSize((current) => ({
+                w: Math.max(240, (current.w ?? DEFAULT_FLOAT.w) + dx),
+                h: Math.max(160, (current.h ?? DEFAULT_FLOAT.h) + dy),
+                x: current.x,
+                y: current.y,
+              }));
+            },
             onPointerCancel: onResizeUp,
           }),
         );
@@ -835,12 +901,30 @@ window.__ModuleLoader__.load({
           props.onToggleCollapse !== undefined
             ? h(
                 'button',
-                { type: 'button', style: buttonStyle, onClick: () => props.onToggleCollapse(record.uiId), title: 'Collapse' },
+                {
+                  type: 'button',
+                  style: buttonStyle,
+                  onClick: () => props.onToggleCollapse(record.uiId),
+                  title: props.collapsed === true ? tr('expand', 'Show') : tr('collapse', 'Hide'),
+                  // The glyph alone is the accessible name without this.
+                  'aria-label': props.collapsed === true ? tr('expand', 'Show') : tr('collapse', 'Hide'),
+                  'aria-expanded': props.collapsed === true ? 'false' : 'true',
+                },
                 props.collapsed === true ? '▸' : '▾',
               )
             : null,
           props.onDismiss !== undefined
-            ? h('button', { type: 'button', style: buttonStyle, onClick: () => props.onDismiss(record.uiId), title: 'Remove' }, '✕')
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  style: buttonStyle,
+                  onClick: () => props.onDismiss(record.uiId),
+                  title: tr('close', 'Close'),
+                  'aria-label': tr('close', 'Close'),
+                },
+                '✕',
+              )
             : null,
         ),
         props.collapsed === true
@@ -872,12 +956,15 @@ window.__ModuleLoader__.load({
         // render, and an object dependency would republish on each one.
       }, [meta === undefined ? undefined : meta.uiId, meta === undefined ? undefined : meta.revision, meta === undefined ? undefined : meta.op, sessionId]);
 
-      // A dock-right interface lives in the right column: reveal its tab once.
+      // A dock-right interface lives in the right column: reveal its tab as soon as
+      // the column can be opened. The controller binds asynchronously, so this
+      // retries whenever it arrives rather than giving up on the first render.
+      const rightPaneController = state.rightPane.controller;
       useEffect(() => {
         if (record === undefined || record.placement !== 'dock-right') return;
         if (state.rightPane.opened.has(record.uiId)) return;
         openRightPane(record.uiId);
-      }, [record === undefined ? undefined : record.uiId, record === undefined ? undefined : record.placement]);
+      }, [record === undefined ? undefined : record.uiId, record === undefined ? undefined : record.placement, rightPaneController]);
 
       if (phase === 'preparing') {
         return h(
@@ -959,7 +1046,7 @@ window.__ModuleLoader__.load({
         placement === 'fullscreen'
           ? h('button', { type: 'button', style: buttonStyle, onClick: openFullscreen }, tr('open', 'Open'))
           : null,
-        placement === 'dock-right' && state.rightPane.available
+        placement === 'dock-right' && rightPaneReady()
           ? h('button', { type: 'button', style: buttonStyle, onClick: () => openRightPane(record.uiId) }, tr('openInRight', 'Open in the right column'))
           : null,
         h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('close', 'Close')),
@@ -979,6 +1066,17 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------- docks
 
+    /**
+     * Which placements one dock claims. dock-right belongs to the right column only
+     * while that column can actually open a tab: the type registering is not enough,
+     * because the interface would then be in no seat at all. Until the controller is
+     * bound, the composer dock keeps claiming it, and only that dock claims it so a
+     * record never renders twice.
+     */
+    function dockPlacements(base) {
+      return base.includes('dock-top') && !rightPaneReady() ? [...base, 'dock-right'] : base;
+    }
+
     function HtmlUiDock(props) {
       useStore();
       const sessionId = sessionIdOf(props);
@@ -987,10 +1085,7 @@ window.__ModuleLoader__.load({
 
       if (sessionId === undefined) return null;
       const base = Array.isArray(props.placements) ? props.placements : ['dock-top', 'panel'];
-      // dock-right belongs to the right column whenever that column exposes its
-      // tab service; the composer dock above the input remains its fallback, and
-      // only that dock claims it so it never renders twice.
-      const placements = base.includes('dock-top') && !state.rightPane.available ? [...base, 'dock-right'] : base;
+      const placements = dockPlacements(base);
       const records = recordsIn(sessionId, placements);
       if (records.length === 0) return null;
 
@@ -1034,7 +1129,18 @@ window.__ModuleLoader__.load({
           onPointerMove: onResizeMove,
           onPointerUp: onResizeUp,
           onPointerCancel: onResizeUp,
-          title: 'Drag to resize',
+          title: tr('resizeHandle', 'Resize the panel'),
+          // A drag-only handle is unreachable by keyboard; the arrows do the same job.
+          role: 'separator',
+          tabIndex: 0,
+          'aria-label': tr('resizeHandle', 'Resize the panel'),
+          'aria-orientation': 'horizontal',
+          onKeyDown: (event) => {
+            const step = event.key === 'ArrowUp' ? -24 : event.key === 'ArrowDown' ? 24 : 0;
+            if (step === 0) return;
+            event.preventDefault();
+            setHeight((current) => Math.min(DOCK_MAX_HEIGHT, Math.max(DOCK_MIN_HEIGHT, current + step)));
+          },
         }),
         ...records.map((record) =>
           h(
@@ -1042,10 +1148,14 @@ window.__ModuleLoader__.load({
             {
               key: record.uiId,
               style: {
-                maxHeight: state.collapsed.get(record.uiId) === true ? 'auto' : `${height}px`,
+                // A concrete height, not only a maximum: the frame inside asks for
+                // 100%, and a percentage against an indefinite height resolves to
+                // auto, so a max-height alone would clip instead of resize.
+                height: state.collapsed.get(record.uiId) === true ? 'auto' : `${height}px`,
                 display: 'flex',
                 flexDirection: 'column',
                 minHeight: '0',
+                overflow: 'hidden',
               },
             },
             h(HtmlUiFrame, {
@@ -1206,8 +1316,29 @@ window.__ModuleLoader__.load({
         return typeof unsubscribe === 'function' ? unsubscribe : undefined;
       }, [props.ctx]);
 
+      // Every hook runs before any early return: a conditional hook would break the
+      // order the moment a session gains or loses its first record.
+      const sessionRecords = sessionId === undefined ? [] : recordsFor(sessionId);
+      const fullscreenId = activeFullscreen(sessionRecords)?.uiId;
+
+      // Escape is the reflex for leaving a fullscreen layer, and the button alone
+      // would be the only way out for anyone not using a pointer.
+      useEffect(() => {
+        if (fullscreenId === undefined) return undefined;
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return;
+          // Switch back to the chat and keep this interface closed until the user
+          // asks for it again; a newly attached one still opens.
+          state.fullscreen = null;
+          state.fullscreenDismissed.add(fullscreenId);
+          bump();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      }, [fullscreenId]);
+
       if (sessionId === undefined) return null;
-      const records = recordsFor(sessionId);
+      const records = sessionRecords;
       if (records.length === 0) return null;
 
       const floats = records.filter((record) => record.placement === 'float');
@@ -1215,6 +1346,12 @@ window.__ModuleLoader__.load({
       const fullscreenRecord = activeFullscreen(records);
 
       const dismiss = dismissRecord;
+
+      const leaveFullscreen = (uiId) => {
+        state.fullscreen = null;
+        state.fullscreenDismissed.add(uiId);
+        bump();
+      };
 
       const layers = [];
 
@@ -1256,6 +1393,11 @@ window.__ModuleLoader__.load({
                 pointerEvents: 'auto',
                 background: 'var(--dsw-alias-bg-base, #fff)',
               },
+              // Modal to assistive technology: the layer covers the page, so the
+              // page behind it must not stay reachable by a screen reader.
+              role: 'dialog',
+              'aria-modal': 'true',
+              'aria-label': fullscreenRecord.title.length > 0 ? fullscreenRecord.title : fullscreenRecord.uiId,
             },
             h(
               'div',
@@ -1266,13 +1408,7 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   style: buttonStyle,
-                  onClick: () => {
-                    // Switch back to the chat and keep this interface closed until
-                    // the user asks for it again; a newly attached one still opens.
-                    state.fullscreen = null;
-                    state.fullscreenDismissed.add(fullscreenRecord.uiId);
-                    bump();
-                  },
+                  onClick: () => leaveFullscreen(fullscreenRecord.uiId),
                 },
                 tr('backToChat', 'Back to chat'),
               ),
@@ -1511,6 +1647,7 @@ window.__ModuleLoader__.load({
         toggleTemplates,
         applyTemplate,
         askModelForTemplate,
+        ensureTicket,
         tr,
         MESSAGES,
         LOCALE_NS,
@@ -1519,6 +1656,8 @@ window.__ModuleLoader__.load({
         dismissRecord,
         toggleCollapsed,
         openRightPane,
+        rightPaneReady,
+        dockPlacements,
         wireRightPane,
         HtmlUiRightPane,
         HtmlUiFrame,

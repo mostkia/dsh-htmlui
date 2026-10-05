@@ -78,6 +78,24 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   document adds one when the author wrote none, and never rewrites what is stored.
 ### Fixed
 
+- A `dock-right` interface always has a seat. The tab *type* registering was
+  treated as "the column works", but opening the tab needs the controller too, and
+  the composer dock stopped claiming `dock-right` as soon as the type registered —
+  so between those two moments the interface rendered nowhere. Readiness now needs
+  both halves, the reveal effect retries when the controller binds, and the
+  fallback holds until then.
+- A theme switch no longer reloads every open document. The ticket URL carried the
+  theme, so changing it changed `src`, which reloaded the frame and discarded
+  everything the interface held in memory (form input, scroll, a chart's own
+  state); the theme already travels over the init and theme messages. A failed
+  ticket is also recoverable now, instead of leaving the surface broken until a
+  page reload.
+- The dock resize handle resizes. The wrapper was constrained with `maxHeight`
+  while the frame asked for `height: 100%`, and a percentage against an indefinite
+  height resolves to `auto`, so dragging only clipped. It sets a concrete height,
+  responds to the arrow keys, and is a labelled `separator` for assistive tech,
+  as are the glyph-only buttons; the fullscreen layer is `aria-modal` and Escape
+  leaves it. (A hook placed after an early return was moved back above it.)
 - The peer range caps every branch. `>=0.1.7-0` had no upper comparator, so a
   future `0.3.0` or `1.0.0` satisfied it — the opposite of what
   `docs/COMPATIBILITY.md` describes. Each line now carries its own ceiling, and

@@ -61,7 +61,7 @@ Things worth stating rather than leaving to be discovered:
 
 ### Verification
 
-`npm test` runs six suites (82 assertions) with no harness and no browser: package
+`npm test` runs nine suites (118 assertions) with no harness and no browser: package
 integrity and a scan that refuses machine-specific strings, the documentation
 contract against the code, the host half, the browser half, the document bridge,
 and a shallow render of every component branch. CI runs them on Ubuntu and
