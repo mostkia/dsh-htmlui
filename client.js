@@ -1356,7 +1356,7 @@ window.__ModuleLoader__.load({
 
       return h(
         'div',
-        { style: { display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0' } },
+        { style: { display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0', flexShrink: 0 } },
         h('div', {
           style: { height: '6px', cursor: 'ns-resize', touchAction: 'none', borderRadius: '3px', background: 'transparent' },
           onPointerDown: onResizeDown,
@@ -1729,6 +1729,11 @@ window.__ModuleLoader__.load({
             borderRadius: '10px',
             background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.02))',
             overflow: 'hidden',
+            // The composer's dock is a flex column that also hosts other entries. An
+            // item without this is squashed to its first row when they compete for
+            // height, which is what a drawer "flattened to its title bar" was.
+            flexShrink: 0,
+            minHeight: '54px',
           },
         },
         h(
