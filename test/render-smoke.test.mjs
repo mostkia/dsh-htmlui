@@ -306,12 +306,12 @@ test('the right pane renders nothing until it has something to host', () => {
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-55550000', sessionId: 'session-1', title: 'R', placement: 'dock-right', revision: 1, bytes: 5 }, undefined),
   ]);
   const hosted = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
-  // The tab already carries the title and the close, so the body draws the document
-  // alone: no title, no box, and no second set of controls inside the surface.
+  // The tab carries the title, so the body draws the document without one — but each
+  // object keeps its own collapse and close, because the column can hold several.
   assert.match(hosted.text, /Preparing interface/u);
   assert.ok(!hosted.text.includes('R'), 'the tab title is not repeated inside the body');
-  assert.ok(!hosted.text.includes('✕'), 'the surface has no close of its own');
-  assert.ok(!hosted.text.includes('▾'), 'and no collapse control either');
+  assert.match(hosted.text, /✕/u, 'one object can be closed without closing the tab');
+  assert.match(hosted.text, /▾/u, 'and collapsed on its own');
 });
 
 test('the template drawer renders nothing closed and a row per template open', () => {

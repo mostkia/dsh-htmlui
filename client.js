@@ -1997,13 +1997,17 @@ window.__ModuleLoader__.load({
               key: record.uiId,
               style: { flex: '1 1 auto', minHeight: '0', display: 'flex', flexDirection: 'column' },
             },
-            // No controls of its own here: the tab carries the close, and a second ✕
-            // inside the surface was one control too many for a page that is already a
-            // panel of the shell.
+            // Each object keeps its own collapse and close: the column can hold several
+            // independent surfaces, and one of them being in the way is not a reason to
+            // close the tab for all of them. They render as a faint cluster in the
+            // corner — no title row, so the surface itself stays seamless.
             h(HtmlUiFrame, {
               record,
               theme: state.theme,
               variant: 'dock',
+              collapsed: state.collapsed.get(record.uiId) === true,
+              onToggleCollapse: toggleCollapsed,
+              onDismiss: dismissRecord,
             }),
           ),
         ),
