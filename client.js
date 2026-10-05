@@ -2035,8 +2035,17 @@ window.__ModuleLoader__.load({
     function ticketToken(uiId) {
       const cached = state.tickets.get(uiId);
       if (cached === undefined || typeof cached.url !== 'string') return undefined;
-      const match = /[?&]t=([^&]+)/u.exec(cached.url);
-      return match === null ? undefined : match[1];
+      // Two shapes, because the capability travels differently for a project that serves
+      // its own files: the plain document route carries it in the query
+      // (`…/ui/<id>?t=…`), while the file route carries it in the *path*
+      // (`…/files/<id>/<token>/index.html`) — a relative subresource request has no query
+      // string to put it in. Reading only the query is why closing such an interface never
+      // worked: no token was found, the close was never sent, and the record outlived the
+      // button and came back on every load.
+      const fromQuery = /[?&]t=([^&]+)/u.exec(cached.url);
+      if (fromQuery !== null) return fromQuery[1];
+      const fromPath = /\/files\/[^/]+\/([^/?#]+)\//u.exec(cached.url);
+      return fromPath === null ? undefined : fromPath[1];
     }
 
     function dismissRecord(uiId) {

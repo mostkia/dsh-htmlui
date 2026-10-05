@@ -674,6 +674,20 @@ test('every surface keeps one hook order, records or not', () => {
   );
 });
 
+test('the capability is read from either URL shape', () => {
+  // A project that serves its own files is opened at `…/files/<id>/<token>/index.html`,
+  // because a relative subresource request has no query string to carry the token in. The
+  // closing path read only the query, found nothing, and never sent the close — so those
+  // interfaces could not be removed and came back on every load.
+  __internals.state.tickets.clear();
+  __internals.state.tickets.set('ui-token001', { url: '/plugins/@mostkia/dsh-htmlui/ui/ui-token001?t=query-token&r=1' });
+  assert.equal(__internals.ticketToken('ui-token001'), 'query-token', 'the plain document route carries it in the query');
+  __internals.state.tickets.set('ui-token002', { url: '/plugins/@mostkia/dsh-htmlui/files/ui-token002/path-Token_1/index.html?r=1' });
+  assert.equal(__internals.ticketToken('ui-token002'), 'path-Token_1', 'the file route carries it in the path');
+  assert.equal(__internals.ticketToken('ui-unknown'), undefined, 'and an interface this page never loaded has none');
+  __internals.state.tickets.clear();
+});
+
 test('a closed surface stays closed until the host drops the record', () => {
   const record = __internals.recordFromMeta(
     { htmlui: true, op: 'render', uiId: 'ui-close0001', sessionId: 'session-close', title: 'C', placement: 'float', revision: 1, bytes: 5 },
