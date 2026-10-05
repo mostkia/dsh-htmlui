@@ -307,7 +307,7 @@ test('a tool result projection becomes a placement record', () => {
       title: '看板',
       placement: 'float',
       size: '520x360+80+60',
-      url: '/plugins/@mostkia/dsh-htmlui/ui/ui-1a2b3c4d?t=x',
+      url: '/plugins/@mostkia/dsh-htmlui/ui/ui-1a2b3c4d?r=3',
       revision: 3,
       bytes: 2048,
     },

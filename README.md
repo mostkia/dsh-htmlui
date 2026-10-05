@@ -83,6 +83,9 @@ allow-popups allow-downloads allow-pointer-lock"`, i.e. **without**
 `allow-same-origin`: an opaque origin with no cookies, no storage, and no access
 to the host page. Every document carries a per-document capability token (HMAC of
 a plugin-local secret) that gates its document, action, state, and SSE routes.
+That token appears in exactly one place — the frame URL the ticket route hands
+out — so no tool result, session log entry, list response, or stream frame ever
+contains it, and a token-free address cannot be loaded.
 
 The carrier's own policy: only loopback Host/Origin pairs are trusted, an
 opaque-origin frame is accepted only with a valid token, cross-site ticket
@@ -144,7 +147,7 @@ removing it uncovers the file again.
 ## Development
 
 ```sh
-npm test        # 53 assertions: 24 host half, 21 browser half, 8 document bridge
+npm test        # 54 assertions: 25 host half, 21 browser half, 8 document bridge
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

@@ -6,6 +6,10 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- A capability token no longer appears in any durable projection. The tool
+  result, its presentation projection, the `/ui/list` response, and the record on
+  disk all carry a token-free address now; the ticket route is the single place
+  the token is handed out, and a token-free address cannot be loaded at all.
 - `window.dshHTML.send()` now includes the `op` the host dispatches on. Without
   it every interaction an interface sent was refused as an unsupported
   operation — the model round trip was broken end to end, and only a test of the

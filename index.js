@@ -756,6 +756,16 @@ export function apply(ctx, config) {
     return `${meta.id} ${meta.placement ?? 'inline'}${size.length > 0 ? ` ${size}` : ''} ${meta.title ?? ''}`.trim();
   }
 
+  /**
+   * Token-free address of a document, safe for anything durable. The capability
+   * token is minted per request by {@link documentUrl} and handed out only by the
+   * ticket route, so it never reaches a tool result, a session log, a list
+   * response, or a stream frame.
+   */
+  function recordPath(meta) {
+    return `${ROUTE_PREFIX}/ui/${meta.id}?r=${meta.revision ?? 1}`;
+  }
+
   /** Public (browser-facing) projection of one UI record. */
   function publicRecord(meta) {
     return {
@@ -766,7 +776,7 @@ export function apply(ctx, config) {
       size: meta.size,
       sizeText: formatSize(meta.size),
       path: meta.path ?? `${ROUTE_PREFIX}/ui/${meta.id}`,
-      url: documentUrl(meta.id, undefined, meta.revision),
+      url: recordPath(meta),
       revision: meta.revision ?? 1,
       bytes: meta.bytes ?? 0,
       origin: meta.origin ?? 'inline',

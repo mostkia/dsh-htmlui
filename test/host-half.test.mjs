@@ -246,7 +246,7 @@ test('render accepts an inline document and reports a machine-independent id', a
   assert.equal(result.placement, 'float');
   assert.equal(result.size, '520x360+40+40');
   assert.equal(result.sessionId, 'session-test');
-  assert.match(result.url, /^\/plugins\/@mostkia\/dsh-htmlui\/ui\/ui-[0-9a-f]{8}\?t=/u);
+  assert.match(result.url, /^\/plugins\/@mostkia\/dsh-htmlui\/ui\/ui-[0-9a-f]{8}\?r=1$/u);
   assert.ok(existsSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', result.uiId, 'index.html')));
 });
 
@@ -679,6 +679,40 @@ test('an explicitly allowed origin works on an exposed deployment', async () => 
       /* best effort */
     }
   }
+});
+
+test('a capability token never reaches a durable projection', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>token</p>', title: 'Token' }, exec('session-token'));
+  assert.ok(!created.url.includes('t='), 'the tool value must not carry the token');
+  const projection = tool('html_ui').output.presentationMeta({}, created);
+  assert.ok(!JSON.stringify(projection).includes('t='), 'the tool projection must not carry the token');
+
+  const listed = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/list',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ sessionId: 'session-token' }),
+  });
+  assert.equal(listed.status, 200);
+  assert.ok(!listed.text.includes('t='), 'the list response must not carry the token');
+
+  const onDisk = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', created.uiId, 'meta.json'), 'utf8');
+  assert.ok(!onDisk.includes('t='), 'the record on disk must not carry the token');
+
+  // The ticket is the one place it appears, and the document cannot be fetched
+  // without it.
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const capability = /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url);
+  assert.ok(capability !== null, 'the ticket hands out the capability');
+  const bare = await callRoute(route(), { url: created.url, headers: { host: '127.0.0.1:3080' } });
+  assert.equal(bare.status, 403, 'the token-free address is not loadable');
+  const framed = await callRoute(route(), { url: JSON.parse(entry.text).url, headers: { host: '127.0.0.1:3080' } });
+  assert.equal(framed.status, 200);
 });
 
 test('every presentation projection stays lossless JSON', async () => {
