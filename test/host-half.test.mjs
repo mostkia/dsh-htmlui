@@ -445,6 +445,39 @@ test('the health route reports the running generation and its counts', async () 
   assert.equal(foreign.status, 403);
 });
 
+test('another session cannot rewrite, remove, or freeze an interface it does not own', async () => {
+  const mine = await tool('html_ui').execute({ op: 'render', html: '<p>mine</p>', title: 'Mine' }, exec('session-owner'));
+  const hijack = await tool('html_ui').execute({ op: 'update', id: mine.uiId, html: '<p>hijacked</p>' }, exec('session-intruder'));
+  assert.equal(hijack.ok, false);
+  assert.match(hijack.error, /another session/u);
+  const removal = await tool('html_ui').execute({ op: 'close', id: mine.uiId }, exec('session-intruder'));
+  assert.equal(removal.ok, false);
+  const stored = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', mine.uiId, 'index.html'), 'utf8');
+  assert.ok(stored.includes('mine'), 'the document survives an intruder update');
+  assert.ok(!stored.includes('hijacked'), 'the intruder body never lands');
+
+  const owned = await tool('html_ui').execute({ op: 'update', id: mine.uiId, html: '<p>mine2</p>' }, exec('session-owner'));
+  assert.equal(owned.ok, true, 'the owner still updates its own interface');
+
+  const stolen = await tool('html_ui_template').execute({ op: 'save', name: 'stolen', ui_id: mine.uiId }, exec('session-intruder'));
+  assert.equal(stolen.ok, false);
+  assert.match(stolen.error, /another session/u);
+});
+
+test('only documents can be attached or frozen by path', async () => {
+  writeFileSync(join(scratch, 'notes.txt'), 'not a document', 'utf8');
+  const refused = await tool('html_ui').execute({ op: 'render', path: 'notes.txt' }, exec());
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /not an HTML document/u);
+  const frozen = await tool('html_ui_template').execute({ op: 'save', name: 'nope', path: 'notes.txt' }, exec());
+  assert.equal(frozen.ok, false);
+  assert.match(frozen.error, /not an HTML document/u);
+  // The allowlist still accepts the other document spellings.
+  writeFileSync(join(scratch, 'panel.htm'), '<p>htm</p>', 'utf8');
+  const accepted = await tool('html_ui').execute({ op: 'render', path: 'panel.htm' }, exec());
+  assert.equal(accepted.ok, true);
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.

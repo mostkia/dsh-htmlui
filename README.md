@@ -37,6 +37,12 @@ conversation needs it.
 dsh plugin --profile web add @mostkia/dsh-htmlui
 ```
 
+Without npm, the same package installs straight from the repository:
+
+```sh
+dsh plugin --profile web add github:mostkia/dsh-htmlui
+```
+
 Requires DSH `>=0.1.7-0` (the pre-release line is included on purpose, so `0.1.7-rc.*`
 installs). Then hard-refresh the page. A working client half logs
 `[dsh-htmlui] client active (0.1.1)` in the browser console.
@@ -125,7 +131,8 @@ Neither half needs a build step: the host half is plain ESM, and the browser hal
 is the module the loader materializes as-is. Both are plain JavaScript with no
 runtime dependency on the harness module graph, and the plugin declares no
 dependencies at all. CI runs both suites on Ubuntu and Windows across Node 22 and
-24 (`.github/workflows/ci.yml`).
+24 (`.github/workflows/ci.yml`). Release steps and the prepared
+awesome-dsh-plugin entry live in [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 ## License
 

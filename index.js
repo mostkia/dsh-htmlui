@@ -147,6 +147,19 @@ function resolveInputPath(value, cwd) {
   return isAbsolute(raw) ? resolve(raw) : resolve(cwd ?? process.cwd(), raw);
 }
 
+/**
+ * A document path must name a document. The plugin only ever renders HTML, so
+ * anything else is a mistake worth reporting rather than a file to copy into the
+ * data root and hand to a browser.
+ */
+function resolveHtmlInputPath(value, cwd) {
+  const path = resolveInputPath(value, cwd);
+  if (!/\.(?:html?|xhtml)$/iu.test(path)) {
+    throw new Error(`not an HTML document: ${path} (expected .html, .htm, or .xhtml)`);
+  }
+  return path;
+}
+
 /** `520x360`, `520x360+80+60`, `80%x50%` or `{w,h,x,y}` all normalize to numbers. */
 function normalizeSize(value) {
   if (value === undefined || value === null) return undefined;
@@ -737,6 +750,22 @@ export function apply(ctx, config) {
     return current.meta;
   }
 
+  /**
+   * Resolve an interface the calling session owns. A model that guesses another
+   * session's id must not be able to rewrite or remove that session's surfaces,
+   * so ownership is checked on every mutating tool path.
+   */
+  function readOwnedUi(id, sessionId) {
+    const key = String(id ?? '');
+    const current = key.length > 0 ? store.readUi(key) : undefined;
+    if (current === undefined) return { error: `unknown ui id: ${key}`, hint: 'call html_ui op=list' };
+    if (sessionId === undefined) return { error: 'no session in tool context', hint: 'this tool must run inside a session' };
+    if (current.meta.sessionId !== sessionId) {
+      return { error: 'that interface belongs to another session', hint: 'call html_ui op=list for this session' };
+    }
+    return { record: current };
+  }
+
   function resolveSessionId(explicit, exec) {
     const fromArg = typeof explicit === 'string' && explicit.trim().length > 0 ? explicit.trim() : undefined;
     if (fromArg !== undefined) return fromArg;
@@ -762,7 +791,7 @@ export function apply(ctx, config) {
       return { source, origin: 'template', template: templateName };
     }
     if (typeof args.path === 'string' && args.path.trim().length > 0) {
-      const path = resolveInputPath(args.path, cwd);
+      const path = resolveHtmlInputPath(args.path, cwd);
       const source = readTextCapped(path, MAX_DOCUMENT_BYTES);
       return { source: mergeInlineParts(source, args.css, args.js), origin: 'file', sourcePath: path };
     }
@@ -862,7 +891,7 @@ export function apply(ctx, config) {
         id: { type: 'string', description: 'Existing ui id, required by update and close.' },
         title: { type: 'string', description: 'Short human title shown by the host chrome and used by the model loop.' },
         html: { type: 'string', description: 'Inline HTML document or fragment. Keep it small; large documents belong in a file.' },
-        path: { type: 'string', description: 'Path to an HTML file (workspace relative or absolute). Preferred for real interfaces.' },
+        path: { type: 'string', description: 'Path to an HTML document (.html, .htm, or .xhtml; workspace relative or absolute). Preferred for real interfaces.' },
         css: { type: 'string', description: 'Extra CSS merged into the document when html or path is used.' },
         js: { type: 'string', description: 'Extra script merged into the document when html or path is used.' },
         placement: {
@@ -899,6 +928,9 @@ export function apply(ctx, config) {
         if (op === 'close') {
           const id = String(args?.id ?? '');
           if (id.length === 0) return { ok: false, op, error: 'id is required', hint: 'call html_ui op=list' };
+          const sessionId = resolveSessionId(undefined, exec);
+          const owned = readOwnedUi(id, sessionId);
+          if (owned.error !== undefined) return { ok: false, op, error: owned.error, hint: owned.hint };
           const closed = closeUi(id);
           if (closed === undefined) return { ok: false, op, error: `unknown ui id: ${id}`, hint: 'call html_ui op=list' };
           return { ok: true, op, uiId: id, title: closed.title ?? '', placement: closed.placement ?? '' };
@@ -910,11 +942,12 @@ export function apply(ctx, config) {
         if (sessionId === undefined) {
           return { ok: false, op, error: 'no session in tool context', hint: 'this tool must run inside a session' };
         }
-        const existingSession = op === 'update' ? store.readUi(String(args?.id ?? ''))?.meta.sessionId : undefined;
-        if (op === 'update' && existingSession === undefined) {
-          return { ok: false, op, error: `unknown ui id: ${String(args?.id ?? '')}`, hint: 'call html_ui op=list' };
+        let own = sessionId;
+        if (op === 'update') {
+          const owned = readOwnedUi(String(args?.id ?? ''), sessionId);
+          if (owned.error !== undefined) return { ok: false, op, error: owned.error, hint: owned.hint };
+          own = owned.record.meta.sessionId;
         }
-        const own = op === 'update' ? existingSession : sessionId;
         const count = store.listUis(own).length;
         if (op === 'render' && count >= MAX_UI_PER_SESSION) {
           return {
@@ -974,7 +1007,7 @@ export function apply(ctx, config) {
         name: { type: 'string', description: 'Template name (lowercase letters, digits, dot, dash, underscore).' },
         ui_id: { type: 'string', description: 'Existing interface to freeze when saving.' },
         html: { type: 'string', description: 'Inline HTML to save when no ui_id is given.' },
-        path: { type: 'string', description: 'HTML file to save when no ui_id is given.' },
+        path: { type: 'string', description: 'HTML document to save when no ui_id is given (.html, .htm, or .xhtml).' },
         description: { type: 'string', description: 'Optional note describing the template.' },
       },
       required: ['op'],
@@ -1067,11 +1100,11 @@ export function apply(ctx, config) {
         }
         let source;
         if (typeof args?.ui_id === 'string' && args.ui_id.length > 0) {
-          const current = store.readUi(args.ui_id);
-          if (current === undefined) return { ok: false, op, error: `unknown ui id: ${args.ui_id}`, hint: 'call html_ui op=list' };
-          source = current.source;
+          const owned = readOwnedUi(args.ui_id, resolveSessionId(undefined, exec));
+          if (owned.error !== undefined) return { ok: false, op, error: owned.error, hint: owned.hint };
+          source = owned.record.source;
         } else if (typeof args?.path === 'string' && args.path.trim().length > 0) {
-          source = readTextCapped(resolveInputPath(args.path, cwd), MAX_DOCUMENT_BYTES);
+          source = readTextCapped(resolveHtmlInputPath(args.path, cwd), MAX_DOCUMENT_BYTES);
         } else if (typeof args?.html === 'string' && args.html.trim().length > 0) {
           if (byteLength(args.html) > maxInlineBytes) {
             return { ok: false, op, error: `inline html exceeds maxInlineBytes (${maxInlineBytes})`, hint: 'write the file and pass path' };

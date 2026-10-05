@@ -33,6 +33,12 @@ dsh-genui 渲染的是白名单 JSON 组件；本插件渲染的是真东西：�
 dsh plugin --profile web add @mostkia/dsh-htmlui
 ```
 
+没有 npm 也能装，直接从仓库：
+
+```sh
+dsh plugin --profile web add github:mostkia/dsh-htmlui
+```
+
 要求 DSH `>=0.1.7-0`（故意包含预发布线，`0.1.7-rc.*` 也能装）。装完硬刷新页面；客户端半部生效时浏览器控制台会打印 `[dsh-htmlui] client active (0.1.1)`。
 
 两条最省事的"确认运行中的宿主装的是哪一代"：
@@ -90,7 +96,7 @@ npm test        # 宿主半部 18 项 + 浏览器半部 11 项断言
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 
-两边都没有构建步骤：宿主半部是纯 ESM，浏览器半部就是加载器直接物化的那个模块。两者都是纯 JavaScript，运行时不依赖 harness 的模块图，插件本身零依赖。CI 在 Ubuntu 与 Windows 上、Node 22 与 24 四个组合跑同一套测试（`.github/workflows/ci.yml`）。
+两边都没有构建步骤：宿主半部是纯 ESM，浏览器半部就是加载器直接物化的那个模块。两者都是纯 JavaScript，运行时不依赖 harness 的模块图，插件本身零依赖。CI 在 Ubuntu 与 Windows 上、Node 22 与 24 四个组合跑同一套测试（`.github/workflows/ci.yml`）。发布步骤与已备好的 awesome-dsh-plugin 条目见 [docs/PUBLISHING.md](docs/PUBLISHING.md)。
 
 ## 许可
 
