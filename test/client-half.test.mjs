@@ -127,7 +127,7 @@ test('exposes the harness client contract', () => {
   assert.equal(typeof apply, 'function');
 });
 
-test('registers the tool card, the fallback dock, the drawer, the overlay, the turn tail and the right-pane body', () => {
+test('registers the tool card, the fallback dock, the drawer, the overlay and the turn tail — and no column tab yet', () => {
   const context = createClientContext();
   const dispose = apply(context);
   assert.deepEqual(context.injections, [
@@ -137,18 +137,39 @@ test('registers the tool card, the fallback dock, the drawer, the overlay, the t
     'conversation.chat.turnTail',
     'conversation.input.right',
     'conversation.input.dock',
-    'sidebar.right.pane.tab',
   ]);
-  const byId = context.registrations.map((entry) => `${entry.options.name}#${entry.options.key ?? entry.options.id}`);
-  assert.deepEqual(byId, [
+  const byId = () => context.registrations.map((entry) => `${entry.options.name}#${entry.options.key ?? entry.options.id}`);
+  assert.deepEqual(byId(), [
     'tool.call.toolview#html_ui',
     'conversation.input.dock#htmlui-dock',
     'shell.overlay#htmlui-overlay',
     'conversation.chat.turnTail#htmlui-inline',
     'conversation.input.right#htmlui-templates',
     'conversation.input.dock#htmlui-templates-dock',
-    `sidebar.right.pane.tab#${__internals.TAB_ID}`,
   ]);
+  // The column's tab is not registered until something needs it: an "HTML UI" page in
+  // every session's column, holding nothing, costs width for no content.
+  assert.equal(
+    context.registrations.some((entry) => entry.options.name === 'sidebar.right.pane.tab'),
+    false,
+    'no column tab at boot',
+  );
+
+  // A right-column record brings the tab into being, and its removal takes it away.
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  __internals.publish(
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-aa770000', sessionId: 'session-lazy', placement: 'dock-right', revision: 1 },
+      undefined,
+    ),
+  );
+  assert.ok(context.injections.includes('sidebar.right.pane.tab'), 'the tab is registered on demand');
+  assert.ok(byId().includes(`sidebar.right.pane.tab#${__internals.TAB_ID}`));
+  __internals.retire('ui-aa770000', 'session-lazy');
+  // The fake slot registry keeps its entries, so the observable proof of teardown is
+  // the flag the component reads: with no records, the tab is no longer there.
+  assert.equal(__internals.state.rightPane.available, false, 'and it leaves with the last record');
   assert.equal(typeof dispose, 'function');
 });
 
@@ -273,26 +294,38 @@ test('without a locale service the English literals stand, and a refusal is surv
 });
 
 test('dock-right keeps its fallback until the column can actually open a tab', () => {
-  // A registered tab type is not enough: without a controller the interface would have
-  // no seat at all, so the wide dock has to keep claiming it, and let go the moment the
-  // column can take it — one seat draws a record, never two.
+  // A record brings the tab type in; the type alone still cannot open a tab, so the
+  // wide dock has to keep claiming the record, and let go the moment the column can
+  // take it — one seat draws a record, never two.
   const base = ['dock-right'];
-  resetRightPane();
   const registeredTab = { register: () => () => {} };
+  const rightRecord = () =>
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-bb880000', sessionId: 'session-fallback', placement: 'dock-right', revision: 1 },
+      undefined,
+    );
+
+  resetRightPane();
   apply(createClientContext({ tabs: registeredTab }));
+  assert.equal(__internals.rightPaneReady(), false, 'no record, so no tab and no column');
+
+  resetRightPane();
+  apply(createClientContext({ tabs: registeredTab }));
+  __internals.publish(rightRecord());
   assert.equal(__internals.rightPaneReady(), false, 'a tab type alone cannot open a tab');
   assert.deepEqual(__internals.dockPlacements(base), ['dock-right'], 'so the fallback holds');
 
   // With the controller bound, the right column takes over and the dock lets go.
   resetRightPane();
-  const controller = { openTab: () => {} };
-  apply(createClientContext({ tabs: registeredTab, controller }));
+  apply(createClientContext({ tabs: registeredTab, controller: { openTab: () => {} } }));
+  __internals.publish(rightRecord());
   assert.equal(__internals.rightPaneReady(), true);
   assert.deepEqual(__internals.dockPlacements(base), [], 'the dock stops claiming it');
 
   // A controller that cannot open a tab is no more use than none at all.
   resetRightPane();
   apply(createClientContext({ tabs: registeredTab, controller: {} }));
+  __internals.publish(rightRecord());
   assert.equal(__internals.rightPaneReady(), false);
   assert.deepEqual(__internals.dockPlacements(base), ['dock-right']);
 
@@ -363,6 +396,10 @@ function resetRightPane() {
   __internals.state.rightPane.available = false;
   __internals.state.rightPane.controller = undefined;
   __internals.state.rightPane.opened.clear();
+  // The tab now follows the records, so a leftover record from an earlier test would
+  // keep it alive across activations and make the next assertion meaningless.
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
 }
 
 test('dock-right falls back to the composer dock when the column has no tab service', () => {
@@ -378,6 +415,7 @@ test('dock-right falls back to the composer dock when the column has no tab serv
 test('dock-right registers its tab type and reveals it through the column', () => {
   const registered = [];
   const opened = [];
+  resetRightPane();
   const context = createClientContext({
     tabs: {
       register(definition) {
@@ -392,6 +430,14 @@ test('dock-right registers its tab type and reveals it through the column', () =
     },
   });
   apply(context);
+  assert.equal(registered.length, 0, 'nothing is registered while nothing needs it');
+  // The record is what brings the tab into being.
+  __internals.publish(
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-cc990000', sessionId: 'session-type', placement: 'dock-right', revision: 1 },
+      undefined,
+    ),
+  );
   assert.equal(__internals.state.rightPane.available, true);
   assert.equal(registered.length, 1);
   assert.equal(registered[0].id, __internals.TAB_ID);
@@ -417,20 +463,38 @@ test('a tab service that refuses the definition keeps the fallback intact', () =
     },
   });
   assert.doesNotThrow(() => apply(context));
+  assert.doesNotThrow(() =>
+    __internals.publish(
+      __internals.recordFromMeta(
+        { htmlui: true, op: 'render', uiId: 'ui-dd110000', sessionId: 'session-refuse', placement: 'dock-right', revision: 1 },
+        undefined,
+      ),
+    ),
+  );
   assert.equal(__internals.state.rightPane.available, false);
   assert.ok(context.logs.some((line) => line.includes('right-pane tab type unavailable')));
+  // The record still has a seat: the wide dock keeps claiming it.
+  assert.deepEqual(__internals.dockPlacements(['dock-right']), ['dock-right']);
 });
 
-test('tearing the tab type down returns dock-right to its fallback', () => {
+test('the last right-column record takes the tab back out of the column', () => {
   resetRightPane();
-  const context = createClientContext({
-    tabs: { register: () => () => {} },
-  });
+  const context = createClientContext({ tabs: { register: () => () => {} } });
   apply(context);
+  assert.equal(__internals.state.rightPane.available, false);
+  assert.ok(context.effects.length === 0, 'no tab type is owned while nothing needs it');
+
+  __internals.publish(
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-ee220000', sessionId: 'session-teardown', placement: 'dock-right', revision: 1 },
+      undefined,
+    ),
+  );
   assert.equal(__internals.state.rightPane.available, true);
   assert.ok(context.effects.length > 0, 'the tab type is owned by an effect');
-  for (const dispose of context.effects) dispose();
-  assert.equal(__internals.state.rightPane.available, false);
+
+  __internals.retire('ui-ee220000', 'session-teardown');
+  assert.equal(__internals.state.rightPane.available, false, 'and it leaves with the last record');
 });
 
 test('dismissing a surface closes it locally and asks the host with a token', async () => {

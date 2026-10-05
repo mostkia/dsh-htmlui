@@ -210,6 +210,7 @@ window.__ModuleLoader__.load({
       ) {
         state.tickets.delete(uiId);
       }
+      syncRightPane();
       bump();
     }
 
@@ -221,6 +222,7 @@ window.__ModuleLoader__.load({
       state.fullscreenDismissed.delete(uiId);
       removeFromSession(sessionId ?? record?.sessionId, uiId);
       if (state.fullscreen === uiId) state.fullscreen = null;
+      syncRightPane();
       bump();
     }
 
@@ -287,6 +289,7 @@ window.__ModuleLoader__.load({
       for (const uiId of state.dismissed) {
         if (!seen.has(uiId)) forgetDismissal(uiId);
       }
+      syncRightPane();
     }
 
     /** How long one session's list answer is shared between the seats that ask. */
@@ -1668,46 +1671,18 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Wire the right column: stage one registers the tab type, stage two the body.
-     * Every step is contained — a column that exposes no tab service (or refuses
-     * the definition) leaves dock-right on its composer-dock fallback instead of
-     * taking the whole browser half down with it.
+     * The right column's tab exists only while some session has something for it.
+     *
+     * Registering the type at boot leaves an "HTML UI" tab in the column of every
+     * session forever, which is a page that costs width and holds nothing. The tab is
+     * therefore created when the first `dock-right` record appears and torn down when
+     * the last one goes; the controller binding stays, because it is what opens the
+     * column afterwards and it creates nothing on its own.
      */
-    function wireRightPane(ctx, disposers) {
-      disposers.push(
-        ctx.slots.inject('sidebar.right.pane.tab', () =>
-          ctx.slots.register(
-            { name: 'sidebar.right.pane.tab', key: TAB_ID },
-            guarded(ctx, (props) => h(HtmlUiRightPane, Object.assign({}, props, { ctx }))),
-          ),
-        ),
-      );
+    const rightPaneWiring = { ctx: undefined, wired: false, disposes: [] };
+
+    function wireRightPaneController(ctx, disposers) {
       if (typeof ctx.inject !== 'function') return;
-      ctx.inject(['sidebarRightTabs'], (scope) => {
-        try {
-          const tabs = scope.sidebarRightTabs;
-          if (tabs === undefined || typeof tabs.register !== 'function') return;
-          scope.effect(() => {
-            // The registry owns the registration's lifecycle; this effect owns
-            // only the flag other components read, and clears it on teardown so
-            // dock-right moves back to its fallback instead of vanishing.
-            tabs.register({
-              id: TAB_ID,
-              kind: TAB_KIND,
-              multiple: false,
-              title: () => 'HTML UI',
-            });
-            state.rightPane.available = true;
-            bump();
-            return () => {
-              state.rightPane.available = false;
-              bump();
-            };
-          }, 'dsh-htmlui: right-pane tab type');
-        } catch (error) {
-          logWarn(ctx, 'dsh-htmlui: right-pane tab type unavailable', error);
-        }
-      });
       ctx.inject(['sidebarRight'], (scope) => {
         const controller = scope.sidebarRight;
         if (controller === undefined || typeof controller.openTab !== 'function') return;
@@ -1721,6 +1696,81 @@ window.__ModuleLoader__.load({
           'dsh-htmlui: right-pane controller',
         );
       });
+      disposers.push(() => {
+        state.rightPane.controller = undefined;
+      });
+    }
+
+    /** Register the tab body and its type, once, and keep the disposers. */
+    function ensureRightPaneTab() {
+      const ctx = rightPaneWiring.ctx;
+      if (rightPaneWiring.wired || ctx === undefined) return;
+      rightPaneWiring.wired = true;
+      const disposes = [];
+      disposes.push(
+        ctx.slots.inject('sidebar.right.pane.tab', () =>
+          ctx.slots.register(
+            { name: 'sidebar.right.pane.tab', key: TAB_ID },
+            guarded(ctx, (props) => h(HtmlUiRightPane, Object.assign({}, props, { ctx }))),
+          ),
+        ),
+      );
+      if (typeof ctx.inject === 'function') {
+        ctx.inject(['sidebarRightTabs'], (scope) => {
+          try {
+            const tabs = scope.sidebarRightTabs;
+            if (tabs === undefined || typeof tabs.register !== 'function') return;
+            scope.effect(() => {
+              // The registry owns the registration's lifecycle; this effect owns only
+              // the flag other components read, and clears it on teardown so dock-right
+              // moves back to its fallback instead of vanishing.
+              tabs.register({
+                id: TAB_ID,
+                kind: TAB_KIND,
+                multiple: false,
+                title: () => 'HTML UI',
+              });
+              state.rightPane.available = true;
+              bump();
+              return () => {
+                state.rightPane.available = false;
+                bump();
+              };
+            }, 'dsh-htmlui: right-pane tab type');
+          } catch (error) {
+            logWarn(ctx, 'dsh-htmlui: right-pane tab type unavailable', error);
+          }
+        });
+      }
+      rightPaneWiring.disposes = disposes;
+    }
+
+    /** Take the tab back out of the column. */
+    function releaseRightPaneTab() {
+      if (!rightPaneWiring.wired) return;
+      rightPaneWiring.wired = false;
+      for (const dispose of rightPaneWiring.disposes) {
+        try {
+          dispose();
+        } catch {
+          /* a seat that refuses to leave must not break the store */
+        }
+      }
+      rightPaneWiring.disposes = [];
+      state.rightPane.available = false;
+    }
+
+    /** Keep the column's tab in step with the records that need it. */
+    function syncRightPane() {
+      let wanted = false;
+      for (const record of state.byId.values()) {
+        if (record.placement === 'dock-right') {
+          wanted = true;
+          break;
+        }
+      }
+      if (wanted) ensureRightPaneTab();
+      else releaseRightPaneTab();
     }
 
     // ------------------------------------------------------------------ overlay
@@ -2101,7 +2151,12 @@ window.__ModuleLoader__.load({
       // The right column is optional: wire it in its own guard so a deployment
       // without that column keeps every other surface working.
       try {
-        wireRightPane(ctx, disposers);
+        rightPaneWiring.ctx = ctx;
+        // A fresh activation owns its own seats: the previous one's tab must go, or a
+        // re-activation would leave a registration nobody can dispose.
+        releaseRightPaneTab();
+        wireRightPaneController(ctx, disposers);
+        syncRightPane();
       } catch (error) {
         logWarn(ctx, 'dsh-htmlui: right pane wiring skipped', error);
       }
@@ -2147,6 +2202,7 @@ window.__ModuleLoader__.load({
         retire,
         convergeSession,
         syncSession,
+        syncRightPane,
         activeFullscreen,
         isCurrentRevision,
         loadTemplates,
@@ -2170,7 +2226,8 @@ window.__ModuleLoader__.load({
         rightPaneReady,
         dockPlacements,
         useOptionalDisclosure,
-        wireRightPane,
+        ensureRightPaneTab,
+        releaseRightPaneTab,
         HtmlUiRightPane,
         HtmlUiFrame,
         HtmlUiToolView,
