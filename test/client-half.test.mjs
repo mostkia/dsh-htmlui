@@ -483,6 +483,56 @@ test('dismissing a surface closes it locally and asks the host with a token', as
   }
 });
 
+test('an interface the snapshot predates is settled by asking the host', async () => {
+  // A tool result does not have to carry a timestamp, so "the host did not list it"
+  // cannot be read as "the host dropped it": it may just be newer than the snapshot.
+  // The card asks again instead of guessing, and the answer decides.
+  const listCalls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    const body = JSON.parse(init.body);
+    if (url.endsWith('/ui/list')) {
+      listCalls.push(body);
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            ok: true,
+            count: 1,
+            uis: [{ uiId: 'ui-new00001', sessionId: body.sessionId, title: 'new', placement: 'panel', revision: 1, bytes: 5, sizeText: '', createdAt: 9_000 }],
+          }),
+      });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
+  };
+  try {
+    __internals.state.byId.clear();
+    __internals.state.bySession.clear();
+    __internals.state.dismissed.clear();
+    __internals.state.hostListed.clear();
+    __internals.state.hostSynced.clear();
+    __internals.state.hostSyncedAt.clear();
+    const sessionId = 'session-ask';
+    // An empty snapshot: as far as this page knows, the session holds nothing.
+    __internals.convergeSession(sessionId, []);
+    assert.equal(__internals.recordsFor(sessionId).length, 0);
+
+    // A card arrives for an id the snapshot does not have, with no timestamp.
+    __internals.publish(
+      __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-new00001', sessionId, title: 'new', placement: 'panel', revision: 1, bytes: 5 }, undefined),
+    );
+    assert.equal(__internals.recordsFor(sessionId).length, 0, 'it is not shown on the card alone');
+
+    // Asking settles it: the host lists it, and the ordinary convergence publishes it.
+    // The three-argument first call is the convergence itself, which asks nothing.
+    assert.equal(listCalls.length, 0, 'the empty snapshot was handed in, not fetched');
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    assert.equal(listCalls.length, 1, 'the page asked the host, once');
+    assert.equal(__internals.recordsFor(sessionId).length, 1, 'and the host answer is what decides');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('a transcript card cannot republish what the host has dropped', () => {
   __internals.state.byId.clear();
   __internals.state.bySession.clear();

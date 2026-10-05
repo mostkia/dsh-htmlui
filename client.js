@@ -131,6 +131,24 @@ window.__ModuleLoader__.load({
      * ticket that no longer existed. Once a session has been synced with the host,
      * the host is the authority on which ids exist.
      */
+    /** Ids whose existence this page has already put to the host once. */
+    const askedAbout = new Set();
+
+    /**
+     * Ask the host to settle one id's existence. A tool card may carry an interface
+     * the last snapshot predates, and it may also be a card whose record the host has
+     * dropped; only the host can tell those apart, so the question is asked once and
+     * the answer arrives as a convergence.
+     */
+    function askTheHost(sessionId, uiId) {
+      const key = `${sessionId}\u0000${uiId}`;
+      if (askedAbout.has(key)) return;
+      askedAbout.add(key);
+      setTimeout(() => {
+        syncSession(sessionId, { force: true });
+      }, 120);
+    }
+
     function publish(record, options) {
       if (record === null || typeof record !== 'object') return;
       const uiId = String(record.uiId ?? '');
@@ -141,12 +159,18 @@ window.__ModuleLoader__.load({
       if (!fromHost && sessionId !== undefined && state.hostSynced.has(sessionId)) {
         const listed = state.hostListed.get(sessionId);
         const syncedAt = state.hostSyncedAt.get(sessionId) ?? 0;
-        const createdAt = Number.isFinite(record.createdAt) ? record.createdAt : 0;
+        const createdAt = Number.isFinite(record.createdAt) ? record.createdAt : undefined;
         // A record created after that snapshot cannot be in it, so a new interface
-        // still shows the moment its card lands. One created before the snapshot and
-        // missing from it was dropped by the host: publish it and a closed surface
-        // comes back from its own transcript card.
-        if (createdAt <= syncedAt && listed !== undefined && !listed.has(uiId)) return;
+        // still shows the moment its card lands.
+        const knownNew = createdAt !== undefined && createdAt > syncedAt;
+        if (!knownNew && listed !== undefined && !listed.has(uiId)) {
+          // The snapshot may simply be older than this interface (a tool result does
+          // not have to carry a timestamp), so ask again rather than guess. The host's
+          // answer decides, and it arrives through the normal convergence. Asking once
+          // per id is what keeps a record the host dropped from coming back.
+          askTheHost(sessionId, uiId);
+          return;
+        }
       }
       const previous = state.byId.get(uiId);
       const next = Object.assign({}, previous, record, { uiId });
