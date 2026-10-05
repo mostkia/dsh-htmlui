@@ -39,17 +39,35 @@ Every reading below is a machine value, not an impression.
 | `background` | `1920×919, visible` | works |
 | `fullscreen` | `1920×845, visible` (74 px less than `background`: its chrome row) | works |
 | `inline` | the document loaded; the card lives inside the tool row | works after the fix below |
-| `dock-top` / `panel` / `dock-bottom` | **no reading at all**, and the live slot tree showed the dock occupant `active: false` | broken, fixed below |
+| `dock-top` | first reading `0×0, hidden`; every later reading `769×321, visible` | works after the fixes below |
+| `panel` | `769×321, visible` | works after the fixes below |
+| `dock-bottom` | `293×321, visible` | works after the fixes below |
+
+All eight placements reported a real size, from documents measuring themselves, on
+the second live run. The three dock seats had never loaded before it.
 
 The nine self-checks that passed inside a live document: `window.dshHTML` exists,
 version, `uiId`, `sessionId`, theme, `parent.document` access refused,
 `localStorage` unavailable, state readable, SSE subscription available.
 
+Two seat facts worth knowing, both measured rather than assumed:
+
+- The dock above the input is 769 px wide on a 1920 px viewport; the composer's own
+  dock below it is 293 px. They are not the same seat, and they are not the same
+  width.
+- Frames were observed to remount in batches — several ids reloading within the same
+  millisecond, and one id reloading while its revision never changed — which recreates
+  the iframe and clears the document's own state. This run did not establish what
+  triggers it; a console line per mount (`frame mounted <id>`) and one per URL change
+  (`reloading the document <id>`) exist so the next run can. Whatever the trigger,
+  `dshHTML.state` is the supported place for state that has to survive it.
+
 Interpretation notes, because two readings are easy to misread:
 
 - A document reporting `w=0 h=0` with `visibility: hidden` is **normal** during a
   mount or a tab activation: `dock-right` reported exactly that and then
-  `851×830, visible` 20 ms later. A single such sample is not a failure.
+  `851×830, visible` 20 ms later. A single such sample is not a failure. Judging a
+  seat from one sample cost this run two wrong conclusions.
 - The host reported eight records for the session with every placement correct
   throughout the run, so the data layer was never the problem.
 
