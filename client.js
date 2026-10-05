@@ -25,6 +25,12 @@ window.__ModuleLoader__.load({
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
     /** Printed once on activation: the installed half can be confirmed from the console. */
     const CLIENT_ACTIVE_LINE = '[dsh-htmlui] client active (0.1.1)';
+    /**
+     * One line per frame mount and unmount. A frame that is remounted loses its
+     * document, and during acceptance that was indistinguishable from a URL change
+     * without this. It is a debug line: silence it here when it is not needed.
+     */
+    const DEBUG_FRAMES = true;
     /** Right-sidebar tab type: its `id` is also the key its body registers under. */
     const TAB_ID = '@mostkia/dsh-htmlui/panel';
     const TAB_KIND = 'dsh-htmlui-panel';
@@ -697,6 +703,16 @@ window.__ModuleLoader__.load({
         return { w: initial.w, h: initial.h };
       });
 
+      // A mount means React recreated this frame, which reloads the document and loses
+      // whatever it held; a URL change logs separately, just below. Between them the
+      // console names the mechanism instead of leaving it to inference.
+      useEffect(() => {
+        if (DEBUG_FRAMES === true) console.debug('[dsh-htmlui] frame mounted', record.uiId);
+        return () => {
+          if (DEBUG_FRAMES === true) console.debug('[dsh-htmlui] frame unmounted', record.uiId);
+        };
+      }, []);
+
       useEffect(() => {
         let cancelled = false;
         setStatus('loading');
@@ -708,7 +724,7 @@ window.__ModuleLoader__.load({
           }
           // A frame whose URL changes reloads the document and loses whatever it held.
           // Saying so in the console is how a reload is told apart from a remount (a
-          // remount logs nothing, because this ref starts empty again).
+          // remount logs nothing here, because this ref starts empty again).
           if (urlRef.current !== undefined && urlRef.current !== next) {
             console.debug('[dsh-htmlui] reloading the document', record.uiId, 'revision', record.revision);
           }
