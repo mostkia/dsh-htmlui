@@ -43,6 +43,19 @@ window.__ModuleLoader__.load({
     const TAB_ID = '@mostkia/dsh-htmlui/panel';
     const TAB_KIND = 'dsh-htmlui-panel';
     const FRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock';
+    /**
+     * The sandbox for one document.
+     *
+     * The default is what it has always been: an opaque-origin frame that can run script
+     * but cannot touch the page around it, so a document can never reach the DSH
+     * interface. A project the reader imported themselves can be raised to `unsafe`,
+     * which adds `allow-same-origin` — and with it, access to this page. That is a real
+     * trade, so it is per project, chosen by the reader, never a default, and the form
+     * says so where the choice is made.
+     */
+    function sandboxFor(security) {
+      return security === 'unsafe' ? `${FRAME_SANDBOX} allow-same-origin` : FRAME_SANDBOX;
+    }
     const INLINE_MAX_HEIGHT = 560;
     const DOCK_MIN_HEIGHT = 140;
 
@@ -107,7 +120,7 @@ window.__ModuleLoader__.load({
        * The manifest form, shared by adopting a copied-in folder and editing an existing
        * project: `existing` decides whether it creates or saves over one.
        */
-      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false },
+      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -610,6 +623,8 @@ window.__ModuleLoader__.load({
         // Which project this interface came from; the session page shows it in
         // parentheses beside the title.
         template: typeof meta.template === 'string' && meta.template.length > 0 ? meta.template : undefined,
+        // The level the interface was created with, which decides its sandbox.
+        security: typeof meta.security === 'string' && meta.security.length > 0 ? meta.security : 'strict',
         url: typeof meta.url === 'string' ? meta.url : undefined,
         revision: Number.isFinite(meta.revision) ? meta.revision : 1,
         bytes: Number.isFinite(meta.bytes) ? meta.bytes : 0,
@@ -678,6 +693,15 @@ window.__ModuleLoader__.load({
         adoptName: 'Project name',
         adoptDescription: 'Details',
         adoptPlacement: 'Where it opens',
+        adoptSecurity: 'Security level',
+        securityStrict: 'Strict (default)',
+        securityLocal: 'Own files only',
+        securityOpen: 'Own files + network',
+        securityUnsafe: 'Unrestricted (unsafe)',
+        securityHint_strict: 'One document, no external files, no network: what this plugin has always done.',
+        securityHint_local: 'The project’s own folder is served beside the document: app.js, css, images and fonts load from it.',
+        securityHint_open: 'Also allows https/http/ws: CDN scripts, external stylesheets, API calls and sockets.',
+        securityHint_unsafe: 'Also drops the sandbox’s origin isolation, so the document can reach this DSH page and everything in it. Only for HTML you wrote yourself.',
         adoptHint: 'Nothing is written yet: fill this in and the project is created with it.',
         adoptConfirm: 'Write the manifest',
         editTitle: 'Edit project details',
@@ -760,6 +784,15 @@ window.__ModuleLoader__.load({
         adoptName: '项目名称',
         adoptDescription: '详细描述',
         adoptPlacement: '默认生成位置',
+        adoptSecurity: '安全等级',
+        securityStrict: '严格（默认）',
+        securityLocal: '允许自身文件',
+        securityOpen: '自身文件 + 允许联网',
+        securityUnsafe: '不限制（不安全）',
+        securityHint_strict: '单个文档：不加载外部文件、不联网 —— 插件一直以来的行为。',
+        securityHint_local: '把项目自己的文件夹作为静态资源提供：app.js、css、图片、字体都能按相对路径加载。',
+        securityHint_open: '在上一级基础上放开 https/http/ws：可用 CDN 脚本、外部样式表、调用 API 与 WebSocket。',
+        securityHint_unsafe: '额外去掉沙箱的源隔离，文档脚本可以访问这个 DSH 页面本身。只对你自己写的 HTML 使用。',
         adoptHint: '此时还没有写入任何东西：填完后点下面的按钮，才会带着这些信息创建项目。',
         adoptConfirm: '写入清单',
         editTitle: '编辑项目信息',
@@ -954,7 +987,7 @@ window.__ModuleLoader__.load({
           // An edit says so: "it is a project now" would be false for one that already was.
           state.templates.notice =
             state.adopt.existing === true ? tr('edited', 'Saved.') : tr('adopted', 'It is a project now.');
-          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false };
           return loadTemplates().then(() => true);
         })
         .catch(() => {
@@ -1317,7 +1350,7 @@ window.__ModuleLoader__.load({
           ref: frameRef,
           src: url,
           title: record.title !== undefined && record.title.length > 0 ? record.title : `HTML UI ${record.uiId}`,
-          sandbox: FRAME_SANDBOX,
+          sandbox: sandboxFor(record.security),
           referrerPolicy: 'no-referrer',
           allow: 'clipboard-write',
           onLoad: handshake,
@@ -2542,7 +2575,44 @@ window.__ModuleLoader__.load({
       { value: 'background', key: 'placementBackground', fallback: 'Background layer' },
     ];
 
-    /** Bring one float to the front of the floating stack. */
+    /**
+     * The security levels a project can carry, in the order they are offered.
+     *
+     * `strict` is what the plugin has always done and stays the default; the rest exist
+     * for a project the reader imported themselves, and their hint says exactly what each
+     * one opens up. `unsafe` is last and flagged, because it is the only one that lets a
+     * document reach this page.
+     */
+    const SECURITY_CHOICES = [
+      {
+        value: 'strict',
+        labelKey: 'securityStrict',
+        label: 'Strict (default)',
+        hintKey: 'securityHint_strict',
+        hint: 'One document, no external files, no network: what this plugin has always done.',
+      },
+      {
+        value: 'local',
+        labelKey: 'securityLocal',
+        label: 'Own files only',
+        hintKey: 'securityHint_local',
+        hint: 'The project’s own folder is served beside the document: app.js, css, images and fonts load from it.',
+      },
+      {
+        value: 'open',
+        labelKey: 'securityOpen',
+        label: 'Own files + network',
+        hintKey: 'securityHint_open',
+        hint: 'Also allows https/http/ws: CDN scripts, external stylesheets, API calls and sockets.',
+      },
+      {
+        value: 'unsafe',
+        labelKey: 'securityUnsafe',
+        label: 'Unrestricted (unsafe)',
+        hintKey: 'securityHint_unsafe',
+        hint: 'Also drops the sandbox’s origin isolation, so the document can reach this DSH page and everything in it. Only for HTML you wrote yourself.',
+      },
+    ];
     function raiseFloat(uiId) {
       const current = state.floatZ.get(uiId);
       if (current !== undefined && current === state.floatZTop) return;
@@ -2770,6 +2840,7 @@ window.__ModuleLoader__.load({
                         name: typeof template.name === 'string' && template.name.length > 0 ? template.name : template.slug,
                         description: typeof template.description === 'string' ? template.description : '',
                         placement: typeof template.placement === 'string' && template.placement.length > 0 ? template.placement : 'dock-right',
+                        security: typeof template.security === 'string' && template.security.length > 0 ? template.security : 'strict',
                         busy: false,
                       };
                       bump();
@@ -2846,6 +2917,7 @@ window.__ModuleLoader__.load({
                             name: stem,
                             description: '',
                             placement: 'dock-right',
+                            security: 'strict',
                             busy: false,
                           };
                           bump();
@@ -2945,6 +3017,54 @@ window.__ModuleLoader__.load({
                           ...CREATE_PLACEMENTS.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.key, entry.fallback)} · ${entry.value}`)),
                         ),
                       ),
+                      // How much this project's documents may do. The default is what the
+                      // plugin has always done; a complete web project the reader imported
+                      // needs more, so they choose here — per project, with the consequence
+                      // spelled out.
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' } },
+                        h('span', { style: { flex: '0 0 150px', fontSize: '11.5px' } }, tr('adoptSecurity', 'Security level')),
+                        h(
+                          'select',
+                          {
+                            value: state.adopt.security,
+                            onChange: (event) => {
+                              state.adopt.security = event.target.value;
+                              bump();
+                            },
+                            style: {
+                              flex: '1 1 auto',
+                              minWidth: '0',
+                              font: 'inherit',
+                              fontSize: '12px',
+                              padding: '3px 7px',
+                              borderRadius: '7px',
+                              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
+                              background: 'var(--dsw-alias-bg-base, #fff)',
+                              color: 'inherit',
+                            },
+                          },
+                          ...SECURITY_CHOICES.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.labelKey, entry.label)} · ${entry.value}`)),
+                        ),
+                      ),
+                      h(
+                        'div',
+                        {
+                          style: {
+                            fontSize: '11px',
+                            marginBottom: '8px',
+                            color:
+                              state.adopt.security === 'unsafe'
+                                ? 'var(--dsw-alias-state-error-primary, #c33)'
+                                : 'var(--dsw-alias-label-secondary, #888)',
+                          },
+                        },
+                        (() => {
+                          const chosen = SECURITY_CHOICES.find((entry) => entry.value === state.adopt.security) ?? SECURITY_CHOICES[0];
+                          return tr(chosen.hintKey, chosen.hint);
+                        })(),
+                      ),
                       h(
                         'div',
                         { style: { display: 'flex', justifyContent: 'flex-end', gap: '6px' } },
@@ -2954,7 +3074,7 @@ window.__ModuleLoader__.load({
                             type: 'button',
                             style: buttonStyle,
                             onClick: () => {
-                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false };
                               bump();
                             },
                           },
@@ -2972,6 +3092,7 @@ window.__ModuleLoader__.load({
                                 name: state.adopt.name,
                                 description: state.adopt.description,
                                 placement: state.adopt.placement,
+                                security: state.adopt.security,
                               });
                             },
                           },
@@ -3372,6 +3493,7 @@ window.__ModuleLoader__.load({
        */
       __internals: {
         FRAME_SANDBOX,
+        sandboxFor,
         ROUTE_BASE,
         CLIENT_ACTIVE_LINE,
         TAB_ID,

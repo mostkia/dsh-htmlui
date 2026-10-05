@@ -1101,7 +1101,7 @@ test('a copied-in folder is adopted with the manifest the reader filled in', asy
       meta: { slug: 'my-page', name: '我的页面', description: '一个自己拷进来的页面', placement: 'float' },
     }),
   });
-  assert.equal(adopted.status, 200);
+  assert.equal(adopted.status, 200, `adopt said: ${adopted.text}`);
   const saved = JSON.parse(adopted.text);
   assert.equal(saved.slug, 'my-page', 'the id the reader chose is used');
   const meta = JSON.parse(readFileSync(join(own, '我的页面', 'meta.json'), 'utf8'));
@@ -1161,6 +1161,61 @@ test('an existing project is edited in place, addressed by its slug', async () =
 
   const listed = await tool('html_ui_template').execute({ op: 'list' }, exec('session-edit'));
   assert.equal((listed.summary.match(/my-page/gu) ?? []).length, 1, 'editing must not leave a second entry behind');
+  clearTemplatesDir();
+});
+
+test('a project at a higher security level serves its own files, and only then', async () => {
+  // A project the reader imported brings its own app.js. At `strict` that request must
+  // 404 — the default stays what it always was — and at `local` the file is served from
+  // the project's own folder, with the document served beside it so relative paths work.
+  const own = mkdtempSync(join(tmpdir(), 'dsh-htmlui-sec-'));
+  writeFileSync(join(process.env.DSH_HTMLUI_ROOT, 'settings.json'), JSON.stringify({ templatesDir: own, templatesAsked: true }), 'utf8');
+  mkdirSync(join(own, 'site'), { recursive: true });
+  writeFileSync(join(own, 'site', 'index.html'), '<p>site</p>', 'utf8');
+  writeFileSync(join(own, 'site', 'app.js'), 'console.log(1);', 'utf8');
+  writeFileSync(join(own, 'site', 'meta.json'), JSON.stringify({ slug: 'site', name: 'site', security: 'local' }), 'utf8');
+
+  // The ticket route hands out the capability token the frame will use.
+  const ticketFor = async (uiId) => {
+    const ticket = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      body: JSON.stringify({ uiId, sessionId: 'session-sec' }),
+    });
+    const url = JSON.parse(ticket.text).url;
+    const match = /[?&]t=([^&]+)/u.exec(url);
+    return { token: match[1], url, file: (name) => `/plugins/@mostkia/dsh-htmlui/files/${uiId}/${name}?t=${match[1]}` };
+  };
+  const getRoute = (url) => callRoute(route(), { method: 'GET', url, headers: { host: '127.0.0.1:3080' } });
+
+  const strictRendered = await tool('html_ui').execute({ op: 'render', html: '<p>strict</p>', placement: 'inline' }, exec('session-sec'));
+  assert.equal(strictRendered.ok, true, strictRendered.error ?? 'strict still renders');
+  assert.equal(strictRendered.security, 'strict', 'an interface with no project level is strict');
+  const strictTicket = await ticketFor(strictRendered.uiId);
+  assert.match(strictTicket.url, /\/ui\/ui-/u, 'a strict interface keeps the plain document URL');
+  const strictFile = await getRoute(strictTicket.file('app.js'));
+  assert.equal(strictFile.status, 404, 'a strict interface serves no files');
+
+  const rendered = await tool('html_ui').execute({ op: 'render', template: 'site' }, exec('session-sec'));
+  assert.equal(rendered.ok, true, rendered.error ?? 'the project renders');
+  assert.equal(rendered.security, 'local', 'the project carries the level it was imported with');
+  const ticket = await ticketFor(rendered.uiId);
+  assert.match(ticket.url, /\/files\/.*\/index\.html/u, 'a project at a higher level is served with a directory URL');
+  const file = await getRoute(ticket.file('app.js'));
+  assert.equal(file.status, 200, `the project's own file is served: ${file.text.slice(0, 80)}`);
+  assert.match(file.text, /console\.log/u);
+
+  const document = await getRoute(ticket.file('index.html'));
+  assert.equal(document.status, 200, 'and the document itself is served there too');
+  assert.match(document.text, /<p>site<\/p>/u);
+
+  // Escaping the project folder is refused rather than read.
+  const escaped = await getRoute(`/plugins/@mostkia/dsh-htmlui/files/${rendered.uiId}/../../../settings.json?t=${ticket.token}`);
+  assert.ok(escaped.status === 403 || escaped.status === 404, `a path outside the project is not served (${escaped.status})`);
+
+  const wrongToken = await getRoute(`/plugins/@mostkia/dsh-htmlui/files/${rendered.uiId}/app.js?t=nope`);
+  assert.equal(wrongToken.status, 403, 'and the capability token is still required');
   clearTemplatesDir();
 });
 

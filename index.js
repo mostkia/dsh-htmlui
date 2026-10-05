@@ -35,7 +35,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const name = 'dsh-htmlui';
@@ -211,6 +211,33 @@ function formatSize(size) {
 function normalizePlacement(value) {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return PLACEMENTS.includes(text) ? text : undefined;
+}
+
+/**
+ * How much a document is allowed to do.
+ *
+ * The default stays exactly as strict as it has always been: an opaque-origin frame
+ * that can run inline script and talk to this plugin, and nothing else. A project the
+ * reader imported themselves often needs more — its own `app.js`, a stylesheet, a CDN,
+ * an API — and refusing all of it made complete web projects look broken. The answer is
+ * a level recorded in the project's own manifest and chosen at import time, so the
+ * default is never weakened and the reader decides per project, with a warning.
+ *
+ *   strict  exactly the historical behaviour: one document, no assets, no network
+ *   local   the project's folder is served beside the document: ./app.js, ./css, images
+ *   open    local, plus https/http/ws for script, style, fonts and connections
+ *   unsafe  open, plus allow-same-origin — which lets the document reach the DSH page
+ *           itself. Nothing else is different, and no other level implies it.
+ */
+const SECURITY_LEVELS = ['strict', 'local', 'open', 'unsafe'];
+
+function normalizeSecurity(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return SECURITY_LEVELS.includes(text) ? text : undefined;
+}
+
+function securityOf(meta) {
+  return normalizeSecurity(meta?.security) ?? 'strict';
 }
 
 function slugify(value) {
@@ -762,6 +789,7 @@ function createStore(root) {
       typeof wanted.name === 'string' && wanted.name.trim().length > 0 ? wanted.name.trim().slice(0, 200) : name.replace(/\.html?$/iu, '');
     const description = typeof wanted.description === 'string' ? wanted.description.slice(0, 400) : '';
     const placement = normalizePlacement(wanted.placement);
+    const security = normalizeSecurity(wanted.security) ?? 'strict';
     const info = statSync(target);
     if (info.isDirectory()) {
       const dir = target;
@@ -779,6 +807,7 @@ function createStore(root) {
         name: displayName,
         description,
         placement,
+        security,
         bytes: byteLength(source),
         updatedAt: Date.now(),
       });
@@ -792,6 +821,7 @@ function createStore(root) {
       name: displayName,
       description,
       placement,
+      security,
       bytes: byteLength(source),
       updatedAt: Date.now(),
     });
@@ -1100,10 +1130,16 @@ export function apply(ctx, config) {
    * same `src` and the interface would show the previous document until a manual
    * refresh — which is the whole point of updating it in place.
    */
-  function documentUrl(uiId, theme, revision) {
+  function documentUrl(uiId, theme, revision, security) {
     const suffix = theme === 'dark' || theme === 'light' ? `&theme=${theme}` : '';
     const rev = Number.isFinite(revision) ? `&r=${revision}` : '';
-    return `${ROUTE_PREFIX}/ui/${uiId}?t=${tokenFor(uiId)}${rev}${suffix}`;
+    const query = `t=${tokenFor(uiId)}${rev}${suffix}`;
+    // A project that may serve its own files gets a directory-shaped URL, so every
+    // relative reference in the document (`./app.js`, `./img/logo.png`) resolves beside
+    // it instead of landing under the plugin's own route and 404-ing.
+    return security === undefined || security === 'strict'
+      ? `${ROUTE_PREFIX}/ui/${uiId}?${query}`
+      : `${ROUTE_PREFIX}/files/${uiId}/index.html?${query}`;
   }
 
   function recordSummary(meta) {
@@ -1136,6 +1172,9 @@ export function apply(ctx, config) {
       bytes: meta.bytes ?? 0,
       origin: meta.origin ?? 'inline',
       template: meta.template,
+      // The page needs this to build the frame: the sandbox attribute is per document,
+      // and an interface that may serve its own files must say so to the browser too.
+      security: securityOf(meta),
       createdAt: meta.createdAt ?? 0,
       updatedAt: meta.updatedAt ?? 0,
     };
@@ -1153,6 +1192,9 @@ export function apply(ctx, config) {
       path: `${ROUTE_PREFIX}/ui/${id}`,
       origin: input.origin ?? 'inline',
       template: input.template,
+      // Recorded on the record, not read live from the project: an interface keeps the
+      // level it was created with even if the project is edited later.
+      security: normalizeSecurity(input.security) ?? 'strict',
       sourcePath: input.sourcePath,
       revision: 1,
       bytes: byteLength(input.source),
@@ -1236,7 +1278,7 @@ export function apply(ctx, config) {
       for (const [key, value] of Object.entries(variables)) {
         source = source.split(`{{${key}}}`).join(String(value));
       }
-      return { source, origin: 'template', template: templateName, templatePlacement: template.meta?.placement };
+      return { source, origin: 'template', template: templateName, templatePlacement: template.meta?.placement, templateSecurity: template.meta?.security };
     }
     if (typeof args.path === 'string' && args.path.trim().length > 0) {
       const path = resolveHtmlInputPath(args.path, cwd);
@@ -1267,6 +1309,10 @@ export function apply(ctx, config) {
       uiId: { type: 'string' },
       title: { type: 'string' },
       placement: { type: 'string' },
+      // How much the document may do. Absent means the strict default; a project's own
+      // level is chosen when the project is imported.
+      security: { type: 'string', enum: SECURITY_LEVELS },
+      template: { type: 'string' },
       size: { type: 'string' },
       sessionId: { type: 'string' },
       url: { type: 'string' },
@@ -1334,6 +1380,7 @@ export function apply(ctx, config) {
       // The project an interface was created from: the session page shows it beside the
       // title, so a reader can tell two interfaces of the same project apart.
       template: value.template ?? '',
+      security: value.security ?? '',
       size: value.size ?? '',
       url: value.url,
       revision: value.revision ?? 1,
@@ -1460,6 +1507,7 @@ export function apply(ctx, config) {
           placement:
             normalizePlacement(args?.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(source.templatePlacement),
           size: normalizeSize(args?.size) ?? normalizeSize(declared.size),
+          security: normalizeSecurity(args?.security) ?? normalizeSecurity(declared.security) ?? normalizeSecurity(source.templateSecurity) ?? 'strict',
           origin: source.origin,
           template: source.template,
           sourcePath: source.sourcePath,
@@ -1477,6 +1525,9 @@ export function apply(ctx, config) {
           url: publicRecord(meta).url,
           bytes: meta.bytes,
           revision: meta.revision,
+          // Reported so a caller can see which level an interface is running at.
+          security: securityOf(meta),
+          template: meta.template ?? '',
         };
       } catch (error) {
         const message = String(error?.message ?? error);
@@ -1654,7 +1705,7 @@ export function apply(ctx, config) {
           return;
         }
         const theme = body.theme === 'dark' ? 'dark' : body.theme === 'light' ? 'light' : undefined;
-        sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme, current.meta.revision) });
+        sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme, current.meta.revision, securityOf(current.meta)) });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
@@ -1704,6 +1755,7 @@ export function apply(ctx, config) {
             description: String(template.description ?? ''),
             // The edit form opens with these filled in, so the page needs them too.
             placement: normalizePlacement(template.placement),
+            security: securityOf(template),
             bundled: template.bundled === true,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
           })),
@@ -1788,6 +1840,9 @@ export function apply(ctx, config) {
           placement:
             normalizePlacement(body.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(template.meta.placement),
           size: normalizeSize(body.size) ?? normalizeSize(declared.size),
+          // Request, then the document, then the project's own level — the same ladder
+          // the placement takes, so a project can carry its own security level.
+          security: normalizeSecurity(body.security) ?? normalizeSecurity(declared.security) ?? normalizeSecurity(template.meta.security) ?? 'strict',
           origin: 'template',
           template: slug,
           source,
@@ -1795,6 +1850,38 @@ export function apply(ctx, config) {
         sendJson(res, 200, { ok: true, ui: publicRecord(meta) });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
+  /**
+   * The policy for one document, at its own security level.
+   *
+   * A sandboxed frame without `allow-same-origin` has an *opaque* origin, and an opaque
+   * origin matches no URL: `'self'` would allow nothing, which would block the injected
+   * bridge script (`window.dshHTML` would simply not exist) and could make the frame
+   * refuse to display at all. Every same-origin allowance therefore names this request's
+   * own host explicitly.
+   *
+   * Higher levels widen this deliberately and only where a real project needs it: the
+   * plugin's own host is always allowed, and `open`/`unsafe` add the wider web.
+   */
+  function contentSecurityPolicy(req, security) {
+    const host = String(req.headers.host ?? '');
+    const selfOrigin = host.length > 0 ? `http://${host} https://${host}` : '';
+    const wide = security === 'open' || security === 'unsafe';
+    const web = wide ? 'https: http:' : '';
+    const sockets = wide ? 'ws: wss:' : '';
+    return [
+      "default-src 'none'",
+      `script-src 'unsafe-inline' 'unsafe-eval' blob: ${selfOrigin} ${web}`.trim(),
+      `style-src 'unsafe-inline' ${selfOrigin} ${web}`.trim(),
+      `img-src ${selfOrigin} data: blob: https: http:`.trim(),
+      `media-src ${selfOrigin} data: blob: https: http:`.trim(),
+      `font-src ${selfOrigin} data: ${web}`.trim(),
+      `connect-src ${selfOrigin} ${web} ${sockets}`.trim(),
+      `frame-ancestors ${selfOrigin}`.trim(),
+      "base-uri 'none'",
+      "form-action 'none'",
+    ].join('; ');
   }
 
   function handleDocument(req, res, url) {
@@ -1810,6 +1897,110 @@ export function apply(ctx, config) {
       sendText(res, 404, 'not found');
       return;
     }
+    return serveDocument(req, res, url, current, uiId, token);
+  }
+
+  /** Content types for the handful of files a project serves beside its document. */
+  const FILE_TYPES = {
+    html: 'text/html; charset=utf-8',
+    htm: 'text/html; charset=utf-8',
+    js: 'text/javascript; charset=utf-8',
+    mjs: 'text/javascript; charset=utf-8',
+    css: 'text/css; charset=utf-8',
+    json: 'application/json; charset=utf-8',
+    map: 'application/json; charset=utf-8',
+    svg: 'image/svg+xml',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    ico: 'image/x-icon',
+    woff: 'font/woff',
+    woff2: 'font/woff2',
+    ttf: 'font/ttf',
+    otf: 'font/otf',
+    wasm: 'application/wasm',
+    txt: 'text/plain; charset=utf-8',
+    md: 'text/plain; charset=utf-8',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    pdf: 'application/pdf',
+  };
+
+  function fileTypeFor(name) {
+    const match = /\.([a-z0-9]+)$/iu.exec(name);
+    return match === null ? 'application/octet-stream' : (FILE_TYPES[match[1].toLowerCase()] ?? 'application/octet-stream');
+  }
+
+  /**
+   * Serve one project's own files beside its document.
+   *
+   * `local` and above exist for exactly this: a project the reader imported brings its
+   * own `app.js`, stylesheet, fonts and images, and a single-document route made every
+   * one of those a 404 — which reads as "my project does not run". The document itself is
+   * served at `.../index.html` so every relative reference in it resolves here.
+   *
+   * The path is resolved inside the project folder and refused if it escapes, and a
+   * `strict` project serves nothing at all.
+   */
+  function handleFiles(req, res, url) {
+    const rest = url.pathname.slice(`${ROUTE_PREFIX}/files/`.length);
+    const parts = rest.split('/').filter((part) => part.length > 0);
+    const uiId = parts.shift();
+    const wanted = parts.length === 0 ? 'index.html' : parts.join('/');
+    const token = url.searchParams.get('t') ?? '';
+    if (uiId === undefined || uiId.length === 0 || !tokenMatches(uiId, token)) {
+      sendText(res, 403, 'forbidden');
+      return;
+    }
+    const current = store.readUi(uiId);
+    if (current === undefined) {
+      sendText(res, 404, 'not found');
+      return;
+    }
+    const security = securityOf(current.meta);
+    if (security === 'strict') {
+      sendText(res, 404, 'not found');
+      return;
+    }
+    // The document itself, composed exactly as the plain route composes it: same bridge,
+    // same handshake, same policy for its level.
+    if (wanted === 'index.html' || wanted === '') {
+      return serveDocument(req, res, url, current, uiId, token);
+    }
+    const template = typeof current.meta.template === 'string' ? store.readTemplate(current.meta.template) : undefined;
+    if (template === undefined) {
+      sendText(res, 404, 'not found');
+      return;
+    }
+    const root = dirname(template.documentPath);
+    const resolved = resolve(root, wanted.replace(/\\/gu, '/'));
+    if (resolved !== root && !resolved.startsWith(`${root}${sep}`)) {
+      sendText(res, 403, 'forbidden');
+      return;
+    }
+    let data;
+    try {
+      data = readFileSync(resolved);
+    } catch {
+      sendText(res, 404, 'not found');
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': fileTypeFor(resolved),
+      // A project under development is read on every load: caching would make an edit
+      // look like it did nothing.
+      'cache-control': 'no-store',
+      'content-length': data.length,
+      'access-control-allow-origin': '*',
+    });
+    res.end(data);
+  }
+
+  function serveDocument(req, res, url, current, uiId, token) {
     const state = store.readState(current.meta.sessionId ?? '');
     const config = {
       pluginVersion: PLUGIN_VERSION,
@@ -1823,32 +2014,13 @@ export function apply(ctx, config) {
       initialTheme: url.searchParams.get('theme') === 'dark' ? 'dark' : 'light',
       state: state[uiId] ?? null,
     };
-    const html = composeDocument(current.source, config);
-    const host = String(req.headers.host ?? '');
-    // A sandboxed frame without `allow-same-origin` has an *opaque* origin, and an
-    // opaque origin matches no URL: `'self'` would allow nothing, which would block
-    // the injected bridge script (`window.dshHTML` would simply not exist) and could
-    // make the frame refuse to display at all. Every same-origin allowance therefore
-    // names this request's own host explicitly.
-    const selfOrigin = host.length > 0 ? `http://${host} https://${host}` : '';
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      'content-security-policy': [
-        "default-src 'none'",
-        `script-src 'unsafe-inline' 'unsafe-eval' blob: ${selfOrigin}`.trim(),
-        `style-src 'unsafe-inline' ${selfOrigin}`.trim(),
-        `img-src ${selfOrigin} data: blob: https: http:`.trim(),
-        `media-src ${selfOrigin} data: blob: https: http:`.trim(),
-        `font-src ${selfOrigin} data:`.trim(),
-        `connect-src ${selfOrigin}`.trim(),
-        `frame-ancestors ${selfOrigin}`.trim(),
-        "base-uri 'none'",
-        "form-action 'none'",
-      ].join('; '),
+      'content-security-policy': contentSecurityPolicy(req, securityOf(current.meta)),
       'x-content-type-options': 'nosniff',
     });
-    res.end(html);
+    res.end(composeDocument(current.source, config));
   }
 
   function handleAsset(req, res, url) {
@@ -2063,10 +2235,17 @@ export function apply(ctx, config) {
         return;
       }
       const isDocument = path.startsWith(`${ROUTE_PREFIX}/ui/`) && path !== `${ROUTE_PREFIX}/ui/ticket` && path !== `${ROUTE_PREFIX}/ui/list`;
-      const token = isDocument ? url.searchParams.get('t') ?? '' : '';
-      const uiIdFromPath = isDocument ? path.slice(`${ROUTE_PREFIX}/ui/`.length).split('/')[0] : '';
+      // A project that serves its own files: the document is requested at
+      // `.../files/<id>/index.html` there, so relative references land beside it.
+      const isProjectFile = path.startsWith(`${ROUTE_PREFIX}/files/`);
+      const token = isDocument || isProjectFile ? url.searchParams.get('t') ?? '' : '';
+      const uiIdFromPath = isDocument
+        ? path.slice(`${ROUTE_PREFIX}/ui/`.length).split('/')[0]
+        : isProjectFile
+          ? path.slice(`${ROUTE_PREFIX}/files/`.length).split('/')[0]
+          : '';
       const carrierDefers = path === `${ROUTE_PREFIX}/rpc` || path === `${ROUTE_PREFIX}/events`;
-      const capability = isDocument ? tokenMatches(uiIdFromPath, token) : carrierDefers ? 'defer' : false;
+      const capability = isDocument || isProjectFile ? tokenMatches(uiIdFromPath, token) : carrierDefers ? 'defer' : false;
       const decision = originDecision(req, capability, allowedOrigins);
       if (!decision.ok) {
         sendJson(res, decision.code, { ok: false, error: decision.message });
@@ -2113,6 +2292,10 @@ export function apply(ctx, config) {
       if (isDocument) {
         if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleDocument(req, res, url);
+      }
+      if (isProjectFile) {
+        if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleFiles(req, res, url);
       }
       if (path === `${ROUTE_PREFIX}/assets/${BRIDGE_FILE}`) {
         if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

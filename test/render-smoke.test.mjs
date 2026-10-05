@@ -532,6 +532,18 @@ test('the session manager lists what is attached and can remove it', () => {
   assert.match(other.text, /no HTML interface/u);
 });
 
+test('the sandbox follows the project, and only unsafe touches the origin', () => {
+  // The frame's isolation is per project. Strict, local and open all keep the document
+  // away from this page; only the level the reader chose explicitly gives that up.
+  const strict = __internals.sandboxFor('strict');
+  assert.ok(strict.includes('allow-scripts'), 'a document may still run its own script');
+  assert.ok(!strict.includes('allow-same-origin'), 'and cannot reach the DSH page');
+  assert.equal(__internals.sandboxFor('local'), strict, 'serving a project’s files changes no sandbox flag');
+  assert.equal(__internals.sandboxFor('open'), strict, 'and neither does allowing the network');
+  assert.equal(__internals.sandboxFor(undefined), strict, 'an interface with no level is strict');
+  assert.ok(__internals.sandboxFor('unsafe').includes('allow-same-origin'), 'unsafe is the one that drops isolation');
+});
+
 test('a float window carries its own minimize, and a hidden one leaves the frame', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-88000001', sessionId: 'viewed', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
