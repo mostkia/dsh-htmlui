@@ -913,13 +913,17 @@ window.__ModuleLoader__.load({
      * Adopt one thing the reader copied into the directory.
      *
      * The host gives it the manifest that makes it a project — that is the step a copied
-     * file is missing, and why it looked like it never arrived.
+     * file is missing, and why it looked like it never arrived. The manifest is the one
+     * the reader filled in: this function is the only place it is sent, so a dropped
+     * argument here means the form was written for nothing.
      */
-    function adoptTemplate(name) {
+    function adoptTemplate(name, manifest) {
+      state.adopt.busy = true;
       state.templates.adopting = typeof name === 'string' ? name : '';
       bump();
-      return postJson('/templates/adopt', { name })
+      return postJson('/templates/adopt', { name, meta: manifest })
         .then((value) => {
+          state.adopt.busy = false;
           state.templates.adopting = '';
           if (value === null || value.ok !== true) {
             state.templates.error = (value !== null && value.error) || 'failed';
@@ -928,9 +932,11 @@ window.__ModuleLoader__.load({
           }
           state.templates.error = null;
           state.templates.notice = tr('adopted', 'It is a project now.');
+          state.adopt = { open: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
           return loadTemplates().then(() => true);
         })
         .catch(() => {
+          state.adopt.busy = false;
           state.templates.adopting = '';
           state.templates.error = 'failed';
           bump();
@@ -3246,6 +3252,7 @@ window.__ModuleLoader__.load({
         isCurrentRevision,
         loadTemplates,
         saveTemplatesDir,
+        adoptTemplate,
         markTemplatesAsked,
         toggleTemplates,
         applyTemplate,

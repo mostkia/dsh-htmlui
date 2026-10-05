@@ -524,6 +524,38 @@ test('the folder picker chooses the templates directory', async () => {
   }
 });
 
+test('the adopt request carries the manifest the reader filled in', async () => {
+  // This is the bug that cost several live rounds: the form collected the details and
+  // the function dropped them, so the host wrote a default manifest and the reader saw
+  // the fields "not take". The request body is the thing to assert, not the form.
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.endsWith('/templates/adopt')) {
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, name: body.name, slug: body.meta.slug, kind: 'dir', count: 1 }) });
+    }
+    if (url.endsWith('/templates')) {
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, dir: '/opt/x', configured: true, count: 1, templates: [], candidates: [] }) });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
+  };
+  try {
+    __internals.state.byId.clear();
+    __internals.state.bySession.clear();
+    apply(createClientContext());
+    const manifest = { slug: 'my-page', name: '我的页面', description: '自述', placement: 'float' };
+    __internals.state.adopt = Object.assign({ open: true, source: 'my-folder', busy: false }, manifest);
+    const adopted = await __internals.adoptTemplate('my-folder', manifest);
+    assert.equal(adopted, true);
+    assert.deepEqual(calls[0].body, { name: 'my-folder', meta: manifest }, 'the manifest travels with the request');
+    assert.equal(__internals.state.adopt.open, false, 'and the form closes once it is written');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('a theme switch does not reload an open document', async () => {
   resetRightPane();
   const tickets = [];
