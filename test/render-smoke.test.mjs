@@ -274,27 +274,25 @@ test('a docked card offers the right-column route when the column is available',
   assert.match(withColumn.text, /Open in the right column/u);
 });
 
-test('the composer docks render nothing until their own placement appears', () => {
+test('the fallback dock draws nothing without a record, but still measures the column', () => {
   const meta = (uiId, placement) => ({ htmlui: true, op: 'render', uiId, sessionId: 'session-1', title: uiId, placement, revision: 1, bytes: 5 });
   resetStore();
-  assert.equal(__internals.HtmlUiDock({ session: { id: 'session-1' }, placements: ['dock-top', 'panel'] }), null);
+  // Nothing to draw, so no visible surface: the dock's only output is its measuring
+  // node, which is a zero-height child of the conversation column. A fullscreen
+  // surface is placed from that measurement rather than over the user's sidebar.
+  const idle = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-right'] });
+  assert.equal(idle.text, '', 'nothing visible without a record');
+  assert.ok(idle.elements.length > 0, 'the measuring node is still rendered, which is what the geometry is read from');
 
-  resetStore([__internals.recordFromMeta(meta('ui-33330000', 'dock-bottom'), undefined)]);
-  assert.equal(
-    __internals.HtmlUiDock({ session: { id: 'session-1' }, placements: ['dock-top', 'panel'] }),
-    null,
-    'the top dock does not claim a bottom placement',
-  );
-  const bottom = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-bottom'] });
-  // A docked split is seamless: the document, and a faint control cluster, without a
-  // title row or a box around either.
-  assert.match(bottom.text, /Preparing interface/u);
-  assert.ok(!bottom.text.includes('ui-33330000'), 'a docked split draws no title row');
-  assert.match(bottom.text, /✕/u);
+  resetStore([__internals.recordFromMeta(meta('ui-33330000', 'float'), undefined)]);
+  // A float is not the dock's business, so the dock still draws nothing visible.
+  assert.equal(render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-right'] }).text, '');
 
-  resetStore([__internals.recordFromMeta(meta('ui-44440000', 'panel'), undefined)]);
-  const panel = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-top', 'panel'] });
-  assert.match(panel.text, /Preparing interface/u);
+  resetStore([__internals.recordFromMeta(meta('ui-44440000', 'dock-right'), undefined)]);
+  const claimed = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-right'] });
+  assert.match(claimed.text, /Preparing interface/u);
+  assert.ok(!claimed.text.includes('ui-44440000'), 'a docked split draws no title row');
+  assert.match(claimed.text, /✕/u);
 });
 
 test('the right pane renders nothing until it has something to host', () => {

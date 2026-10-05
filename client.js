@@ -72,6 +72,8 @@ window.__ModuleLoader__.load({
       hostListed: new Map(),
       hostSynced: new Set(),
       hostSyncedAt: new Map(),
+      /** The conversation column's own left edge and width, measured from our seats. */
+      column: { left: 0, width: 0 },
       /** The newest turn tail seen per session, where inline interfaces render. */
       tailSeq: new Map(),
       collapsed: new Map(),
@@ -1706,6 +1708,23 @@ window.__ModuleLoader__.load({
       // between renders and React raised error #310 ("rendered more hooks than during
       // the previous render"), which the surface boundary then showed in red.
       const resizeRef = useRef(null);
+      const measureRef = useRef(null);
+      useEffect(() => {
+        const node = measureRef.current;
+        if (node === null || node === undefined || typeof node.getBoundingClientRect !== 'function') return undefined;
+        const apply = () => {
+          const rect = node.getBoundingClientRect();
+          const left = Math.round(rect.left);
+          const width = Math.round(rect.width);
+          if (width > 0 && (state.column.left !== left || state.column.width !== width)) {
+            state.column = { left, width };
+            bump();
+          }
+        };
+        apply();
+        window.addEventListener('resize', apply);
+        return () => window.removeEventListener('resize', apply);
+      }, []);
       const onResizeDown = useCallback(
         (event) => {
           if (event.button !== 0) return;
@@ -1738,7 +1757,13 @@ window.__ModuleLoader__.load({
       const base = Array.isArray(props.placements) ? props.placements : ['dock-right'];
       const placements = dockPlacements(base);
       const records = recordsIn(sessionId, placements);
-      if (records.length === 0) return null;
+
+      // This seat is a full-width child of the conversation column, so it is where the
+      // column's own edges are measured for a fullscreen surface. The measurement runs
+      // even with nothing to draw: covering the user's sidebar is not acceptable, and
+      // reading another plugin's DOM to avoid it is not either.
+      const measure = h('div', { key: 'measure', ref: measureRef, style: { width: '100%', height: 0, pointerEvents: 'none' } });
+      if (records.length === 0) return h(React.Fragment, null, measure);
 
       const dismiss = dismissRecord;
       const toggle = toggleCollapsed;
@@ -1746,6 +1771,7 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0', flexShrink: 0 } },
+        measure,
         h('div', {
           style: { height: '6px', cursor: 'ns-resize', touchAction: 'none', borderRadius: '3px', background: 'transparent' },
           onPointerDown: onResizeDown,
@@ -1873,13 +1899,18 @@ window.__ModuleLoader__.load({
       if (rightPaneWiring.wired || ctx === undefined) return;
       rightPaneWiring.wired = true;
       const disposes = [];
+      // The registration's own disposer is the one that takes it out of the slot tree:
+      // keeping only the injection's disposer left the tab registered forever, which is
+      // why an empty session still had an HTML UI page in its column.
       disposes.push(
-        ctx.slots.inject('sidebar.right.pane.tab', () =>
-          ctx.slots.register(
+        ctx.slots.inject('sidebar.right.pane.tab', () => {
+          const unregister = ctx.slots.register(
             { name: 'sidebar.right.pane.tab', key: TAB_ID },
             guarded(ctx, (props) => h(HtmlUiRightPane, Object.assign({}, props, { ctx }))),
-          ),
-        ),
+          );
+          if (typeof unregister === 'function') disposes.push(unregister);
+          return unregister;
+        }),
       );
       if (typeof ctx.inject === 'function') {
         ctx.inject(['sidebarRightTabs'], (scope) => {
@@ -1890,15 +1921,17 @@ window.__ModuleLoader__.load({
               // The registry owns the registration's lifecycle; this effect owns only
               // the flag other components read, and clears it on teardown so dock-right
               // moves back to its fallback instead of vanishing.
-              tabs.register({
+              const unregister = tabs.register({
                 id: TAB_ID,
                 kind: TAB_KIND,
                 multiple: false,
                 title: () => 'HTML UI',
               });
+              if (typeof unregister === 'function') disposes.push(unregister);
               state.rightPane.available = true;
               bump();
               return () => {
+                if (typeof unregister === 'function') unregister();
                 state.rightPane.available = false;
                 bump();
               };
@@ -2012,7 +2045,6 @@ window.__ModuleLoader__.load({
 
       if (sessionId === undefined) return null;
       const records = sessionRecords;
-      if (records.length === 0) return null;
 
       const floats = records.filter((record) => record.placement === 'float');
       const backgrounds = records.filter((record) => record.placement === 'background');
@@ -2059,7 +2091,13 @@ window.__ModuleLoader__.load({
               key: `fs-${fullscreenRecord.uiId}`,
               style: {
                 position: 'fixed',
-                inset: '0',
+                top: '0',
+                // A fullscreen surface covers the conversation column, not the frame: the
+                // sidebar belongs to the user, and covering it hides their sessions. The
+                // column's own edges are measured from our seat inside it.
+                left: state.column.width > 0 ? `${state.column.left}px` : '0',
+                width: state.column.width > 0 ? `${state.column.width}px` : '100%',
+                height: '100%',
                 zIndex: 5,
                 display: 'flex',
                 flexDirection: 'column',

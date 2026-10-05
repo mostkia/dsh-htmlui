@@ -53,7 +53,8 @@ Attach one of each and confirm it appears where its placement promises:
 | `inline` | The document renders at the end of the turn that attached it, seamlessly: no chrome, no border, no background, height taken from the document (680×383 measured). It scrolls only past the height cap |
 | `dock-right` | The session's right column opens a tab hosting it (851×830 measured) and the surface is seamless there too — the tab already carries the title. The tab itself is registered only while something needs it: with no `dock-right` record the column holds **no HTML UI page at all**. While that column cannot open a tab (no controller bound) it falls back to the wide dock above the composer, never to both |
 | `float` | A window that drags by its **title text** and resizes from the corner (arrows work on the focused handle); `size` sets where it starts. The ✕ closes it for good: the record leaves the host store |
-| `fullscreen` | The surface covers the session (1920×882 measured: exactly one chrome row), and "Back to chat" gives the chat back while **keeping** the record |
+| `fullscreen` | The surface covers the **conversation column**, not the frame: the left sidebar keeps its width and stays usable (measured from our own seat inside the column, so no other plugin's DOM is read). "Back to chat" gives the chat back while **keeping** the record; ✕ deletes it |
+| Session page | The conversation's view row carries an `HTML UI` page listing this session's interfaces with a `Remove` per row and `Remove all` — the only way to take away a click-through `background` layer or a seamless `inline` one |
 | `background` | A click-through layer over the frame (1920×919 measured, the whole frame because it has no chrome): the page under it still receives clicks |
 
 Two constraints of the host layout, worth knowing before judging a failure:
