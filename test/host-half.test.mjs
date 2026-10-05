@@ -823,7 +823,9 @@ test('the template shipped with the package renders like any other', async () =>
   const shown = await tool('html_ui_template').execute({ op: 'show', name: 'starter' }, exec());
   assert.equal(shown.ok, true);
   assert.ok(shown.bytes > 0, 'the reported size comes from the file, not a cache');
-  assert.match(shown.summary, /panel/u);
+  // The description is the template's own copy, and the shipped one is written in the
+  // language its author works in — it is not one of this plugin's translated strings.
+  assert.match(shown.summary, /面板/u);
 
   const rendered = await tool('html_ui').execute(
     { op: 'render', template: 'starter', variables: { title: '自检面板' }, title: 'Starter' },

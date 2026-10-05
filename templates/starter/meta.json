@@ -1,5 +1,5 @@
 {
   "slug": "starter",
   "name": "starter",
-  "description": "Minimal theme-aware panel: local-first counter, one model round trip, server-side state."
+  "description": "极简主题自适应面板：本地优先计数器、一次模型往返、状态存在宿主侧。"
 }
