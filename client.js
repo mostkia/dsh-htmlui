@@ -23,6 +23,8 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
 
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
+    /** Printed once on activation: the installed half can be confirmed from the console. */
+    const CLIENT_ACTIVE_LINE = '[dsh-htmlui] client active (0.1.1)';
     const FRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock';
     const INLINE_MAX_HEIGHT = 560;
     const DOCK_MIN_HEIGHT = 140;
@@ -923,9 +925,9 @@ window.__ModuleLoader__.load({
       );
 
       if (ctx.logger !== undefined && typeof ctx.logger.info === 'function') {
-        ctx.logger.info('[dsh-htmlui] client active');
+        ctx.logger.info(CLIENT_ACTIVE_LINE);
       } else {
-        console.info('[dsh-htmlui] client active');
+        console.info(CLIENT_ACTIVE_LINE);
       }
 
       return () => {
@@ -939,6 +941,31 @@ window.__ModuleLoader__.load({
       };
     }
 
-    return { inject: ['slots', 'sessions'], apply };
+    return {
+      inject: ['slots', 'sessions'],
+      apply,
+      /**
+       * Test surface. The browser half is otherwise reachable only through a live
+       * page, so the store, the placement parser, and the record projection are
+       * exported for `test/client-half.test.mjs`. They are implementation
+       * details: nothing outside this package should call them.
+       */
+      __internals: {
+        FRAME_SANDBOX,
+        ROUTE_BASE,
+        CLIENT_ACTIVE_LINE,
+        state,
+        parseSizeText,
+        recordFromMeta,
+        recordsFor,
+        recordsIn,
+        publish,
+        retire,
+        resolveViewedSessionId,
+        sessionIdOf,
+        argsOf,
+        metaOf,
+      },
+    };
   },
 });

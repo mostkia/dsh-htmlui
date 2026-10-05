@@ -42,7 +42,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.0';
+const PLUGIN_VERSION = '0.1.1';
 
 const PLACEMENTS = [
   'inline',
@@ -1368,6 +1368,19 @@ export function apply(ctx, config) {
       const decision = originDecision(req, capability);
       if (!decision.ok) {
         sendJson(res, decision.code, { ok: false, error: decision.message });
+        return;
+      }
+      if (path === `${ROUTE_PREFIX}/health`) {
+        if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        // The one route an operator can curl to confirm which generation is live.
+        sendJson(res, 200, {
+          ok: true,
+          plugin: PKG,
+          version: PLUGIN_VERSION,
+          placements: PLACEMENTS,
+          storage: { configured: typeof settings.root === 'string' && settings.root.trim().length > 0 },
+          counts: { uis: store.listUis().length, templates: store.listTemplates().length, sseClients: hub.size() },
+        });
         return;
       }
       if (path === `${ROUTE_PREFIX}/ui/ticket`) {

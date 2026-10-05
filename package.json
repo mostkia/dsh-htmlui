@@ -1,6 +1,6 @@
 {
   "name": "@mostkia/dsh-htmlui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HTML session UI for DeepSeek Harness: the agent authors HTML/CSS/JS, the plugin renders it in sandboxed iframes placed inline, docked, floating, or fullscreen, and relays interaction back to the model over POST + SSE.",
   "type": "module",
   "main": "index.js",
@@ -21,6 +21,7 @@
     "SKILL.md",
     "README.md",
     "README.zh.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "keywords": [
@@ -45,6 +46,10 @@
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node test/host-half.test.mjs && node test/client-half.test.mjs",
+    "check": "node --check index.js && node --check client.js && node --check assets/bridge.js && npm test"
   },
   "meta": {
     "title": "DSH HTML UI",

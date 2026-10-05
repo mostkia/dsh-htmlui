@@ -422,6 +422,29 @@ test('a per-document rate limit protects the model from a runaway frame', async 
   assert.ok(limited > 0, 'the bucket must eventually refuse');
 });
 
+test('the health route reports the running generation and its counts', async () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const response = await callRoute(route(), {
+    url: '/plugins/@mostkia/dsh-htmlui/health',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+  });
+  assert.equal(response.status, 200);
+  const body = JSON.parse(response.text);
+  assert.equal(body.ok, true);
+  assert.equal(body.plugin, '@mostkia/dsh-htmlui');
+  assert.equal(body.version, pkg.version, 'the reported version must match the manifest');
+  assert.ok(body.placements.includes('fullscreen'));
+  assert.equal(typeof body.counts.uis, 'number');
+  assert.equal(typeof body.counts.templates, 'number');
+  assert.equal(typeof body.counts.sseClients, 'number');
+  assert.ok(!JSON.stringify(body).includes(process.env.DSH_HTMLUI_ROOT), 'the carrier never discloses the storage path');
+  const foreign = await callRoute(route(), {
+    url: '/plugins/@mostkia/dsh-htmlui/health',
+    headers: { host: '127.0.0.1:3080', origin: 'http://evil.example' },
+  });
+  assert.equal(foreign.status, 403);
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.

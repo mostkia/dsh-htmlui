@@ -39,7 +39,18 @@ dsh plugin --profile web add @mostkia/dsh-htmlui
 
 Requires DSH `>=0.1.7-0` (the pre-release line is included on purpose, so `0.1.7-rc.*`
 installs). Then hard-refresh the page. A working client half logs
-`[dsh-htmlui] client active` in the browser console.
+`[dsh-htmlui] client active (0.1.1)` in the browser console.
+
+Two cheap ways to confirm which generation a running host has loaded:
+
+```sh
+curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
+# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.1",...}
+```
+
+Editing the host half (`index.js`) does **not** reload in a running host: the
+loader keeps the module generation it activated. Cold-start `dsh` after host-half
+changes; the browser half only needs a refresh.
 
 ## How it works
 
@@ -106,12 +117,15 @@ example.
 ## Development
 
 ```sh
-node test/host-half.test.mjs      # host half: 16 assertions, no harness needed
+npm test        # 18 host-half assertions + 11 browser-half assertions
+npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 
-The client half has no build step: edit `client.js`, refresh the page. Both
-halves are plain JavaScript with no runtime dependency on the harness module
-graph.
+Neither half needs a build step: the host half is plain ESM, and the browser half
+is the module the loader materializes as-is. Both are plain JavaScript with no
+runtime dependency on the harness module graph, and the plugin declares no
+dependencies at all. CI runs both suites on Ubuntu and Windows across Node 22 and
+24 (`.github/workflows/ci.yml`).
 
 ## License
 

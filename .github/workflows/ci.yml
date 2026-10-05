@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The plugin takes no dependencies and needs no build step, so the suites
+      # run directly against the sources that ship.
+      - name: Syntax check
+        run: |
+          node --check index.js
+          node --check client.js
+          node --check assets/bridge.js
+
+      - name: Host half
+        run: node test/host-half.test.mjs
+
+      - name: Browser half
+        run: node test/client-half.test.mjs
