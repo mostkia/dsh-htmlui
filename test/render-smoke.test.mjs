@@ -222,18 +222,21 @@ test('the tool card reports each phase without throwing', () => {
   assert.match(started.text, /float/);
 });
 
-test('an inline tool card renders the document, and a superseded one does not', () => {
+test('an inline tool card points at the tail, and a superseded one yields', () => {
   const meta = { htmlui: true, op: 'render', uiId: 'ui-11110000', sessionId: 'session-1', title: 'A', placement: 'inline', revision: 1, bytes: 5 };
   resetStore();
   const first = render(__internals.HtmlUiToolView, { phase: 'result', block: { meta } });
   assert.match(first.text, /A/);
-  assert.match(first.text, /Preparing interface/u, 'the current card owns the document');
+  // The document is drawn by the turn tail, not by this row: one seat draws it, so a
+  // GUI that shows tool rows cannot show two copies of the same interface.
+  assert.match(first.text, /shown at the end of this turn/u);
+  assert.ok(!first.text.includes('Preparing interface'), 'the row does not draw the document itself');
 
   // An update arrives: the store moves to revision 2 and the old card yields.
   resetStore([__internals.recordFromMeta({ ...meta, revision: 2 }, undefined)]);
   const superseded = render(__internals.HtmlUiToolView, { phase: 'result', block: { meta } });
   assert.match(superseded.text, /this revision was replaced/u);
-  assert.ok(!superseded.text.includes('Preparing interface'), 'a superseded card must not render a second live copy');
+  assert.ok(!superseded.text.includes('shown at the end'), 'a superseded card must not claim the current revision');
 });
 
 test('a docked card offers the right-column route when the column is available', () => {
@@ -320,6 +323,43 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   assert.match(overlay.text, /Back to chat/u, 'the switch back is part of the layer');
   // The layer draws the chrome, so the frame inside must not draw a second one.
   assert.equal(overlay.text.match(/fullscreen/gu).length, 1, 'exactly one title row');
+});
+
+test('an inline interface renders in the newest turn tail, and only there', () => {
+  // A turn tail renders once per turn, so rendering inline interfaces in every tail
+  // would stack a copy per turn; rendering them in the tail that created them would
+  // need the record to carry its turn. The newest tail is the one seat that needs
+  // neither, and it is where "the current interfaces" belong.
+  const inline = __internals.recordFromMeta(
+    { htmlui: true, op: 'render', uiId: 'ui-bb660001', sessionId: 'session-tail', title: 'T', placement: 'inline', revision: 1, bytes: 5 },
+    undefined,
+  );
+  resetStore([inline]);
+  __internals.state.tailSeq.clear();
+  // The newest tail is learned by rendering: the first tail claims the slot, and a
+  // later tail takes it over.
+  const older = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 10 });
+  assert.match(older.text, /T/u, 'the first tail seen renders the interface');
+  const newer = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 40 });
+  assert.match(newer.text, /T/u, 'a newer turn takes the interface over');
+  const olderAgain = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 10 });
+  assert.equal(olderAgain.text, '', 'and the older turn stops drawing it');
+  // Without a session or a sequence there is nothing to decide.
+  assert.equal(__internals.HtmlUiInlineTail({ sessionId: 'session-tail' }), null);
+  assert.equal(__internals.HtmlUiInlineTail({ seq: 40 }), null);
+  // A session with no inline interface draws nothing even in its newest tail.
+  __internals.state.tailSeq.clear();
+  assert.equal(render(__internals.HtmlUiInlineTail, { sessionId: 'session-other', seq: 1 }).text, '');
+});
+
+test('the tool card points at the tail instead of drawing a second copy', () => {
+  const block = {
+    meta: { htmlui: true, op: 'render', uiId: 'ui-bb660002', sessionId: 'session-tail', title: 'Card', placement: 'inline', revision: 1, bytes: 5 },
+  };
+  const card = render(__internals.HtmlUiToolView, { phase: 'result', block, ctx: undefined });
+  assert.match(card.text, /Card/u, 'the row still names the interface');
+  assert.match(card.text, /shown at the end of this turn/u, 'and says where it is drawn');
+  assert.ok(!card.text.includes('Preparing interface'), 'it does not draw the document as well');
 });
 
 test('every surface keeps one hook order, records or not', () => {

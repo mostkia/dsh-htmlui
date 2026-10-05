@@ -50,7 +50,7 @@ Attach one of each and confirm it appears where its placement promises:
 
 | Placement | What to look for |
 |---|---|
-| `inline` | The document renders inside the tool row, scrolls with the transcript, and its chrome shows the title. The row opens itself for it |
+| `inline` | The document renders at the end of the turn that attached it, and the tool row keeps a line naming it. A GUI that shows tool rows shows the line there, never a second copy of the document |
 | `dock-top` | A 769 px-wide surface above the composer card (that was the width on a 1920 px viewport) |
 | `dock-bottom` | A surface below the composer card, in that card's own dock — a narrower seat (293 px on the same viewport), not a second stack above |
 | `panel` | The same seat as `dock-top`, and it updates in place after `html_ui op=update` |

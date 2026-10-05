@@ -54,6 +54,8 @@ window.__ModuleLoader__.load({
       hostListed: new Map(),
       hostSynced: new Set(),
       hostSyncedAt: new Map(),
+      /** The newest turn tail seen per session, where inline interfaces render. */
+      tailSeq: new Map(),
       collapsed: new Map(),
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
@@ -531,6 +533,7 @@ window.__ModuleLoader__.load({
         backToChat: 'Back to chat',
         rightPaneEmpty: 'This session has no right-column interface.',
         rightPaneNoSession: 'No session is open for this column yet.',
+        inlineAtTail: 'inline · shown at the end of this turn',
         templatesButton: '⟨/⟩ Templates',
         templatesTooltip: 'HTML UI templates',
         templatesTitle: 'HTML UI templates',
@@ -560,6 +563,7 @@ window.__ModuleLoader__.load({
         backToChat: '切回聊天',
         rightPaneEmpty: '这个会话还没有右侧栏界面。',
         rightPaneNoSession: '这个栏还没有对应到会话。',
+        inlineAtTail: '内联 · 显示在本轮末尾',
         templatesButton: '⟨/⟩ 模板',
         templatesTooltip: 'HTML UI 模板',
         templatesTitle: 'HTML UI 模板',
@@ -1150,6 +1154,51 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The in-conversation home for `inline` interfaces.
+     *
+     * The tool call row is where an inline interface belongs contextually, but a GUI
+     * may not show tool rows at all (the first live acceptance run found exactly
+     * that), which leaves the surface with no visible seat. This slot is the shipped
+     * one for in-flow contributions, and every other feature that appends to a turn
+     * uses it.
+     *
+     * It renders the session's inline interfaces in the *newest* turn's tail only:
+     * a turn tail renders once per turn, so rendering them in every tail would stack
+     * a copy per turn, and scoping them to the turn that created them would need the
+     * record to carry that turn. "The current interfaces appear at the end of the
+     * conversation" needs neither.
+     */
+    function HtmlUiInlineTail(props) {
+      useStore();
+      const sessionId = resolveSessionId(props);
+      useSessionSync(sessionId);
+      const seq = Number.isFinite(props.seq) ? props.seq : undefined;
+      if (sessionId === undefined || seq === undefined) return null;
+
+      const newest = state.tailSeq.get(sessionId);
+      if (newest === undefined || seq > newest) {
+        // Rendering is not the place to notify, but this is the one chance to learn
+        // which tail is last; the re-render it triggers is what settles the choice.
+        state.tailSeq.set(sessionId, seq);
+      }
+      if (state.tailSeq.get(sessionId) !== seq) return null;
+
+      const records = recordsIn(sessionId, ['inline']);
+      if (records.length === 0) return null;
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0', flexShrink: 0 } },
+        ...records.map((record) =>
+          h(
+            'div',
+            { key: record.uiId, style: { display: 'flex', flexDirection: 'column', minHeight: '0' } },
+            h(HtmlUiFrame, { record, theme: state.theme, variant: 'inline', onDismiss: dismissRecord }),
+          ),
+        ),
+      );
+    }
+
+    /**
      * The tool row's own disclosure. The contract makes `useDisclosure` a required
      * owner prop; the guard keeps a slimmer owner from crashing the card. `useState`
      * runs unconditionally so the hook order never changes.
@@ -1252,15 +1301,25 @@ window.__ModuleLoader__.load({
               : h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('close', 'Close')),
           );
         }
+        // The interface itself renders at the end of the turn (see HtmlUiInlineTail):
+        // one seat draws it, so a GUI that does show tool rows cannot show it twice.
         return h(
           'div',
-          { style: { margin: '2px 0' } },
-          h(HtmlUiFrame, {
-            record,
-            theme: state.theme,
-            variant: 'inline',
-            onDismiss: (uiId) => dismissRecord(uiId),
-          }),
+          {
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              margin: '2px 0',
+              padding: '6px 10px',
+              border: '1px solid var(--dsw-alias-border-l1, #ddd)',
+              borderRadius: '10px',
+              color: 'var(--dsw-alias-label-secondary, #888)',
+              fontSize: '12px',
+            },
+          },
+          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} · ${tr('inlineAtTail', 'inline · shown at the end of this turn')}`),
+          h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('close', 'Close')),
         );
       }
 
@@ -1870,6 +1929,15 @@ window.__ModuleLoader__.load({
         ),
       );
 
+      disposers.push(
+        ctx.slots.inject('conversation.chat.turnTail', () =>
+          ctx.slots.register(
+            { name: 'conversation.chat.turnTail', id: 'htmlui-inline', order: 45 },
+            guarded(ctx, (props) => h(HtmlUiInlineTail, Object.assign({}, props, { ctx }))),
+          ),
+        ),
+      );
+
       // The template drawer: a catalogue the user reaches without the model.
       disposers.push(
         ctx.slots.inject('conversation.input.right', () =>
@@ -1950,6 +2018,7 @@ window.__ModuleLoader__.load({
         LOCALE_NS,
         HtmlUiTemplateDrawer,
         HtmlUiTemplateButton,
+        HtmlUiInlineTail,
         HtmlUiBoundary,
         guarded,
         ReactComponent,

@@ -23,7 +23,7 @@ conversation needs it.
 
 | `placement` | Where it lives |
 |---|---|
-| `inline` | In the transcript, part of the tool call that created it |
+| `inline` | In the transcript, at the end of the turn that attached it (the tool row keeps a line naming it) |
 | `dock-top` | Full width above the composer card |
 | `dock-bottom` | Below the composer card, in that card's own dock. It is a narrower seat than the one above the input — measured 293 px against 769 px on a 1920 px viewport — so keep its content compact |
 | `panel` | The same dock, updated in place |
@@ -197,7 +197,7 @@ close it.
 ## Development
 
 ```sh
-npm test        # 130 assertions: 12 package, 10 doc contract, 35 host, 32 browser, 9 bridge, 15 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 133 assertions: 12 package, 10 doc contract, 35 host, 33 browser, 9 bridge, 17 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

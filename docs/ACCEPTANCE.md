@@ -86,12 +86,15 @@ The one-at-a-time run found defects the earlier all-at-once run could not:
 
 ## Still open
 
-`inline` has no visible seat in this GUI. The correct seat is
-`conversation.chat.turnTail`, which receives the turn and its closing sequence, and
-every shipped in-flow feature uses it. Making an inline surface render *only* in the
-turn that created it needs the record to carry that turn, which is a host change and
-therefore a restart. Until then, an inline interface is reachable only where tool
-rows are shown.
+`inline` had no visible seat in this GUI: it rendered inside the tool call row, and
+tool rows are not shown here. It now renders in the newest turn's tail
+(`conversation.chat.turnTail`), the shipped slot for in-flow contributions, with the
+tool row keeping a line that names it. That change is verified by the suites and by
+the slot registration itself (`htmlui-inline`, active), and was confirmed on screen in
+the run that followed. Scoping an interface to the turn that *created* it would need
+the record to carry that turn, which is a host change; rendering the session's inline
+interfaces in the newest tail needs neither and is what a reader expects of "the
+current interfaces".
 
 Two seat facts worth knowing, both measured rather than assumed:
 

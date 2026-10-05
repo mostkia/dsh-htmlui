@@ -22,6 +22,8 @@ Large documents belong in a file, not in the conversation:
 
 1. Write the document with the file tools (`write`).
 2. Attach it: `html_ui { "op": "render", "path": "ui/dashboard.html", "title": "订单看板", "placement": "dock-top" }`.
+   With `inline` (the default) the document appears at the end of the turn that
+   attached it, and the tool row keeps a line naming it.
 
 Inline `html` is capped (16 KiB by default) and stays in the conversation
 context forever, so use it only for small sketches.
