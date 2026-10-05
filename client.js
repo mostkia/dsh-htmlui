@@ -2555,12 +2555,17 @@ window.__ModuleLoader__.load({
         );
       }
 
-      if (fullscreenRecord !== undefined) {
+      // Every fullscreen surface stays mounted, and only the active one is shown. Rendering
+      // just the active one meant switching away unmounted its document, so coming back
+      // reloaded the interface from scratch and lost whatever lived in it — the same loss
+      // the floats had, and the same fix: hide it rather than destroy it.
+      for (const surface of records.filter((entry) => entry.placement === 'fullscreen')) {
+        const active = fullscreenRecord !== undefined && fullscreenRecord.uiId === surface.uiId;
         layers.push(
           h(
             'div',
             {
-              key: `fs-${fullscreenRecord.uiId}`,
+              key: `fs-${surface.uiId}`,
               style: {
                 position: 'fixed',
                 top: '0',
@@ -2571,7 +2576,7 @@ window.__ModuleLoader__.load({
                 width: state.column.width > 0 ? `${state.column.width}px` : '100%',
                 height: '100%',
                 zIndex: 5,
-                display: 'flex',
+                display: active ? 'flex' : 'none',
                 flexDirection: 'column',
                 pointerEvents: 'auto',
                 background: 'var(--dsw-alias-bg-base, #fff)',
@@ -2580,24 +2585,24 @@ window.__ModuleLoader__.load({
               // page behind it must not stay reachable by a screen reader.
               role: 'dialog',
               'aria-modal': 'true',
-              'aria-label': fullscreenRecord.title.length > 0 ? fullscreenRecord.title : fullscreenRecord.uiId,
+              'aria-label': surface.title.length > 0 ? surface.title : surface.uiId,
             },
             h(
               'div',
               { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
-              h('span', { style: titleStyle }, `${fullscreenRecord.title.length > 0 ? fullscreenRecord.title : fullscreenRecord.uiId} ${tr('fullscreenSuffix', '· fullscreen')}`),
+              h('span', { style: titleStyle }, `${surface.title.length > 0 ? surface.title : surface.uiId} ${tr('fullscreenSuffix', '· fullscreen')}`),
               h(
                 'button',
                 {
                   type: 'button',
                   style: buttonStyle,
-                  onClick: () => leaveFullscreen(fullscreenRecord.uiId),
+                  onClick: () => leaveFullscreen(surface.uiId),
                 },
                 tr('backToChat', 'Back to chat'),
               ),
-              h('button', { type: 'button', style: buttonStyle, onClick: () => dismiss(fullscreenRecord.uiId) }, tr('close', 'Close')),
+              h('button', { type: 'button', style: buttonStyle, onClick: () => dismiss(surface.uiId) }, tr('close', 'Close')),
             ),
-            h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: fullscreenRecord, theme: state.theme, variant: 'dock', bare: true })),
+            h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: surface, theme: state.theme, variant: 'dock', bare: true })),
           ),
         );
       }

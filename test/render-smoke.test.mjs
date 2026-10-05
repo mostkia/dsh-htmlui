@@ -370,6 +370,18 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   assert.match(overlay.text, /Back to chat/u, 'the switch back is part of the layer');
   // The layer draws the chrome, so the frame inside must not draw a second one.
   assert.equal(overlay.text.match(/fullscreen/gu).length, 1, 'exactly one title row');
+
+  // Two surfaces, one pinned: the other stays mounted but hidden, because unmounting would
+  // destroy its document and coming back would reload the interface from scratch.
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-66660000', sessionId: 'viewed', title: 'F', placement: 'fullscreen', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-66660001', sessionId: 'viewed', title: 'G', placement: 'fullscreen', revision: 1, bytes: 5 }, undefined),
+  ]);
+  __internals.state.fullscreen = 'ui-66660000';
+  const both = render(__internals.HtmlUiOverlay, { ctx });
+  const surfaces = both.elements.filter((element) => element.props?.['aria-modal'] === 'true');
+  assert.equal(surfaces.length, 2, 'both fullscreen surfaces stay in the tree');
+  assert.equal(surfaces.filter((surface) => surface.props.style.display === 'none').length, 1, 'and the inactive one is hidden, not removed');
 });
 
 test('an inline interface renders in the newest turn tail, and only there', () => {
