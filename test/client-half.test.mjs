@@ -429,32 +429,57 @@ test('tearing the tab type down returns dock-right to its fallback', () => {
   assert.equal(__internals.state.rightPane.available, false);
 });
 
-test('dismissing a surface closes it locally and tells the host', async () => {
+test('dismissing a surface closes it locally and asks the host with a token', async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (url, init) => {
-    calls.push({ url, body: init === undefined ? undefined : JSON.parse(init.body) });
+    const body = init === undefined ? undefined : JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.endsWith('/ui/ticket')) {
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, url: `/plugins/@mostkia/dsh-htmlui/ui/${body.uiId}?t=fresh-token&r=1` }) });
+    }
     return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
   };
   try {
     __internals.state.byId.clear();
     __internals.state.bySession.clear();
-    __internals.publish(
-      __internals.recordFromMeta(
-        { htmlui: true, op: 'render', uiId: 'ui-dddd4444', sessionId: 'session-d', placement: 'float', revision: 1 },
-        undefined,
-      ),
+    __internals.state.tickets.clear();
+    __internals.state.dismissed.clear();
+    const record = __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-dddd4444', sessionId: 'session-d', placement: 'float', revision: 1 },
+      undefined,
     );
+    __internals.publish(record);
+
+    // Path one: this page loaded the interface, so it already holds the capability.
+    // The host validates every /rpc with it, and a close without one is refused with
+    // 403 - which is exactly how a working close button came to look dead.
+    __internals.state.tickets.set('ui-dddd4444', { url: '/plugins/@mostkia/dsh-htmlui/ui/ui-dddd4444?t=known-token&r=1' });
     __internals.dismissRecord('ui-dddd4444');
-    await Promise.resolve();
+    await settle();
+    const first = calls.find((call) => call.body !== undefined && call.body.op === 'close');
+    assert.ok(first !== undefined, 'the host must be told to drop the record');
+    assert.equal(first.body.uiId, 'ui-dddd4444');
+    assert.equal(first.body.t, 'known-token', 'the close carries the capability the page holds');
+    assert.ok(first.url.endsWith('/rpc'));
     assert.equal(__internals.state.byId.get('ui-dddd4444'), undefined);
     assert.equal(__internals.recordsFor('session-d').length, 0);
-    const close = calls.find((call) => call.body !== undefined && call.body.op === 'close');
-    assert.ok(close !== undefined, 'the host must be told to drop the record');
-    assert.equal(close.body.uiId, 'ui-dddd4444');
-    assert.ok(close.url.endsWith('/rpc'));
+
+    // Path two: a record this page never loaded has no capability yet, so one is
+    // minted first and the close uses what comes back.
+    calls.length = 0;
+    __internals.state.dismissed.clear();
+    __internals.publish(record);
+    __internals.dismissRecord('ui-dddd4444');
+    await settle();
+    assert.ok(calls.some((call) => call.url.endsWith('/ui/ticket')), 'a ticket is minted first');
+    const second = calls.find((call) => call.body !== undefined && call.body.op === 'close');
+    assert.ok(second !== undefined);
+    assert.equal(second.body.t, 'fresh-token', 'and the close uses the capability that arrived');
   } finally {
     globalThis.fetch = originalFetch;
+    __internals.state.tickets.clear();
+    __internals.state.dismissed.clear();
   }
 });
 

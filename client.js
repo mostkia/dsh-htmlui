@@ -1223,17 +1223,35 @@ window.__ModuleLoader__.load({
     }
 
     /** Remove one surface locally and tell the host to drop its record. */
+    /** The capability the host handed this page for an interface, taken from its URL. */
+    function ticketToken(uiId) {
+      const cached = state.tickets.get(uiId);
+      if (cached === undefined || typeof cached.url !== 'string') return undefined;
+      const match = /[?&]t=([^&]+)/u.exec(cached.url);
+      return match === null ? undefined : match[1];
+    }
+
     function dismissRecord(uiId) {
       state.dismissed.add(uiId);
+      // The token has to be read before the teardown, which drops the cached ticket.
+      const token = ticketToken(uiId);
       retire(uiId);
-      // The host is the only one who can drop the record. Tell it, and if that fails
-      // the id stays in `dismissed`, so the surface stays gone here while the model
-      // can still close it later. A refusal is worth saying out loud; a request that
-      // never left (no network, a test harness) is not.
-      postJson('/rpc', { uiId, op: 'close' }).then((result) => {
-        if (result !== null && result.ok === false) {
-          logWarn(undefined, `[dsh-htmlui] the host refused to close ${uiId}`, result);
-        }
+      const close = (capability) =>
+        postJson('/rpc', { uiId, op: 'close', t: capability }).then((result) => {
+          if (result !== null && result.ok === false) {
+            logWarn(undefined, `[dsh-htmlui] the host refused to close ${uiId}`, result);
+          }
+        });
+      if (token !== undefined) {
+        close(token);
+        return;
+      }
+      // This page never loaded the interface, so it never received a capability for
+      // it: ask for a ticket first and close with what comes back. Without this the
+      // host refused every close with 403 and the record outlived the button.
+      ensureTicket(uiId).then(() => {
+        const fresh = ticketToken(uiId);
+        if (fresh !== undefined) close(fresh);
       });
     }
 
@@ -1843,6 +1861,7 @@ window.__ModuleLoader__.load({
         applyTemplate,
         askModelForTemplate,
         ensureTicket,
+        ticketToken,
         tr,
         MESSAGES,
         LOCALE_NS,
