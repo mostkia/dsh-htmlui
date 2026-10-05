@@ -1906,6 +1906,12 @@ export function apply(ctx, config) {
       `media-src ${selfOrigin} data: blob: https: http:`.trim(),
       `font-src ${selfOrigin} data: ${web}`.trim(),
       `connect-src ${selfOrigin} ${web} ${sockets}`.trim(),
+      // A project's own page may embed another page of its own — a weather widget beside
+      // a wallpaper, say. Without this, `default-src 'none'` blocks every nested frame and
+      // the missing file looks like a server problem. Frames of the project's own origin
+      // are allowed from `local` up; the wider web only from `open`/`unsafe`.
+      `frame-src ${selfOrigin} ${web}`.trim(),
+      `child-src ${selfOrigin} ${web} ${wide ? 'blob:' : ''}`.trim(),
       `frame-ancestors ${selfOrigin}`.trim(),
       "base-uri 'none'",
       "form-action 'none'",
