@@ -1756,9 +1756,7 @@ window.__ModuleLoader__.load({
         openRightPane(record.uiId);
         return;
       }
-      if (record.placement === 'float' || record.placement === 'background') {
-        // A background layer can be hidden by the escape control, so it needs the same
-        // way back as a minimized window.
+      if (record.placement === 'float') {
         state.hidden.delete(record.uiId);
         bump();
         return;
@@ -1814,14 +1812,16 @@ window.__ModuleLoader__.load({
           state.hidden.has(record.uiId)
             ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
             : null,
-          // Every form can now be out of sight — a background layer included, because the
-          // escape control hides it rather than deleting it — so every row offers the same
-          // way back, in the same words.
-          h(
-            'button',
-            { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
-            tr('managerRestore', 'Show'),
-          ),
+          // Every form that can be out of sight gets the same control, with the same
+          // words. A background layer is always on screen and cannot be hidden, so it has
+          // none — it is removed with the control beside this one.
+          record.placement === 'background'
+            ? null
+            : h(
+                'button',
+                { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
+                tr('managerRestore', 'Show'),
+              ),
           h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
         ),
       );
@@ -2499,8 +2499,6 @@ window.__ModuleLoader__.load({
       const layers = [];
 
       for (const record of backgrounds) {
-        // A hidden background layer leaves the screen; the record stays listed.
-        if (state.hidden.has(record.uiId)) continue;
         layers.push(
           h(
             'div',

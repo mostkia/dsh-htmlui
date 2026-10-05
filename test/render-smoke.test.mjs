@@ -612,7 +612,7 @@ test('a float remembers where it was left, and a touch brings it to the front', 
   resetStore();
 });
 
-test('the session page restores every form, background layer included', () => {
+test('the session page restores every form except the background layer', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000001', sessionId: 'session-1', title: '背景', placement: 'background', revision: 1, bytes: 5 }, undefined),
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000002', sessionId: 'session-1', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
@@ -622,9 +622,9 @@ test('the session page restores every form, background layer included', () => {
   ]);
   const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
   const restores = (listed.text.match(/Show/gu) ?? []).length;
-  // All five, background included: the escape control hides a layer instead of deleting it,
-  // so the session page is where it comes back from.
-  assert.equal(restores, 5, 'every form can be shown again');
+  // Four of the five: a background layer is always on screen and cannot be hidden, so there
+  // is nothing to restore — it is removed with the control beside this one.
+  assert.equal(restores, 4, 'four of the five forms can be shown again');
   assert.ok(listed.text.includes('Remove'), 'and every one of them can be removed');
   resetStore();
 });
