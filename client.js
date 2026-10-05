@@ -748,6 +748,7 @@ window.__ModuleLoader__.load({
       const [url, setUrl] = useState(undefined);
       const [status, setStatus] = useState('loading');
       const [attempt, setAttempt] = useState(0);
+      const [contentHeight, setContentHeight] = useState(undefined);
       const frameRef = useRef(null);
       const nonceRef = useRef(newNonce());
       const urlRef = useRef(undefined);
@@ -825,6 +826,13 @@ window.__ModuleLoader__.load({
           if (data.__dshHtmlUi === 'resize') {
             const next = parseSizeText(data.size);
             if (next !== undefined) setSize((current) => Object.assign({}, current, next));
+          }
+          if (data.__dshHtmlUi === 'content') {
+            // The document measured itself. An iframe never grows to its content, and a
+            // surface meant to blend into the transcript must not show a scrollbar for
+            // a few lines of content.
+            const height = Number(data.height);
+            if (Number.isFinite(height) && height > 0) setContentHeight(Math.round(height));
           }
         }
         window.addEventListener('message', onMessage);
@@ -1033,7 +1041,32 @@ window.__ModuleLoader__.load({
         return h('div', { style: { width: '100%', height: '100%' } }, body);
       }
 
-      const height = variant === 'inline' ? Math.min(INLINE_MAX_HEIGHT, initial.h ?? 420) : '100%';
+      if (variant === 'inline') {
+        // Seamless by design: no chrome, no border, no background, and the height is
+        // whatever the document measured for itself (capped, so a very long document
+        // scrolls rather than swallowing the transcript). It reads as part of the
+        // conversation, not as a window parked in it.
+        const measured = contentHeight ?? initial.h;
+        const height =
+          measured !== undefined && Number.isFinite(measured)
+            ? Math.min(INLINE_MAX_HEIGHT, Math.max(60, measured))
+            : 220;
+        return h(
+          'div',
+          {
+            style: {
+              width: '100%',
+              height: `${height}px`,
+              minHeight: '0',
+              overflow: 'hidden',
+              background: 'transparent',
+            },
+          },
+          h('div', { style: { width: '100%', height: '100%' } }, body),
+        );
+      }
+
+      const height = '100%';
       // A seat that draws its own chrome (the fullscreen layer) asks for the document
       // alone; otherwise the surface shows two title rows, one from each.
       if (bare === true) {
@@ -1044,7 +1077,7 @@ window.__ModuleLoader__.load({
               display: 'flex',
               flexDirection: 'column',
               width: '100%',
-              height: typeof height === 'number' ? `${height}px` : height,
+              height,
               minHeight: '0',
               overflow: 'hidden',
               background: 'var(--dsw-alias-bg-base, #fff)',
@@ -1319,7 +1352,6 @@ window.__ModuleLoader__.load({
             },
           },
           h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} · ${tr('inlineAtTail', 'inline · shown at the end of this turn')}`),
-          h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('close', 'Close')),
         );
       }
 

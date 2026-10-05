@@ -231,6 +231,49 @@
     },
   };
 
+  /**
+   * Report how tall this document actually is.
+   *
+   * An iframe never grows to its content, so a surface that is meant to read as part
+   * of the conversation has to say its own height; otherwise it shows a scrollbar for
+   * three lines of content. Changes are coalesced into one frame of animation.
+   */
+  var lastHeight = 0;
+  var measureScheduled = false;
+
+  function measureNow() {
+    measureScheduled = false;
+    try {
+      var root = document.documentElement;
+      var body = document.body;
+      var height = Math.max(root === null ? 0 : root.scrollHeight, body === null ? 0 : body.scrollHeight);
+      if (height > 0 && Math.abs(height - lastHeight) >= 1) {
+        lastHeight = height;
+        notifyHost('content', { height: height });
+      }
+    } catch (error) {
+      /* measuring must never break the document */
+    }
+  }
+
+  function measure() {
+    if (measureScheduled) return;
+    measureScheduled = true;
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(measureNow);
+    else setTimeout(measureNow, 16);
+  }
+
+  if (typeof ResizeObserver === 'function') {
+    try {
+      new ResizeObserver(measure).observe(document.documentElement);
+    } catch (error) {
+      /* an unsupported observer is not fatal */
+    }
+  }
+  window.addEventListener('resize', measure);
+  window.addEventListener('load', measure);
+  measure();
+
   readyDetail = { uiId: uiId, sessionId: sessionId, theme: theme };
   emit('ready', readyDetail);
 })();

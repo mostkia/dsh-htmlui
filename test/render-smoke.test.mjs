@@ -155,13 +155,28 @@ function resetStore(records = []) {
 
 // --------------------------------------------------------------------- tests
 
-test('an inline frame renders its chrome and a loading body', () => {
+test('an inline frame is seamless: no chrome, no border, content-sized', () => {
   const { text, elements } = render(__internals.HtmlUiFrame, { record: recordFor('inline'), theme: 'light', variant: 'inline' });
-  assert.match(text, /看板/);
-  assert.match(text, /inline/);
   // The body is the ticket-less state until the effect resolves.
   assert.match(text, /Preparing interface/u);
   assert.ok(elements.length > 0);
+  // It reads as part of the conversation: the title is not drawn, there is no close
+  // control, and no box around it.
+  assert.ok(!text.includes('看板'), 'no title row');
+  assert.ok(!text.includes('✕'), 'no close control');
+  const styles = elements.map((element) => element.props.style ?? {});
+  for (const style of styles) {
+    assert.notEqual(style.border, '1px solid var(--dsw-alias-border-l1, #ddd)', 'no frame border');
+    assert.equal(style.background === 'var(--dsw-alias-bg-base, #fff)', false, 'no opaque background');
+  }
+  // The height comes from the document's own measurement when it reports one.
+  const measured = render(__internals.HtmlUiFrame, {
+    record: recordFor('inline'),
+    theme: 'light',
+    variant: 'inline',
+    initialSize: { h: 180 },
+  });
+  assert.match(measured.text, /Preparing interface/u);
 });
 
 test('a failing surface reports itself instead of rendering nothing', () => {
@@ -339,9 +354,9 @@ test('an inline interface renders in the newest turn tail, and only there', () =
   // The newest tail is learned by rendering: the first tail claims the slot, and a
   // later tail takes it over.
   const older = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 10 });
-  assert.match(older.text, /T/u, 'the first tail seen renders the interface');
+  assert.match(older.text, /Preparing interface/u, 'the first tail seen renders the interface');
   const newer = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 40 });
-  assert.match(newer.text, /T/u, 'a newer turn takes the interface over');
+  assert.match(newer.text, /Preparing interface/u, 'a newer turn takes the interface over');
   const olderAgain = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 10 });
   assert.equal(olderAgain.text, '', 'and the older turn stops drawing it');
   // Without a session or a sequence there is nothing to decide.
