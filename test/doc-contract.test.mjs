@@ -135,7 +135,7 @@ test('a document can declare its own placement, and the skill says so', () => {
 
 test('the operator documents stay complete and reachable', () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  for (const file of ['PUBLISHING.md', 'VERIFY.md', 'marketplace-pr.md', 'awesome-dsh-plugin.yml']) {
+  for (const file of ['PUBLISHING.md', 'VERIFY.md', 'ACCEPTANCE.md', 'marketplace-pr.md', 'awesome-dsh-plugin.yml']) {
     assert.ok(existsSync(join(root, 'docs', file)), `docs/${file} must exist`);
   }
   const publishing = read('docs/PUBLISHING.md');
@@ -148,6 +148,13 @@ test('the operator documents stay complete and reachable', () => {
   // The acceptance checklist has to name every placement it asks someone to try.
   for (const placement of placements()) {
     assert.ok(read('docs/VERIFY.md').includes(`\`${placement}\``), `VERIFY.md must cover ${placement}`);
+  }
+  // The live record must stay a record: readings, and the defects they produced.
+  const acceptance = read('docs/ACCEPTANCE.md');
+  assert.ok(acceptance.includes('innerWidth'), 'it must say what was measured');
+  assert.match(acceptance, /active: false/u, 'including the evidence that located the dock bug');
+  for (const placement of ['float', 'dock-right', 'background', 'fullscreen']) {
+    assert.ok(acceptance.includes(`\`${placement}\``), `the record must cover ${placement}`);
   }
 });
 
