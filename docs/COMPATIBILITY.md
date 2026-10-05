@@ -59,18 +59,20 @@ major.minor.patch with a pre-release tag. `>=0.1.7-0` therefore admits
 `0.1.7-rc.2` but **refuses** `0.2.0-rc.1`, even though `0.2.0-rc.1` is newer. A
 plain `>=0.1.7` refuses the pre-release line this plugin was developed on.
 
-So each pre-release line is listed explicitly:
+So each pre-release line is listed explicitly, and each line carries its own
+ceiling — an open-ended first branch would also admit `1.0.0`:
 
 ```
->=0.1.7-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0
+>=0.1.7-0 <0.2.0-0 || >=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-alpha.1 <0.3.0-0
 ```
 
 Maintenance, when a new pre-release line appears upstream:
 
 1. Fetch the new packages and re-run the check above.
 2. Add one more `|| >=<line> <0.3.0-0` branch (or a new major ceiling).
-3. `node test/package.test.mjs` fails if the branches are dropped or if the
-   `0.1.7-0` floor disappears, so this cannot rot silently.
+3. `node test/package.test.mjs` fails if the branches are dropped, if a line
+   loses its ceiling, or if the `0.1.7-0` floor disappears, so this cannot rot
+   silently.
 
 ## Re-running the check
 

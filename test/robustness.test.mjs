@@ -54,7 +54,9 @@ test('the carrier answers malformed requests instead of failing', async () => {
     // A hostile object id makes `String()` unable to convert it: the containment
     // boundary turns that into a plain 400 rather than a 500.
     { name: 'ticket with an object id', options: { method: 'POST', url: '/plugins/@mostkia/dsh-htmlui/ui/ticket', headers: LOOPBACK, body: JSON.stringify({ uiId: { toString: 'no' } }) }, status: 400 },
-    { name: 'list without a session', options: { method: 'POST', url: '/plugins/@mostkia/dsh-htmlui/ui/list', headers: LOOPBACK, body: '{}' }, status: 200 },
+    // The page always knows its session, and an unscoped list would hand one caller
+    // every session's records.
+    { name: 'list without a session', options: { method: 'POST', url: '/plugins/@mostkia/dsh-htmlui/ui/list', headers: LOOPBACK, body: '{}' }, status: 400 },
     { name: 'health by POST', options: { method: 'POST', url: '/plugins/@mostkia/dsh-htmlui/health', headers: LOOPBACK }, status: 405 },
   ];
   for (const entry of cases) {

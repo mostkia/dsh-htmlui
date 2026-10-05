@@ -146,6 +146,13 @@ test('ready is replayed to a listener registered after the bridge ran', () => {
   assert.equal(seen.length, 1, 'a late ready listener still fires');
   assert.equal(seen[0].uiId, 'ui-1a2b3c4d');
   assert.equal(seen[0].sessionId, 'session-1');
+  assert.equal(seen[0].theme, 'dark', 'the ready payload carries the theme');
+
+  // The short form is the same subscription, with the same payload.
+  const short = [];
+  env.window.dshHTML.ready((detail) => short.push(detail));
+  assert.deepEqual(short, seen);
+  assert.equal(typeof env.window.dshHTML.ready(() => {}), 'function', 'and it returns a disposer like on()');
 });
 
 test('subscribing opens the stream and delivers frames', () => {

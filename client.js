@@ -391,6 +391,88 @@ window.__ModuleLoader__.load({
       };
     }
 
+    // ---------------------------------------------------------------- messages
+
+    /**
+     * Visible text, resolved through the Client locale service when one is present
+     * (`ctx.get("locale")`, the documented optional access). The English literal in
+     * each call is the fallback, so the surfaces read correctly with no locale
+     * service, during startup, and for a locale this plugin does not carry.
+     */
+    const LOCALE_NS = '@mostkia/dsh-htmlui';
+    const MESSAGES = {
+      en: {
+        close: 'Close',
+        open: 'Open',
+        openInRight: 'Open in the right column',
+        superseded: '· this revision was replaced; the interface is in the newest card below',
+        placed: 'placed: ',
+        fullscreenSuffix: '· fullscreen',
+        backToChat: 'Back to chat',
+        rightPaneEmpty: 'This session has no right-column interface.',
+        templatesButton: '⟨/⟩ Templates',
+        templatesTooltip: 'HTML UI templates',
+        templatesTitle: 'HTML UI templates',
+        apply: 'Apply',
+        applyHint: 'Apply to this session (no model round trip)',
+        toModel: 'Ask the model',
+        toModelHint: 'Put the instruction in the composer instead',
+        collapse: 'Hide',
+        bundled: 'bundled',
+        loading: 'Reading templates…',
+        empty: 'No templates yet: have the model save one with html_ui_template, or drop your own .html into the templates directory.',
+        unavailable: 'Template catalogue unavailable',
+        draft: 'Render the template {slug} with html_ui',
+      },
+      zh: {
+        close: '关闭',
+        open: '打开',
+        openInRight: '在右侧栏打开',
+        superseded: '· 这一版已被更新，界面在下方最新卡片里',
+        placed: '已投放到 ',
+        fullscreenSuffix: '· 全覆盖模式',
+        backToChat: '切回聊天',
+        rightPaneEmpty: '这个会话还没有右侧栏界面。',
+        templatesButton: '⟨/⟩ 模板',
+        templatesTooltip: 'HTML UI 模板',
+        templatesTitle: 'HTML UI 模板',
+        apply: '套用',
+        applyHint: '套用到当前会话（不经过模型）',
+        toModel: '交给模型',
+        toModelHint: '把指令放进输入框，交给模型',
+        collapse: '收起',
+        bundled: '自带',
+        loading: '正在读取模板…',
+        empty: '还没有模板：让模型用 html_ui_template 存一个，或把你的 .html 放进模板目录。',
+        unavailable: '模板目录不可用',
+        draft: '用 html_ui 渲染模板 {slug}',
+      },
+    };
+    /** Bound once the locale service is reached; null means "literal fallback only". */
+    let translateRef = null;
+
+    /**
+     * Resolve one message. The locale lookup returns the key itself for an unknown
+     * entry, which is the signal to keep the literal.
+     */
+    function tr(key, fallback, params) {
+      let text = fallback;
+      if (translateRef !== null) {
+        try {
+          const value = translateRef(key);
+          if (typeof value === 'string' && value.length > 0 && value !== key) text = value;
+        } catch (error) {
+          /* a broken dictionary must not break a render */
+        }
+      }
+      if (params !== undefined) {
+        for (const [name, replacement] of Object.entries(params)) {
+          text = text.split(`{${name}}`).join(String(replacement));
+        }
+      }
+      return text;
+    }
+
     // ---------------------------------------------------------------- templates
 
     /** Load the catalogue the host keeps, so the drawer can offer it. */
@@ -443,7 +525,7 @@ window.__ModuleLoader__.load({
         const conversation = scoped?.get?.('conversation');
         const input = conversation?.input?.for?.(scoped);
         if (input === undefined || typeof input.setDraft !== 'function') return false;
-        input.setDraft(`用 html_ui 渲染模板 ${slug}`);
+        input.setDraft(tr('draft', `Render the template ${slug} with html_ui`, { slug }));
         return true;
       } catch (error) {
         logWarn(ctx, 'dsh-htmlui: could not reach the composer draft', error);
@@ -837,10 +919,10 @@ window.__ModuleLoader__.load({
                 fontSize: '12px',
               },
             },
-            h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} · 这一版已被更新，界面在下方最新卡片里`),
+            h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} ${tr('superseded', '· this revision was replaced; the interface is in the newest card below')}`),
             known === undefined
               ? null
-              : h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, '关闭'),
+              : h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('close', 'Close')),
           );
         }
         return h(
@@ -873,14 +955,14 @@ window.__ModuleLoader__.load({
             background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.02))',
           },
         },
-        h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} · 已投放到 ${placement}`),
+        h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${record.title.length > 0 ? record.title : record.uiId} · ${tr('placed', 'placed: ')}${placement}`),
         placement === 'fullscreen'
-          ? h('button', { type: 'button', style: buttonStyle, onClick: openFullscreen }, '打开')
+          ? h('button', { type: 'button', style: buttonStyle, onClick: openFullscreen }, tr('open', 'Open'))
           : null,
         placement === 'dock-right' && state.rightPane.available
-          ? h('button', { type: 'button', style: buttonStyle, onClick: () => openRightPane(record.uiId) }, '在右侧栏打开')
+          ? h('button', { type: 'button', style: buttonStyle, onClick: () => openRightPane(record.uiId) }, tr('openInRight', 'Open in the right column'))
           : null,
-        h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, '关闭'),
+        h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('close', 'Close')),
       );
     }
 
@@ -994,7 +1076,7 @@ window.__ModuleLoader__.load({
       if (sessionId === undefined) return null;
       const records = recordsIn(sessionId, ['dock-right']);
       if (records.length === 0) {
-        return h('div', { style: emptyStyle }, '这个会话还没有右侧栏界面。');
+        return h('div', { style: emptyStyle }, tr('rightPaneEmpty', 'This session has no right-column interface.'));
       }
       return h(
         'div',
@@ -1178,7 +1260,7 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
-              h('span', { style: titleStyle }, `${fullscreenRecord.title.length > 0 ? fullscreenRecord.title : fullscreenRecord.uiId} · 全覆盖模式`),
+              h('span', { style: titleStyle }, `${fullscreenRecord.title.length > 0 ? fullscreenRecord.title : fullscreenRecord.uiId} ${tr('fullscreenSuffix', '· fullscreen')}`),
               h(
                 'button',
                 {
@@ -1192,9 +1274,9 @@ window.__ModuleLoader__.load({
                     bump();
                   },
                 },
-                '切回聊天',
+                tr('backToChat', 'Back to chat'),
               ),
-              h('button', { type: 'button', style: buttonStyle, onClick: () => dismiss(fullscreenRecord.uiId) }, '关闭'),
+              h('button', { type: 'button', style: buttonStyle, onClick: () => dismiss(fullscreenRecord.uiId) }, tr('close', 'Close')),
             ),
             h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: fullscreenRecord, theme: state.theme, variant: 'dock' })),
           ),
@@ -1235,20 +1317,20 @@ window.__ModuleLoader__.load({
             {
               type: 'button',
               style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
-              title: '套用到当前会话（不经过模型）',
+              title: tr('applyHint', 'Apply to this session (no model round trip)'),
               onClick: () => applyTemplate(template.slug, sessionId),
             },
-            '套用',
+            tr('apply', 'Apply'),
           ),
           h(
             'button',
             {
               type: 'button',
               style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
-              title: '把指令放进输入框，交给模型',
+              title: tr('toModelHint', 'Put the instruction in the composer instead'),
               onClick: () => askModelForTemplate(template.slug, sessionId, props.ctx),
             },
-            '交给模型',
+            tr('toModel', 'Ask the model'),
           ),
           h('span', { style: Object.assign({}, titleStyle, { flex: '0 0 auto' }) }, template.slug),
           h(
@@ -1256,7 +1338,7 @@ window.__ModuleLoader__.load({
             { style: { flex: '1 1 auto', minWidth: '0', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             template.description,
           ),
-          template.bundled === true ? h('span', { style: { fontSize: '10px', color: 'var(--dsw-alias-label-secondary, #888)' } }, '自带') : null,
+          template.bundled === true ? h('span', { style: { fontSize: '10px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('bundled', 'bundled')) : null,
         ),
       );
 
@@ -1274,16 +1356,16 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: surfaceChrome },
-          h('span', { style: titleStyle }, `HTML UI 模板（${items.length}）`),
-          h('button', { type: 'button', style: buttonStyle, onClick: () => toggleTemplates() }, '收起'),
+          h('span', { style: titleStyle }, `${tr('templatesTitle', 'HTML UI templates')} (${items.length})`),
+          h('button', { type: 'button', style: buttonStyle, onClick: () => toggleTemplates() }, tr('collapse', 'Hide')),
         ),
         state.templates.error !== null
-          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)' } }, `模板目录不可用：${state.templates.error}`)
+          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)' } }, `${tr('unavailable', 'Template catalogue unavailable')}: ${state.templates.error}`)
           : null,
         state.templates.loaded !== true
-          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, '正在读取模板…')
+          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('loading', 'Reading templates…'))
           : items.length === 0
-            ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, '还没有模板：让模型用 html_ui_template 存一个，或把你的 .html 放进模板目录。')
+            ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('empty', 'No templates yet: have the model save one with html_ui_template, or drop your own .html into the templates directory.'))
             : h('div', null, ...rows),
       );
     }
@@ -1296,10 +1378,10 @@ window.__ModuleLoader__.load({
         {
           type: 'button',
           style: Object.assign({}, buttonStyle, { height: '26px' }),
-          title: 'HTML UI 模板',
+          title: tr('templatesTooltip', 'HTML UI templates'),
           onClick: () => toggleTemplates(),
         },
-        '⟨/⟩ 模板',
+        tr('templatesButton', '⟨/⟩ Templates'),
       );
     }
 
@@ -1308,6 +1390,26 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       const disposers = [];
       state.theme = readTheme();
+      // A fresh activation must not inherit a binding from a previous one.
+      translateRef = null;
+
+      // Visible text: register this plugin's dictionary with the Client locale
+      // service and bind it. The service is optional — `ctx.get("locale")` is the
+      // documented optional access — so a deployment without it keeps the English
+      // literals, and a refusal of the dictionary never costs us the surfaces.
+      try {
+        const locale = typeof ctx.get === 'function' ? ctx.get('locale') : undefined;
+        if (locale !== undefined && typeof locale.register === 'function' && typeof locale.bind === 'function') {
+          for (const [language, dictionary] of Object.entries(MESSAGES)) {
+            const disposeDictionary = locale.register(LOCALE_NS, language, dictionary);
+            if (typeof disposeDictionary === 'function') disposers.push(disposeDictionary);
+          }
+          const bound = locale.bind(LOCALE_NS);
+          if (typeof bound === 'function') translateRef = bound;
+        }
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: the locale service refused this dictionary', error);
+      }
 
       disposers.push(
         ctx.slots.inject('tool.call.toolview', () =>
@@ -1409,6 +1511,9 @@ window.__ModuleLoader__.load({
         toggleTemplates,
         applyTemplate,
         askModelForTemplate,
+        tr,
+        MESSAGES,
+        LOCALE_NS,
         HtmlUiTemplateDrawer,
         HtmlUiTemplateButton,
         dismissRecord,

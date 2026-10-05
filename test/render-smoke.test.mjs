@@ -160,7 +160,7 @@ test('an inline tool card renders the document, and a superseded one does not', 
   // An update arrives: the store moves to revision 2 and the old card yields.
   resetStore([__internals.recordFromMeta({ ...meta, revision: 2 }, undefined)]);
   const superseded = render(__internals.HtmlUiToolView, { phase: 'result', block: { meta } });
-  assert.match(superseded.text, /已被更新/u);
+  assert.match(superseded.text, /this revision was replaced/u);
   assert.ok(!superseded.text.includes('Preparing interface'), 'a superseded card must not render a second live copy');
 });
 
@@ -169,13 +169,13 @@ test('a docked card offers the right-column route when the column is available',
   resetStore([__internals.recordFromMeta(meta, undefined)]);
   state.rightPane.available = false;
   const fallback = render(__internals.HtmlUiToolView, { phase: 'result', block: { meta } });
-  assert.match(fallback.text, /已投放到 dock-right/u);
-  assert.ok(!fallback.text.includes('在右侧栏打开'), 'no right-column button without the service');
+  assert.match(fallback.text, /placed: dock-right/u);
+  assert.ok(!fallback.text.includes('Open in the right column'), 'no right-column button without the service');
 
   state.rightPane.available = true;
   state.rightPane.controller = { openTab: () => {} };
   const withColumn = render(__internals.HtmlUiToolView, { phase: 'result', block: { meta } });
-  assert.match(withColumn.text, /在右侧栏打开/u);
+  assert.match(withColumn.text, /Open in the right column/u);
 });
 
 test('the composer docks render nothing until their own placement appears', () => {
@@ -200,7 +200,7 @@ test('the composer docks render nothing until their own placement appears', () =
 test('the right pane states its empty case and then hosts its own records', () => {
   resetStore();
   const empty = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
-  assert.match(empty.text, /还没有右侧栏界面/u);
+  assert.match(empty.text, /no right-column interface/u);
 
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-55550000', sessionId: 'session-1', title: 'R', placement: 'dock-right', revision: 1, bytes: 5 }, undefined),
@@ -220,18 +220,18 @@ test('the template drawer renders nothing closed and a row per template open', (
     { slug: 'mine', name: 'mine', description: '', bundled: false, bytes: 2 },
   ];
   const open = render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' });
-  assert.match(open.text, /HTML UI 模板（2）/u);
+  assert.match(open.text, /HTML UI templates \(2\)/u);
   assert.match(open.text, /starter/);
   assert.match(open.text, /mine/);
-  assert.match(open.text, /套用/u, 'one action applies it locally');
-  assert.match(open.text, /交给模型/u, 'and one hands it to the model');
-  assert.match(open.text, /自带/u, 'a packaged template is marked');
+  assert.match(open.text, /Apply/u, 'one action applies it locally');
+  assert.match(open.text, /Ask the model/u, 'and one hands it to the model');
+  assert.match(open.text, /bundled/u, 'a packaged template is marked');
 
   // An empty catalogue and an unavailable one both explain themselves.
   templates.items = [];
-  assert.match(render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' }).text, /还没有模板/u);
+  assert.match(render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' }).text, /No templates yet/u);
   templates.error = 'unavailable';
-  assert.match(render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' }).text, /模板目录不可用/u);
+  assert.match(render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' }).text, /Template catalogue unavailable/u);
   templates.open = false;
 });
 
@@ -244,6 +244,6 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   ]);
   const ctx = { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } };
   const overlay = render(__internals.HtmlUiOverlay, { ctx });
-  assert.match(overlay.text, /全覆盖模式/u);
-  assert.match(overlay.text, /切回聊天/u, 'the switch back is part of the layer');
+  assert.match(overlay.text, /fullscreen/u);
+  assert.match(overlay.text, /Back to chat/u, 'the switch back is part of the layer');
 });

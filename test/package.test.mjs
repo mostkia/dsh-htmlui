@@ -63,7 +63,9 @@ test('the compatibility floor includes the DSH 0.1.7 pre-release line', () => {
   for (const [name, range] of Object.entries(pkg.peerDependencies)) {
     if (!name.startsWith('@deepseek-ai/dsh-')) continue;
     assert.ok(range.includes('0.1.7-0'), `${name} must accept 0.1.7-0, got ${range}`);
+    assert.ok(range.includes('>=0.1.7-0 <0.2.0-0'), `${name} must cap the 0.1 line, or a future 1.0 would satisfy it, got ${range}`);
     assert.ok(range.includes('>=0.2.0-rc.1 <0.3.0-0'), `${name} must accept the 0.2 pre-release line, got ${range}`);
+    assert.ok(range.includes('<0.3.0-0'), `${name} must cap the 0.2 lines, got ${range}`);
     assert.ok(pkg.peerDependenciesMeta?.[name]?.optional === true, `${name} should stay optional so a slim deployment still installs`);
   }
   // Every package the code registers into or reads a service from is declared, so

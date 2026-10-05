@@ -76,6 +76,35 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   declares no doctype, and a document without one is parsed in quirks mode, where
   the box model differs from what any modern stylesheet assumes. The composed
   document adds one when the author wrote none, and never rewrites what is stored.
+### Fixed
+
+- The peer range caps every branch. `>=0.1.7-0` had no upper comparator, so a
+  future `0.3.0` or `1.0.0` satisfied it — the opposite of what
+  `docs/COMPATIBILITY.md` describes. Each line now carries its own ceiling, and
+  the package test fails if one loses it.
+- A resize no longer rewrites the document. `op=resize` persisted through the
+  whole-document write, so a frame could re-serialize a megabyte document per
+  request; it now skips an unchanged size entirely, spends the same bucket as an
+  action, and writes metadata only. The shared body cap came down from 2 MiB to
+  256 KiB, above the largest legitimate payload.
+- The document cap applies to what is stored, not only to what was read:
+  `path` at the limit plus a large inline `css`/`js` used to exceed it silently.
+- An existing `secret` is never rewritten. Treating an unexpected shape as
+  "missing" rotated the key and silently invalidated the capability of every open
+  interface.
+- Atomic writes use a unique temp suffix, so two writers can no longer collide on
+  the same temporary path.
+- The page-facing list route requires a session. A caller supplying none received
+  every session's records; the model's cross-session view is its own tool. Ticket
+  minting is rate limited per document.
+- The README states what the loopback boundary does and does not cover, including
+  that a local process without an `Origin` is trusted by construction — the
+  carrier bounds it instead of pretending to authenticate it.
+- Document text routes through the Client locale service (`ctx.get("locale")`,
+  the documented optional access) with English literals as the fallback, so the
+  surfaces are bilingual instead of hardcoded, and a deployment without the
+  service still reads correctly. The bridge applies the theme from the URL at
+  startup, so a missed init handshake no longer leaves a frame in the wrong theme.
 - The document CSP lets the injected bridge load. A sandboxed frame without
   `allow-same-origin` has an opaque origin, and an opaque origin matches no URL,
   so `script-src` without this host blocked `assets/bridge.js` outright:

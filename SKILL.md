@@ -87,6 +87,7 @@ declares nothing keeps the placement the record already has.
 | `dshHTML.resize('520x420')` | Ask the host to resize the surface. |
 | `dshHTML.close()` | Ask the host to remove the surface. |
 | `dshHTML.on(type, handler)` | `assistant` (streamed model text, and `{ type: 'tool', name }` while a tool call streams), `reasoning` (the model's thinking, kept apart from its answer), `session`, `action`, `ui`, `theme`, `ready`. |
+| `dshHTML.ready(handler)` | The immediate form of `on('ready', …)`: it fires right away with `{ uiId, sessionId, theme }`, and returns a disposer. |
 | `dshHTML.stream()` | Open the SSE stream explicitly. |
 | `dshHTML.theme()` | `'light'` or `'dark'`. |
 

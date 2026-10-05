@@ -62,7 +62,9 @@ const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_UI_PER_SESSION = 24;
 const MAX_TEMPLATES = 200;
 const MAX_STATE_BYTES = 64 * 1024;
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+// Every carrier route shares this cap. State is the largest legitimate payload
+// (MAX_STATE_BYTES); anything above this is a body nobody asked for.
+const MAX_BODY_BYTES = 256 * 1024;
 const SSE_HEARTBEAT_MS = 15_000;
 const ACTION_BUCKET = { capacity: 8, refillMs: 1_500 };
 
@@ -97,16 +99,24 @@ function readJson(path, fallback) {
   }
 }
 
+let tempCounter = 0;
+
+/** A temp name no other writer in this process, or another process, can take. */
+function tempPathFor(path) {
+  tempCounter = (tempCounter + 1) % 1_000_000;
+  return `${path}.${process.pid}.${Date.now()}.${tempCounter}.tmp`;
+}
+
 function writeJsonAtomic(path, value) {
   ensureDir(dirname(path));
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmp = tempPathFor(path);
   writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   renameSync(tmp, path);
 }
 
 function writeTextAtomic(path, text) {
   ensureDir(dirname(path));
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmp = tempPathFor(path);
   writeFileSync(tmp, text, 'utf8');
   renameSync(tmp, path);
 }
@@ -343,8 +353,12 @@ function createStore(root) {
 
   function secret() {
     const path = join(root, 'secret');
-    const existing = existsSync(path) ? readFileSync(path, 'utf8').trim() : '';
-    if (/^[0-9a-f]{64}$/u.test(existing)) return existing;
+    // An existing key is never rewritten, whatever its shape: rotating it would
+    // silently invalidate the capability of every open interface.
+    if (existsSync(path)) {
+      const existing = readFileSync(path, 'utf8').trim();
+      if (existing.length > 0) return existing;
+    }
     const next = randomUUID().replace(/-/gu, '') + randomUUID().replace(/-/gu, '');
     ensureDir(root);
     writeFileSync(path, next, { encoding: 'utf8', mode: 0o600 });
@@ -368,9 +382,13 @@ function createStore(root) {
     };
   }
 
+  /**
+   * Persist a record. `source` is optional: a metadata-only change (a resize) must
+   * not rewrite the document, which can be a megabyte.
+   */
   function writeUi(meta, source) {
     const dir = ensureDir(uiPath(meta.id));
-    writeTextAtomic(join(dir, 'index.html'), source);
+    if (source !== undefined) writeTextAtomic(join(dir, 'index.html'), source);
     writeJsonAtomic(join(dir, 'meta.json'), meta);
     return meta;
   }
@@ -1108,6 +1126,16 @@ export function apply(ctx, config) {
         if (source === undefined) {
           return { ok: false, op, error: 'nothing to render', hint: 'pass html, path, or template' };
         }
+        // The cap applies to what gets stored, not only to what was read: a file at
+        // the limit plus a large inline css and js would otherwise exceed it.
+        if (byteLength(source.source) > MAX_DOCUMENT_BYTES) {
+          return {
+            ok: false,
+            op,
+            error: `composed document is larger than ${MAX_DOCUMENT_BYTES} bytes`,
+            hint: 'trim the inline css/js, or keep the document in the file you pass as path',
+          };
+        }
         // A document may declare its own placement, size, and title; an explicit
         // tool argument always wins, and an unusable value falls back to the
         // default rather than failing the call.
@@ -1161,7 +1189,7 @@ export function apply(ctx, config) {
       properties: {
         op: { type: 'string', enum: ['save', 'list', 'show', 'remove'] },
         name: { type: 'string', description: 'Template name (lowercase letters, digits, dot, dash, underscore).' },
-        ui_id: { type: 'string', description: 'Existing interface to freeze when saving.' },
+        ui_id: { type: 'string', description: 'Existing interface to freeze when saving. Accepted as `id` too, since the html_ui tool names it that way.' },
         html: { type: 'string', description: 'Inline HTML to save when no ui_id is given.' },
         path: { type: 'string', description: 'HTML document to save when no ui_id is given (.html, .htm, or .xhtml).' },
         description: { type: 'string', description: 'Optional note describing the template.' },
@@ -1255,8 +1283,15 @@ export function apply(ctx, config) {
           return { ok: false, op, error: `template store holds ${MAX_TEMPLATES} entries`, hint: 'remove one first' };
         }
         let source;
-        if (typeof args?.ui_id === 'string' && args.ui_id.length > 0) {
-          const owned = readOwnedUi(args.ui_id, resolveSessionId(undefined, exec));
+        // `id` is accepted as well: the html_ui tool names this field that way, and
+        // a model carrying the name across is not making a mistake worth failing.
+        const sourceUiId = typeof args?.ui_id === 'string' && args.ui_id.length > 0
+          ? args.ui_id
+          : typeof args?.id === 'string' && args.id.length > 0
+            ? args.id
+            : undefined;
+        if (sourceUiId !== undefined) {
+          const owned = readOwnedUi(sourceUiId, resolveSessionId(undefined, exec));
           if (owned.error !== undefined) return { ok: false, op, error: owned.error, hint: owned.hint };
           source = owned.record.source;
         } else if (typeof args?.path === 'string' && args.path.trim().length > 0) {
@@ -1302,6 +1337,13 @@ export function apply(ctx, config) {
           sendJson(res, 404, { ok: false, error: `unknown ui id: ${uiId}` });
           return;
         }
+        // Minting is rate limited per document. The carrier trusts the loopback
+        // boundary (see Security in the README): it cannot tell the page from any
+        // other local caller, so it bounds what one caller can do instead.
+        if (!takeToken(uiId)) {
+          sendJson(res, 429, { ok: false, error: 'rate limited', hint: 'too many ticket requests for this interface' });
+          return;
+        }
         const theme = body.theme === 'dark' ? 'dark' : body.theme === 'light' ? 'light' : undefined;
         sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme, current.meta.revision) });
       })
@@ -1311,7 +1353,14 @@ export function apply(ctx, config) {
   function handleList(req, res) {
     readJsonBody(req, MAX_BODY_BYTES)
       .then((body) => {
-        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
+        // The page always knows which session it is showing; an unscoped list would
+        // hand one caller every session's records. The model's own cross-session
+        // view is the html_ui op=list tool, not this route.
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+        if (sessionId.length === 0) {
+          sendJson(res, 400, { ok: false, error: 'a sessionId is required' });
+          return;
+        }
         const all = store.listUis(sessionId).slice(0, MAX_UI_PER_SESSION);
         sendJson(res, 200, { ok: true, count: all.length, uis: all.map(publicRecord) });
       })
@@ -1537,9 +1586,16 @@ export function apply(ctx, config) {
         }
         if (op === 'resize') {
           const size = normalizeSize(body.size);
-          if (size !== undefined) {
+          // A no-op resize must cost nothing: no write, no broadcast, no bucket.
+          const unchanged = size === undefined || formatSize(size) === formatSize(current.meta.size);
+          if (!unchanged) {
+            if (!takeToken(uiId)) {
+              sendJson(res, 429, { ok: false, error: 'rate limited', hint: 'this document is resizing too quickly' });
+              return;
+            }
             const meta = { ...current.meta, size, updatedAt: Date.now() };
-            store.writeUi(meta, current.source);
+            // Metadata only: resizing must never rewrite the document.
+            store.writeUi(meta, undefined);
             hub.push(sessionId, 'ui', { action: 'update', ui: publicRecord(meta) });
           }
           sendJson(res, 200, { ok: true, op, size: formatSize(size) });

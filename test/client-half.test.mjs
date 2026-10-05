@@ -71,11 +71,14 @@ function createClientContext(options = {}) {
   const services = {};
   if (options.tabs !== undefined) services.sidebarRightTabs = options.tabs;
   if (options.controller !== undefined) services.sidebarRight = options.controller;
+  if (options.locale !== undefined) services.locale = options.locale;
   const context = {
     registrations,
     injections,
     logs,
     effects,
+    // The documented optional-service access for a dynamic Client half.
+    get: (key) => services[key],
     logger: {
       info: (message) => logs.push(message),
       warn: (message) => logs.push(message),
@@ -211,11 +214,62 @@ test('handing a template to the model writes the instruction into the draft', ()
   const scoped = { get: () => ({ input: { for: () => ({ setDraft: (text) => drafts.push(text) }) } }) };
   const ctx = { sessions: { scope: (id) => (id === 'session-1' ? scoped : undefined) } };
   assert.equal(__internals.askModelForTemplate('starter', 'session-1', ctx), true);
-  assert.deepEqual(drafts, ['用 html_ui 渲染模板 starter']);
+  assert.deepEqual(drafts, ['Render the template starter with html_ui']);
   // An unreachable composer is a refusal, not a crash.
   assert.equal(__internals.askModelForTemplate('starter', 'session-none', ctx), false);
   assert.equal(__internals.askModelForTemplate('', 'session-1', ctx), false);
   assert.equal(__internals.askModelForTemplate('starter', 'session-1', undefined), false);
+});
+
+test('visible text comes from the locale service when there is one', () => {
+  const registered = [];
+  const disposed = [];
+  const dictionary = { close: 'Schließen', apply: 'Anwenden' };
+  const locale = {
+    register(ns, language, dict) {
+      registered.push({ ns, language, dict });
+      return () => disposed.push(`${ns}:${language}`);
+    },
+    bind() {
+      // The real lookup returns the key itself for an unknown entry.
+      return (key) => (dictionary[key] === undefined ? key : dictionary[key]);
+    },
+  };
+  const dispose = apply(createClientContext({ locale }));
+  assert.deepEqual(registered.map((entry) => entry.language).sort(), ['en', 'zh'], 'every locale this plugin carries is registered');
+  assert.ok(registered.every((entry) => entry.ns === __internals.LOCALE_NS));
+  assert.ok(registered.every((entry) => Object.keys(entry.dict).length === Object.keys(__internals.MESSAGES.en).length), 'the dictionaries stay the same shape');
+  assert.deepEqual(Object.keys(__internals.MESSAGES.zh).sort(), Object.keys(__internals.MESSAGES.en).sort(), 'and cover the same keys');
+
+  assert.equal(__internals.tr('close', 'Close'), 'Schließen');
+  assert.equal(__internals.tr('apply', 'Apply'), 'Anwenden');
+  assert.equal(__internals.tr('templatesTitle', 'HTML UI templates'), 'HTML UI templates', 'an untranslated key keeps the literal');
+  assert.equal(__internals.tr('apply', 'Apply', { slug: 'x' }), 'Anwenden', 'params are only used by the literals that carry them');
+  assert.equal(__internals.tr('draft', 'Render {slug}', { slug: 'starter' }), 'Render starter');
+
+  dispose();
+  assert.equal(disposed.length, 2, 'the dictionaries are disposed with the plugin');
+});
+
+test('without a locale service the English literals stand, and a refusal is survivable', () => {
+  apply(createClientContext());
+  assert.equal(__internals.tr('close', 'Close'), 'Close');
+
+  // A service that refuses the dictionary must not cost us the surfaces.
+  const refusing = createClientContext({
+    locale: {
+      register() {
+        throw new Error('namespace occupied');
+      },
+      bind() {
+        throw new Error('unreachable');
+      },
+    },
+  });
+  const dispose = apply(refusing);
+  assert.equal(typeof dispose, 'function');
+  assert.equal(__internals.tr('close', 'Close'), 'Close');
+  assert.ok(refusing.logs.some((line) => String(line).includes('locale service refused')));
 });
 
 test('dock-top and dock-bottom land in different seats', () => {

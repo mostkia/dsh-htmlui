@@ -140,6 +140,34 @@
     if (data.__dshHtmlUi === 'theme') applyTheme(data.theme);
   });
 
+  /** Subscribe to one event type; the single path both `on` and `ready` take. */
+  function subscribe(type, handler) {
+    if (typeof type !== 'string' || typeof handler !== 'function') return function () {};
+    // The document's own script runs after the bridge, so a `ready` handler
+    // registered then would never see the event that already fired.
+    if (type === 'ready' && readyDetail !== null) {
+      try {
+        handler(readyDetail);
+      } catch (error) {
+        console.warn('[dshHTML] listener failed for "ready"', error);
+      }
+      return function () {};
+    }
+    stream();
+    if (listeners[type] === undefined) listeners[type] = [];
+    listeners[type].push(handler);
+    return function () {
+      var bucket = listeners[type];
+      if (bucket === undefined) return;
+      var index = bucket.indexOf(handler);
+      if (index >= 0) bucket.splice(index, 1);
+    };
+  }
+
+  // The theme from the URL is applied at once: if the host's init handshake never
+  // arrives, the document still matches the page instead of staying light.
+  applyTheme(config.initialTheme);
+
   window.dshHTML = {
     version: typeof config.pluginVersion === 'string' ? config.pluginVersion : '0.0.0',
     uiId: uiId,
@@ -148,12 +176,9 @@
     theme: function () {
       return theme;
     },
+    /** Immediate form of `on('ready', …)`, with the same payload. */
     ready: function (handler) {
-      if (typeof handler === 'function') {
-        stream();
-        handler({ uiId: uiId, sessionId: sessionId });
-      }
-      return undefined;
+      return subscribe('ready', handler);
     },
     stream: stream,
     send: function (action, data, options) {
@@ -193,26 +218,7 @@
       });
     },
     on: function (type, handler) {
-      if (typeof type !== 'string' || typeof handler !== 'function') return function () {};
-      // The document's own script runs after the bridge, so a `ready` handler
-      // registered then would never see the event that already fired.
-      if (type === 'ready' && readyDetail !== null) {
-        try {
-          handler(readyDetail);
-        } catch (error) {
-          console.warn('[dshHTML] listener failed for "ready"', error);
-        }
-        return function () {};
-      }
-      stream();
-      if (listeners[type] === undefined) listeners[type] = [];
-      listeners[type].push(handler);
-      return function () {
-        var bucket = listeners[type];
-        if (bucket === undefined) return;
-        var index = bucket.indexOf(handler);
-        if (index >= 0) bucket.splice(index, 1);
-      };
+      return subscribe(type, handler);
     },
     off: function (type, handler) {
       var bucket = listeners[type];

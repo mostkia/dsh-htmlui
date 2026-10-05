@@ -78,8 +78,10 @@ to the model shows up, and how to read a symptom.
 
 - **Host half** (`index.js`, plain ESM, no dependencies): the `html_ui` and
   `html_ui_template` tools, storage under `$DSH_HOME/htmlui`, and an HTTP carrier
-  at `/plugins/@mostkia/dsh-htmlui` — document tickets, the composed document, a
-  POST action channel, and an SSE stream.
+  at `/plugins/@mostkia/dsh-htmlui` — a document ticket route, the composed
+  document, a per-session list, the template catalogue and its apply route, a
+  POST action channel, an SSE stream, and a health probe. Each route is guarded
+  by the policy described under [Security](#security).
 - **Browser half** (`client.js`, hand-written module, no build step): registers
   the tool view, the composer dock, and the frame-wide overlay, and hosts every
   document in an iframe.
@@ -114,6 +116,19 @@ opaque-origin frame is accepted only with a valid token, cross-site ticket
 requests are refused, mutating routes are POST-only, and each document gets a
 small token bucket so a runaway script cannot flood the model. No secrets belong
 in a document, and the plugin never asks for any.
+
+**What that boundary does and does not cover.** Loopback *is* the trust boundary,
+and it is worth stating plainly: a request with no `Origin` at all — `curl`, a
+script, another local process — is treated as trusted, because a local process
+already has everything the user has. The carrier cannot tell the DSH page from
+such a caller, so it bounds what one caller can do rather than pretending to
+authenticate it: the page-facing list route requires an explicit session, ticket
+minting is rate limited per document, and a capability is revoked the moment its
+interface is closed or superseded. A *browser* attacker is a different matter and
+is refused outright: another origin is rejected, a sandboxed frame on someone
+else's page has no token, and a rebound Host name fails the loopback check.
+If you expose this beyond loopback, read the `allowedOrigins` paragraph below
+first — that is the setting that changes the trust boundary.
 
 A deployment that deliberately serves DSH beyond loopback (`webServer.host:
 0.0.0.0`, a LAN address, a reverse proxy) has a browser origin the default policy
@@ -166,16 +181,17 @@ A hand-written document is a template too. Drop `my-panel.html` into
 write. A managed template of the same name takes precedence while it exists, and
 removing it uncovers the file again.
 
-The composer also carries a **template drawer** (the `⟨/⟩ 模板` control beside
-it). It lists the catalogue, **applies** one straight into the session with no
-model round trip, and offers `交给模型` when the other path is what you want.
-A surface created that way is a normal record: the model sees it in
-`html_ui op=list` and can update or close it.
+The composer also carries a **template drawer** (the `⟨/⟩ Templates` control
+beside it; localized through the Client locale service). It lists the catalogue,
+**applies** one straight into the session with no model round trip, and offers
+`Ask the model` when the other path is what you want. A surface created that way
+is a normal record: the model sees it in `html_ui op=list` and can update or
+close it.
 
 ## Development
 
 ```sh
-npm test        # 111 assertions: 12 package, 9 doc contract, 31 host, 23 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 117 assertions: 12 package, 9 doc contract, 35 host, 25 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

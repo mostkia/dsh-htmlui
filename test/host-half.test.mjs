@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -946,6 +946,99 @@ test('the page can list templates and apply one without the model', async () => 
     body: '{}',
   });
   assert.equal(foreign.status, 403, 'the catalogue is for the page, not for another origin');
+});
+
+test('freezing an interface accepts either field name and still checks ownership', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>freeze me</p>', title: 'Freeze' }, exec('session-freeze'));
+  // `id` is what the html_ui tool calls this field; a model carrying it across must
+  // not be told there is nothing to save.
+  const byAlias = await tool('html_ui_template').execute({ op: 'save', name: 'frozen-alias', id: created.uiId }, exec('session-freeze'));
+  assert.equal(byAlias.ok, true, byAlias.error ?? 'the alias must work');
+  const byName = await tool('html_ui_template').execute({ op: 'save', name: 'frozen-name', ui_id: created.uiId }, exec('session-freeze'));
+  assert.equal(byName.ok, true);
+  // The alias does not bypass the ownership check.
+  const intruder = await tool('html_ui_template').execute({ op: 'save', name: 'stolen-alias', id: created.uiId }, exec('session-other'));
+  assert.equal(intruder.ok, false);
+  assert.match(intruder.error, /another session/u);
+  await tool('html_ui_template').execute({ op: 'remove', name: 'frozen-alias' }, exec('session-freeze'));
+  await tool('html_ui_template').execute({ op: 'remove', name: 'frozen-name' }, exec('session-freeze'));
+});
+
+test('the carrier list is scoped to one session and cannot be unscoped', async () => {
+  await tool('html_ui').execute({ op: 'render', html: '<p>mine</p>' }, exec('session-scoped-a'));
+  await tool('html_ui').execute({ op: 'render', html: '<p>theirs</p>' }, exec('session-scoped-b'));
+  const headers = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' };
+  const scoped = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/list',
+    headers,
+    body: JSON.stringify({ sessionId: 'session-scoped-a' }),
+  });
+  assert.equal(scoped.status, 200);
+  const records = JSON.parse(scoped.text).uis;
+  assert.equal(records.length, 1);
+  assert.equal(records[0].sessionId, 'session-scoped-a');
+
+  // No session, no list: the model's cross-session view is its own tool.
+  const unscoped = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/list',
+    headers,
+    body: '{}',
+  });
+  assert.equal(unscoped.status, 400);
+  assert.match(JSON.parse(unscoped.text).error, /sessionId/u);
+});
+
+test('resizing rewrites only the record, not the document', async () => {
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>resizable</p>' }, exec('session-resize'));
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const token = /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+  const documentPath = join(process.env.DSH_HTMLUI_ROOT, 'ui', created.uiId, 'index.html');
+  const before = statSync(documentPath).mtimeMs;
+
+  const resized = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+    body: JSON.stringify({ t: token, uiId: created.uiId, op: 'resize', size: '640x480+20+20' }),
+  });
+  assert.equal(resized.status, 200);
+  assert.equal(JSON.parse(resized.text).size, '640x480+20+20');
+  await tick();
+  assert.equal(statSync(documentPath).mtimeMs, before, 'the document file must not be rewritten');
+
+  // A no-op resize is free: it does not spend the bucket, so a frame cannot be
+  // throttled by repeating its own size.
+  for (let index = 0; index < 20; index += 1) {
+    const again = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/rpc',
+      headers: { host: '127.0.0.1:3080', origin: 'null' },
+      body: JSON.stringify({ t: token, uiId: created.uiId, op: 'resize', size: '640x480+20+20' }),
+    });
+    assert.equal(again.status, 200, 'an unchanged size is not rate limited');
+  }
+});
+
+test('a composed document over the cap is refused before it is stored', async () => {
+  const file = join(scratch, 'big.html');
+  const half = 'x'.repeat(600 * 1024);
+  writeFileSync(file, `<p>${half}</p>`, 'utf8');
+  const before = readdirSync(join(process.env.DSH_HTMLUI_ROOT, 'ui')).length;
+  // The file alone is under the cap; the inline parts are what push it over.
+  const refused = await tool('html_ui').execute(
+    { op: 'render', path: file, css: `/*${half}*/`, js: `//${half}` },
+    exec('session-big'),
+  );
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /larger than/u);
+  assert.equal(readdirSync(join(process.env.DSH_HTMLUI_ROOT, 'ui')).length, before, 'nothing is stored');
 });
 
 test('every presentation projection stays lossless JSON', async () => {

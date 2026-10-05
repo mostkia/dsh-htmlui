@@ -62,7 +62,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 ## 工作原理
 
-- **宿主半部**（`index.js`，纯 ESM，零依赖）：`html_ui` / `html_ui_template` 两个工具、`$DSH_HOME/htmlui` 下的存储、以及挂在 `/plugins/@mostkia/dsh-htmlui` 的 HTTP 载体（文档票据、拼装后的文档、POST 动作通道、SSE 事件流）。
+- **宿主半部**（`index.js`，纯 ESM，零依赖）：`html_ui` / `html_ui_template` 两个工具、`$DSH_HOME/htmlui` 下的存储、以及挂在 `/plugins/@mostkia/dsh-htmlui` 的 HTTP 载体（文档票据、拼装后的文档、按会话列取、模板目录与套用、POST 动作通道、SSE 事件流、健康探针）。每条路由都受[「安全」](#安全)一节所述策略管辖。
 - **浏览器半部**（`client.js`，手写模块，无需构建）：注册工具卡片、输入框停靠区、整帧浮层，并把每份文档放进 iframe。
 - **桥**（`assets/bridge.js`，服务时注入）：暴露 `window.dshHTML`，提供 `send`、`state`、`resize`、`close`、`on(...)`。
 
@@ -119,7 +119,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 111 项断言：包完整性 12 + 文档契约 9 + 宿主 31 + 浏览器 23 + 桥 9 + 浅渲染 10 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm test        # 117 项断言：包完整性 12 + 文档契约 9 + 宿主 35 + 浏览器 25 + 桥 9 + 浅渲染 10 + 对抗输入 10 + 打包产物 2 + harness schema 5
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 
