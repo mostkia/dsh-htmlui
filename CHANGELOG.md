@@ -6,6 +6,19 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- "Switch back to chat" in fullscreen mode actually switches back. The layer
+  re-selected the same record on the next render, so the button appeared to do
+  nothing; a dismissal is now remembered, while a newly attached interface still
+  opens by itself.
+- Republishing an identical record no longer notifies subscribers. A component
+  effect that republishes its own projection could otherwise re-render itself
+  forever.
+- The dock's height handle captures the pointer, so the drag keeps tracking once
+  the cursor leaves the six-pixel strip.
+- A background placement no longer draws the host chrome row: the layer is
+  click-through, so a header there was decorative and misleading.
+- A session converges on the host's answer: an interface closed from another page
+  or by the model disappears here instead of being rendered until a reload.
 - `dock-bottom` really sits below the composer card. Both vertical placements
   used to render in the same seat above the input, which made the documented
   split untrue; the bottom placement now uses the seat under the composer, and a

@@ -42,6 +42,8 @@ window.__ModuleLoader__.load({
       tickets: new Map(),
       collapsed: new Map(),
       fullscreen: null,
+      /** Interfaces the user switched away from, so auto-open does not fight them. */
+      fullscreenDismissed: new Set(),
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       listeners: new Set(),
@@ -87,12 +89,31 @@ window.__ModuleLoader__.load({
       if (bucket.size === 0) state.bySession.delete(sessionId);
     }
 
+    /** Equality for the fields a surface actually renders. */
+    function sameRecord(a, b) {
+      if (a === undefined || b === undefined) return false;
+      return (
+        a.uiId === b.uiId &&
+        a.sessionId === b.sessionId &&
+        a.title === b.title &&
+        a.placement === b.placement &&
+        a.sizeText === b.sizeText &&
+        a.url === b.url &&
+        a.revision === b.revision &&
+        a.bytes === b.bytes
+      );
+    }
+
     function publish(record) {
       if (record === null || typeof record !== 'object') return;
       const uiId = String(record.uiId ?? '');
       if (uiId.length === 0) return;
       const previous = state.byId.get(uiId);
-      state.byId.set(uiId, Object.assign({}, previous, record, { uiId }));
+      const next = Object.assign({}, previous, record, { uiId });
+      // Republishing an identical record must not notify: a component effect that
+      // republishes would otherwise re-render itself forever.
+      if (sameRecord(previous, next)) return;
+      state.byId.set(uiId, next);
       if (previous === undefined || previous.sessionId !== record.sessionId) {
         if (previous !== undefined) removeFromSession(previous.sessionId, uiId);
         addToSession(record.sessionId, uiId);
@@ -112,9 +133,26 @@ window.__ModuleLoader__.load({
       const record = state.byId.get(uiId);
       state.byId.delete(uiId);
       state.tickets.delete(uiId);
+      state.fullscreenDismissed.delete(uiId);
       removeFromSession(sessionId ?? record?.sessionId, uiId);
       if (state.fullscreen === uiId) state.fullscreen = null;
       bump();
+    }
+
+    /**
+     * Which record owns the fullscreen layer. An explicit choice wins; otherwise
+     * the session's first fullscreen-placed record the user has not switched away
+     * from, so a newly attached interface opens by itself while "switch back to
+     * chat" keeps the one it just closed closed.
+     */
+    function activeFullscreen(records) {
+      if (typeof state.fullscreen === 'string') {
+        const pinned = records.find((record) => record.uiId === state.fullscreen);
+        if (pinned !== undefined) return pinned;
+      }
+      return records.find(
+        (record) => record.placement === 'fullscreen' && !state.fullscreenDismissed.has(record.uiId),
+      );
     }
 
     function recordsFor(sessionId) {
@@ -135,6 +173,23 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Converge one session's surfaces on the host's answer: publish what it
+     * reports, and drop local records it no longer knows about (closed from
+     * another page, or removed by the model).
+     */
+    function convergeSession(sessionId, uis) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0 || !Array.isArray(uis)) return;
+      const seen = new Set();
+      for (const record of uis) {
+        seen.add(String(record.uiId ?? ''));
+        publish(record);
+      }
+      for (const known of recordsFor(sessionId)) {
+        if (!seen.has(known.uiId)) retire(known.uiId, sessionId);
+      }
+    }
+
+    /**
      * Pull the session's stored records once, so a reloaded page rebuilds surfaces
      * whose originating tool call has scrolled out of the transcript.
      */
@@ -144,9 +199,7 @@ window.__ModuleLoader__.load({
         let cancelled = false;
         postJson('/ui/list', { sessionId }).then((value) => {
           if (cancelled) return;
-          if (value !== null && value.ok === true && Array.isArray(value.uis)) {
-            for (const record of value.uis) publish(record);
-          }
+          if (value !== null && value.ok === true) convergeSession(sessionId, value.uis);
         });
         return () => {
           cancelled = true;
@@ -387,6 +440,7 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- surfaces
 
+    /** The frame plus, for every variant but `background`, a slim host chrome row. */
     function HtmlUiFrame(props) {
       const { record, theme, variant } = props;
       const [url, setUrl] = useState(undefined);
@@ -594,6 +648,11 @@ window.__ModuleLoader__.load({
         );
       }
 
+      if (variant === 'background') {
+        // A background layer is decoration: no chrome, and nothing to click.
+        return h('div', { style: { width: '100%', height: '100%' } }, body);
+      }
+
       const height = variant === 'inline' ? Math.min(INLINE_MAX_HEIGHT, initial.h ?? 420) : '100%';
       return h(
         'div',
@@ -654,7 +713,9 @@ window.__ModuleLoader__.load({
           return;
         }
         publish(next);
-      }, [meta, sessionId]);
+        // Depend on primitives: the host may hand a fresh block object on every
+        // render, and an object dependency would republish on each one.
+      }, [meta === undefined ? undefined : meta.uiId, meta === undefined ? undefined : meta.revision, meta === undefined ? undefined : meta.op, sessionId]);
 
       // A dock-right interface lives in the right column: reveal its tab once.
       useEffect(() => {
@@ -764,6 +825,15 @@ window.__ModuleLoader__.load({
         (event) => {
           if (event.button !== 0) return;
           resizeRef.current = { h: height, y: event.clientY };
+          // Without capture the drag only tracks while the pointer stays on the
+          // 6px handle, which makes the dock height practically unadjustable.
+          if (typeof event.currentTarget.setPointerCapture === 'function') {
+            try {
+              event.currentTarget.setPointerCapture(event.pointerId);
+            } catch {
+              /* unsupported capture is not fatal */
+            }
+          }
           event.preventDefault();
         },
         [height],
@@ -968,10 +1038,7 @@ window.__ModuleLoader__.load({
 
       const floats = records.filter((record) => record.placement === 'float');
       const backgrounds = records.filter((record) => record.placement === 'background');
-      const fullscreenRecord =
-        state.fullscreen !== null
-          ? records.find((record) => record.uiId === state.fullscreen)
-          : records.find((record) => record.placement === 'fullscreen');
+      const fullscreenRecord = activeFullscreen(records);
 
       const dismiss = dismissRecord;
 
@@ -1026,7 +1093,10 @@ window.__ModuleLoader__.load({
                   type: 'button',
                   style: buttonStyle,
                   onClick: () => {
+                    // Switch back to the chat and keep this interface closed until
+                    // the user asks for it again; a newly attached one still opens.
                     state.fullscreen = null;
+                    state.fullscreenDismissed.add(fullscreenRecord.uiId);
                     bump();
                   },
                 },
@@ -1125,6 +1195,8 @@ window.__ModuleLoader__.load({
         recordsIn,
         publish,
         retire,
+        convergeSession,
+        activeFullscreen,
         dismissRecord,
         toggleCollapsed,
         openRightPane,

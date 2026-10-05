@@ -394,3 +394,76 @@ test('session identity is read from the composer dock owner props', () => {
   assert.equal(__internals.sessionIdOf({ sessionId: 'session-3' }), 'session-3');
   assert.equal(__internals.sessionIdOf({}), undefined);
 });
+
+test('republishing an identical record notifies nobody', () => {
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  const meta = { htmlui: true, op: 'render', uiId: 'ui-eeee5555', sessionId: 'session-e', title: 'E', placement: 'inline', revision: 4, bytes: 12 };
+  __internals.publish(__internals.recordFromMeta(meta, undefined));
+  const after = __internals.state.revision;
+  // A component effect that republishes the same projection must not re-render
+  // itself forever.
+  __internals.publish(__internals.recordFromMeta({ ...meta }, undefined));
+  assert.equal(__internals.state.revision, after, 'an identical projection is a no-op');
+  // A real change still notifies.
+  __internals.publish(__internals.recordFromMeta({ ...meta, revision: 5 }, undefined));
+  assert.equal(__internals.state.revision, after + 1);
+  // So does a placement change, which invalidates the cached document URL.
+  __internals.state.tickets.set('ui-eeee5555', { url: 'stale', theme: 'light' });
+  __internals.publish(__internals.recordFromMeta({ ...meta, revision: 6, placement: 'float' }, undefined));
+  assert.equal(__internals.state.tickets.get('ui-eeee5555'), undefined);
+});
+
+test('a session converges on what the host reports', () => {
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  const record = (uiId) => ({ htmlui: true, op: 'render', uiId, sessionId: 'session-c', title: uiId, placement: 'inline', revision: 1 });
+  __internals.publish(__internals.recordFromMeta(record('ui-11110000'), undefined));
+  __internals.publish(__internals.recordFromMeta(record('ui-22220000'), undefined));
+  // The host no longer lists the first one: it was closed from elsewhere.
+  __internals.convergeSession('session-c', [
+    { uiId: 'ui-22220000', sessionId: 'session-c', title: 'two', placement: 'float', sizeText: '', revision: 2, bytes: 0 },
+    { uiId: 'ui-33330000', sessionId: 'session-c', title: 'three', placement: 'panel', sizeText: '', revision: 1, bytes: 0 },
+  ]);
+  assert.deepEqual(
+    __internals.recordsFor('session-c').map((entry) => entry.uiId).sort(),
+    ['ui-22220000', 'ui-33330000'],
+  );
+  assert.equal(__internals.state.byId.get('ui-22220000').placement, 'float', 'the host answer wins');
+  // A refused or malformed answer changes nothing.
+  __internals.convergeSession('session-c', undefined);
+  assert.equal(__internals.recordsFor('session-c').length, 2);
+});
+
+test('the fullscreen layer opens by itself and honours switching back', () => {
+  const fullscreenRecord = (uiId) => ({ uiId, placement: 'fullscreen', sessionId: 'session-1' });
+  __internals.state.fullscreen = null;
+  __internals.state.fullscreenDismissed.clear();
+  assert.equal(__internals.activeFullscreen([]), undefined);
+
+  const first = fullscreenRecord('ui-aaaa0001');
+  assert.equal(__internals.activeFullscreen([first]).uiId, 'ui-aaaa0001');
+
+  // "Switch back to chat" must keep it closed. The old selection logic re-picked
+  // the same record on the next render, so the button looked broken.
+  __internals.state.fullscreen = null;
+  __internals.state.fullscreenDismissed.add('ui-aaaa0001');
+  assert.equal(__internals.activeFullscreen([first]), undefined);
+
+  // Opening it explicitly wins over the dismissal.
+  __internals.state.fullscreen = 'ui-aaaa0001';
+  assert.equal(__internals.activeFullscreen([first]).uiId, 'ui-aaaa0001');
+
+  // A newly attached interface opens by itself again.
+  __internals.state.fullscreen = null;
+  const second = fullscreenRecord('ui-bbbb0002');
+  assert.equal(__internals.activeFullscreen([first, second]).uiId, 'ui-bbbb0002');
+
+  // Retiring the pinned interface clears both the pin and its dismissal.
+  __internals.state.fullscreen = 'ui-bbbb0002';
+  __internals.state.fullscreenDismissed.add('ui-bbbb0002');
+  __internals.retire('ui-bbbb0002');
+  assert.equal(__internals.state.fullscreen, null);
+  assert.equal(__internals.state.fullscreenDismissed.has('ui-bbbb0002'), false);
+  assert.equal(__internals.activeFullscreen([first]), undefined, 'the one still dismissed stays dismissed');
+});
