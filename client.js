@@ -549,8 +549,6 @@ window.__ModuleLoader__.load({
         placed: 'placed: ',
         fullscreenSuffix: '· fullscreen',
         backToChat: 'Back to chat',
-        rightPaneEmpty: 'This session has no right-column interface.',
-        rightPaneNoSession: 'No session is open for this column yet.',
         inlineAtTail: 'inline · shown at the end of this turn',
         templatesButton: '⟨/⟩ Templates',
         templatesTooltip: 'HTML UI templates',
@@ -579,8 +577,6 @@ window.__ModuleLoader__.load({
         placed: '已投放到 ',
         fullscreenSuffix: '· 全覆盖模式',
         backToChat: '切回聊天',
-        rightPaneEmpty: '这个会话还没有右侧栏界面。',
-        rightPaneNoSession: '这个栏还没有对应到会话。',
         inlineAtTail: '内联 · 显示在本轮末尾',
         templatesButton: '⟨/⟩ 模板',
         templatesTooltip: 'HTML UI 模板',
@@ -1642,18 +1638,12 @@ window.__ModuleLoader__.load({
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
-      // Never render nothing: an empty tab is indistinguishable from a broken plugin,
-      // and this tab stays open once something has opened it.
+      // Nothing to show means showing nothing: an explanatory line in an open column
+      // costs the reader half the frame for no content. The column itself is not ours
+      // to open or close — it may host other plugins' tabs — so the plugin simply never
+      // occupies it without something to put there.
       const records = sessionId === undefined ? [] : recordsIn(sessionId, ['dock-right']);
-      if (records.length === 0) {
-        return h(
-          'div',
-          { style: emptyStyle },
-          sessionId === undefined
-            ? tr('rightPaneNoSession', 'No session is open for this column yet.')
-            : tr('rightPaneEmpty', 'This session has no right-column interface.'),
-        );
-      }
+      if (records.length === 0) return null;
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: '8px', height: '100%', minHeight: '0', padding: '6px' } },
@@ -1978,9 +1968,40 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** The one control that opens the drawer, beside the composer. */
+    /**
+     * The one control that opens the drawer, beside the composer.
+     *
+     * It is shown only when the catalogue has something in it: a control that opens an
+     * empty drawer is furniture nobody needs. The check is one cheap catalogue read on
+     * mount, refreshed when the window regains focus, so a template the model saves
+     * afterwards still brings the control back.
+     */
     function HtmlUiTemplateButton(props) {
       useStore();
+      const sessionId = resolveSessionId(props);
+      const [count, setCount] = useState(undefined);
+      useEffect(() => {
+        let live = true;
+        const load = () => {
+          // An error must not hide the control: a catalogue that cannot be read is not
+          // an empty catalogue, and the drawer is where the failure is explained.
+          loadTemplates().then(
+            (items) => {
+              if (live) setCount(Array.isArray(items) ? items.length : -1);
+            },
+            () => {
+              if (live) setCount(-1);
+            },
+          );
+        };
+        load();
+        window.addEventListener('focus', load);
+        return () => {
+          live = false;
+          window.removeEventListener('focus', load);
+        };
+      }, [sessionId]);
+      if (count === 0) return null;
       return h(
         'button',
         {

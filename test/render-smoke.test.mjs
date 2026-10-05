@@ -291,10 +291,12 @@ test('the composer docks render nothing until their own placement appears', () =
   assert.match(panel.text, /Preparing interface/u);
 });
 
-test('the right pane states its empty case and then hosts its own records', () => {
+test('the right pane renders nothing until it has something to host', () => {
   resetStore();
-  const empty = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
-  assert.match(empty.text, /no right-column interface/u);
+  // An empty column costs the reader half the frame, and the column is not the
+  // plugin's to open or close: with nothing to show, the plugin shows nothing.
+  assert.equal(__internals.HtmlUiRightPane({ sessionId: 'session-1' }), null);
+  assert.equal(render(__internals.HtmlUiRightPane, { sessionId: 'session-1' }).text, '');
 
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-55550000', sessionId: 'session-1', title: 'R', placement: 'dock-right', revision: 1, bytes: 5 }, undefined),
