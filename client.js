@@ -622,7 +622,7 @@ window.__ModuleLoader__.load({
         toModel: 'Ask the model',
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
-        managerView: 'HTML UI',
+        managerView: 'HTML manager',
         managerTitle: 'HTML interfaces in this session',
         managerClose: 'Remove',
         managerOpen: 'Open column',
@@ -673,7 +673,7 @@ window.__ModuleLoader__.load({
         toModel: '交给模型',
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
-        managerView: 'HTML 界面',
+        managerView: 'HTML管理',
         managerTitle: '本会话的 HTML 界面',
         managerClose: '关闭',
         managerOpen: '打开右栏',
@@ -2606,7 +2606,7 @@ window.__ModuleLoader__.load({
       disposers.push(
         ctx.slots.inject('conversation.view', () =>
           ctx.slots.register(
-            { name: 'conversation.view', id: 'htmlui-view', order: 60, label: () => tr('managerView', 'HTML UI') },
+            { name: 'conversation.view', id: 'htmlui-view', order: 60, label: () => tr('managerView', 'HTML manager') },
             guarded(ctx, (props) => h(HtmlUiManager, Object.assign({}, props, { ctx }))),
           ),
         ),
