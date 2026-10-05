@@ -544,36 +544,23 @@ test('the sandbox follows the project, and only unsafe touches the origin', () =
   assert.ok(__internals.sandboxFor('unsafe').includes('allow-same-origin'), 'unsafe is the one that drops isolation');
 });
 
-test('a background layer is not dimmed, sits below the plugin layers, and can always be hidden', () => {
-  // A wrapper that dims the document cannot be undone from inside it, so a document that
-  // wanted to be fully opaque — a wallpaper — could never get there. Transparency is the
-  // document's own decision, made in its CSS.
-  //
-  // Removing that dimming is also how a background layer once covered the whole interface
-  // with no way back: it takes no pointer events, so its own document cannot offer an exit,
-  // and the host application cannot be placed behind it from this slot. The escape control
-  // is therefore the part that makes an opaque full-bleed layer safe.
+test('a background layer is dimmed by the client, and that is what keeps the interface usable', () => {
+  // `shell.overlay` is a frame-wide layer above every column, and its host creates a
+  // stacking context, so nothing rendered from there can reach behind the interface. A
+  // fully opaque document would cover the whole workspace — and because the layer takes no
+  // pointer events, its own document could not offer a way out either. The dimming is
+  // therefore the safety of the mode, not a decoration: at 0.4 the interface stays
+  // readable and every control stays clickable.
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-88000002', sessionId: 'viewed', title: '壁纸', placement: 'background', revision: 1, bytes: 5 }, undefined),
   ]);
   const ctx = { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } };
   const overlay = render(__internals.HtmlUiOverlay, { ctx });
-  const layer = overlay.elements.find((element) => element.props?.style?.position === 'fixed' && element.props?.style?.zIndex === -1);
-  assert.ok(layer !== undefined, 'the background layer sits below the plugin layers');
-  assert.equal(layer.props.style.opacity, undefined, 'and carries no opacity of its own');
-  assert.equal(layer.props.style.pointerEvents, 'none', 'it is still decoration rather than a click target');
-  assert.match(overlay.text, /Hide background/u, 'and an always-clickable control hides it');
-
-  const escape = overlay.elements.find((element) => typeof element.props?.title === 'string' && /restored from the session page/u.test(element.props.title));
-  assert.ok(escape !== undefined, 'the control explains how to get it back');
-  escape.props.onClick();
-  assert.equal(__internals.state.hidden.has('ui-88000002'), true, 'one click hides the layer');
-  assert.equal(__internals.state.byId.has('ui-88000002'), true, 'without deleting the record');
-  assert.ok(!render(__internals.HtmlUiOverlay, { ctx }).text.includes('Hide background'), 'and the control goes away with it');
-
-  // The session page brings it back, like every other form.
-  const page = render(__internals.HtmlUiManager, { sessionId: 'viewed', ctx });
-  assert.match(page.text, /Show/u, 'a hidden background layer can be restored');
+  const layer = overlay.elements.find((element) => element.props?.style?.position === 'fixed' && element.props?.style?.zIndex === 1);
+  assert.ok(layer !== undefined, 'the background layer is on screen');
+  assert.equal(layer.props.style.opacity, 0.4, 'and is kept translucent');
+  assert.equal(layer.props.style.pointerEvents, 'none', 'it takes no clicks of its own');
+  assert.ok(!overlay.text.includes('Hide background'), 'and it carries no extra control');
   resetStore();
 });
 

@@ -666,8 +666,6 @@ window.__ModuleLoader__.load({
         closeFailed: 'The host refused to remove it; it is still attached.',
         managerRestore: 'Show',
         managerHidden: 'hidden',
-        hideBackground: 'Hide background',
-        hideBackgroundHint: 'Hide the background layer (it can be restored from the session page)',
         minimize: 'Hide the window',
         managerCloseAll: 'Remove all',
         managerEmpty: 'This session has no HTML interface.',
@@ -760,8 +758,6 @@ window.__ModuleLoader__.load({
         closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
         managerRestore: '恢复显示',
         managerHidden: '已隐藏',
-        hideBackground: '隐藏背景层',
-        hideBackgroundHint: '隐藏背景层（可在会话页里恢复显示）',
         minimize: '隐藏窗口',
         managerCloseAll: '全部关闭',
         managerEmpty: '本会话没有 HTML 界面。',
@@ -2479,7 +2475,6 @@ window.__ModuleLoader__.load({
 
       const floats = records.filter((record) => record.placement === 'float');
       const backgrounds = records.filter((record) => record.placement === 'background');
-      const visibleBackgrounds = backgrounds.filter((record) => !state.hidden.has(record.uiId));
       const fullscreenRecord = activeFullscreen(records);
 
       const dismiss = dismissRecord;
@@ -2503,20 +2498,20 @@ window.__ModuleLoader__.load({
               style: {
                 position: 'fixed',
                 inset: '0',
-                // Decoration: the layer does not take clicks — not even its own document's
-                // buttons, which is exactly why it must never be able to cover the rest of
-                // the interface. The escape control below is what guarantees that.
+                // Decoration: the layer does not take clicks.
                 pointerEvents: 'none',
-                // No opacity here. A wrapper that dims the document cannot be undone from
-                // inside it, so a document that wanted to paint a fully opaque background
-                // — a wallpaper, a backdrop — could never get there. Transparency is the
-                // document's own decision: set it in its CSS, where it can also be left out.
+                // Dimmed here, deliberately, and this is the whole safety of the mode.
                 //
-                // Its layer sits *below* the plugin's own layers, so an opaque document
-                // does not hide the escape control or the rest of the interface. It cannot
-                // be placed behind the host application from this slot, so the control — not
-                // the stacking order — is what makes a full-bleed layer safe.
-                zIndex: -1,
+                // `shell.overlay` is documented as a frame-wide layer *above every column*,
+                // and its host creates a stacking context, so nothing rendered from it can
+                // reach behind the interface: a fully opaque document covers the entire
+                // workspace, and because the layer takes no pointer events its own document
+                // cannot offer a way out either. Keeping it translucent is what leaves the
+                // interface readable and clickable while it is on screen. A document that
+                // wants to be dimmer can say so in its own CSS; one that wants to be opaque
+                // cannot be, in this mode.
+                opacity: 0.4,
+                zIndex: 1,
               },
             },
             h(HtmlUiFrame, { record, theme: state.theme, variant: 'background', onDismiss: dismiss }),
@@ -2594,36 +2589,6 @@ window.__ModuleLoader__.load({
         'div',
         { style: { position: 'fixed', inset: '0', pointerEvents: 'none' } },
         ...layers,
-        // The way out of a background layer, always on top of it and always clickable.
-        //
-        // A full-bleed layer that paints itself opaque covers everything behind it, and
-        // because it takes no pointer events its own document cannot offer a way to turn
-        // itself off either: without this, the only recovery was deleting the project
-        // files. Reported once, the hard way. It appears only while a layer is showing,
-        // and hides every visible layer in one click — the records stay listed, and the
-        // session page brings any of them back.
-        visibleBackgrounds.length > 0
-          ? h(
-              'div',
-              { style: { position: 'fixed', top: '6px', right: '10px', pointerEvents: 'auto', zIndex: 30 } },
-              h(
-                'button',
-                {
-                  type: 'button',
-                  style: Object.assign({}, buttonStyle, {
-                    background: 'var(--dsw-alias-bg-overlay, #fff)',
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.18)',
-                  }),
-                  title: tr('hideBackgroundHint', 'Hide the background layer (it can be restored from the session page)'),
-                  onClick: () => {
-                    for (const record of visibleBackgrounds) state.hidden.add(record.uiId);
-                    bump();
-                  },
-                },
-                `${tr('hideBackground', 'Hide background')} (${visibleBackgrounds.length})`,
-              ),
-            )
-          : null,
         h(HtmlUiCreateDialog, { ctx: props.ctx }),
       );
     }
