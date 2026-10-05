@@ -78,6 +78,8 @@ window.__ModuleLoader__.load({
       column: { left: 0, width: 0 },
       /** The newest turn tail seen per session, where inline interfaces render. */
       tailSeq: new Map(),
+      /** Interfaces the reader put away without deleting: floats, for now. */
+      hidden: new Set(),
       collapsed: new Map(),
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
@@ -625,7 +627,9 @@ window.__ModuleLoader__.load({
         managerView: 'HTML manager',
         managerTitle: 'HTML interfaces in this session',
         managerClose: 'Remove',
-        managerOpen: 'Open column',
+        managerRestore: 'Show',
+        managerHidden: 'hidden',
+        minimize: 'Hide the window',
         managerCloseAll: 'Remove all',
         managerEmpty: 'This session has no HTML interface.',
         create: 'Create',
@@ -676,7 +680,9 @@ window.__ModuleLoader__.load({
         managerView: 'HTML管理',
         managerTitle: '本会话的 HTML 界面',
         managerClose: '关闭',
-        managerOpen: '打开右栏',
+        managerRestore: '恢复显示',
+        managerHidden: '已隐藏',
+        minimize: '隐藏窗口',
         managerCloseAll: '全部关闭',
         managerEmpty: '本会话没有 HTML 界面。',
         create: '创建',
@@ -1162,6 +1168,21 @@ window.__ModuleLoader__.load({
               },
               `${record.title !== undefined && record.title.length > 0 ? record.title : record.uiId} · float`,
             ),
+            // Minimizing hides the window without deleting it: the session page can bring
+            // it back, which is the difference between "out of the way" and "gone".
+            props.onMinimize !== undefined
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: buttonStyle,
+                    onClick: () => props.onMinimize(record.uiId),
+                    title: tr('minimize', 'Hide the window'),
+                    'aria-label': tr('minimize', 'Hide the window'),
+                  },
+                  '—',
+                )
+              : null,
             props.onDismiss !== undefined
               ? h(
                 'button',
@@ -1482,6 +1503,36 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Bring one interface back into view, whatever form it is.
+     *
+     * The forms differ in where they live, not in what "show it again" means, so the
+     * session page offers one control and this decides what that takes: the column for
+     * a `dock-right` surface, the window for a minimized `float`, the frame for a
+     * `fullscreen`, and the conversation itself for an `inline` one.
+     */
+    function restoreRecord(record, props) {
+      if (record.placement === 'dock-right') {
+        openRightPane(record.uiId);
+        return;
+      }
+      if (record.placement === 'float') {
+        state.hidden.delete(record.uiId);
+        bump();
+        return;
+      }
+      if (record.placement === 'fullscreen') {
+        state.fullscreen = record.uiId;
+        state.fullscreenDismissed.delete(record.uiId);
+        bump();
+        return;
+      }
+      if (record.placement === 'inline' && typeof props?.openView === 'function') {
+        // An inline surface lives in the conversation, so showing it is going there.
+        props.openView('chat', '');
+      }
+    }
+
+    /**
      * The session's HTML interfaces, listed where the reader already is.
      *
      * A `background` layer is click-through by design and an `inline` one is seamless,
@@ -1511,11 +1562,18 @@ window.__ModuleLoader__.load({
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}${record.sizeText !== undefined && record.sizeText.length > 0 ? ` · ${record.sizeText}` : ''}`),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),
-          // The column is opened on demand — the same call the reveal makes, offered as a
-          // control so a reader whose column was closed can bring their interface back.
-          record.placement === 'dock-right'
-            ? h('button', { type: 'button', style: buttonStyle, onClick: () => openRightPane(record.uiId) }, tr('managerOpen', 'Open column'))
+          state.hidden.has(record.uiId)
+            ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
             : null,
+          // Every form that can be out of sight gets the same control, with the same
+          // words. A background layer is always on screen, so it has none.
+          record.placement === 'background'
+            ? null
+            : h(
+                'button',
+                { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
+                tr('managerRestore', 'Show'),
+              ),
           h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
         ),
       );
@@ -2178,7 +2236,22 @@ window.__ModuleLoader__.load({
       }
 
       for (const record of floats) {
-        layers.push(h(HtmlUiFrame, { key: record.uiId, record, theme: state.theme, variant: 'float', onDismiss: dismiss }));
+        // A minimized window is put away, not deleted: the record stays listed, and the
+        // session page's restore control brings the same window back where it was.
+        if (state.hidden.has(record.uiId)) continue;
+        layers.push(
+          h(HtmlUiFrame, {
+            key: record.uiId,
+            record,
+            theme: state.theme,
+            variant: 'float',
+            onMinimize: (uiId) => {
+              state.hidden.add(uiId);
+              bump();
+            },
+            onDismiss: dismiss,
+          }),
+        );
       }
 
       if (fullscreenRecord !== undefined) {

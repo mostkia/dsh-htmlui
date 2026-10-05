@@ -433,6 +433,43 @@ test('the session manager lists what is attached and can remove it', () => {
   assert.match(other.text, /no HTML interface/u);
 });
 
+test('a float window carries its own minimize, and a hidden one leaves the frame', () => {
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-88000001', sessionId: 'viewed', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const ctx = { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } };
+  const shown = render(__internals.HtmlUiOverlay, { ctx });
+  assert.match(shown.text, /Preparing interface/u, 'a float renders its document');
+
+  // Minimizing puts it away without deleting the record: the session page can restore it.
+  const record = __internals.recordsFor('viewed').find((entry) => entry.placement === 'float');
+  __internals.state.hidden.add(record.uiId);
+  const hidden = render(__internals.HtmlUiOverlay, { ctx });
+  assert.ok(!hidden.text.includes('Preparing interface'), 'a hidden float draws nothing');
+  assert.equal(__internals.recordsFor('viewed').length, 1, 'but the record is still there to restore');
+
+  // The control itself is offered on the frame, next to the close.
+  const frame = render(__internals.HtmlUiFrame, { record, theme: 'light', variant: 'float', onMinimize: () => {}, onDismiss: () => {} });
+  assert.match(frame.text, /—/u, 'the minimize control is drawn');
+  assert.match(frame.text, /✕/u, 'next to the close');
+  resetStore();
+});
+
+test('the session page restores every form except the background layer', () => {
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000001', sessionId: 'session-1', title: '背景', placement: 'background', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000002', sessionId: 'session-1', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000003', sessionId: 'session-1', title: '右栏', placement: 'dock-right', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000004', sessionId: 'session-1', title: '全屏', placement: 'fullscreen', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000005', sessionId: 'session-1', title: '内联', placement: 'inline', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  const restores = (listed.text.match(/Show/gu) ?? []).length;
+  assert.equal(restores, 4, 'four of the five forms can be shown again');
+  assert.ok(listed.text.includes('Remove'), 'and every one of them can be removed');
+  resetStore();
+});
+
 test('every surface keeps one hook order, records or not', () => {
   // React error #310 in the live page came from exactly this: hooks placed after an
   // early return. The count only changed once a seat actually had records, so no test
