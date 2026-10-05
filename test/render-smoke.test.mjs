@@ -452,6 +452,10 @@ test('the create dialog asks what to start from and where to put it', () => {
   for (const text of ['New HTML interface', 'New HTML project', 'Blank canvas', 'starter', 'Right column', 'Floating window', 'Fullscreen', 'Create', 'Cancel', 'Use this directory']) {
     assert.ok(dialog.text.includes(text), `the dialog offers ${text}`);
   }
+  // Only the project list is capped: a long catalogue must not push 默认生成位置 and the
+  // buttons below the fold, and everything else in the form keeps its natural size.
+  const capped = dialog.elements.filter((element) => element.props?.style?.overflowY === 'auto' && element.props?.style?.maxHeight !== undefined);
+  assert.equal(capped.length, 1, 'exactly one region scrolls inside the dialog');
   // The catalogue's directory is on screen and editable, not hidden in documentation.
   const directory = dialog.elements.find((element) => element.props?.type === 'text');
   assert.ok(directory !== undefined, 'a directory box is part of the dialog');

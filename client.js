@@ -2690,7 +2690,21 @@ window.__ModuleLoader__.load({
             : null,
           h(
             'div',
-            { style: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '10px' } },
+            {
+              // Only the project list is capped, and only so the rest of the form stays
+              // reachable: a long catalogue used to push 默认生成位置 and the buttons far
+              // below the fold, which made the form awkward to finish. The list scrolls
+              // in place; everything around it keeps its natural size.
+              style: {
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px',
+                marginBottom: '10px',
+                maxHeight: '30vh',
+                overflowY: 'auto',
+                overscrollBehavior: 'contain',
+              },
+            },
             radio('dsh-create-source', 'blank', tr('newBlank', 'Blank canvas'), state.create.source === 'blank', () => {
               state.create.source = 'blank';
               bump();
