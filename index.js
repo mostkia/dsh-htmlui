@@ -318,6 +318,14 @@ const THEME_STYLE = [
   '--dsh-htmlui-muted:#6b6b6b;--dsh-htmlui-border:#e2e2e2;--dsh-htmlui-accent:#247bbf;}',
   'html[data-dsh-htmlui-theme="dark"]{color-scheme:dark;--dsh-htmlui-theme:dark;--dsh-htmlui-bg:#1b1b1e;',
   '--dsh-htmlui-fg:#f2f2f2;--dsh-htmlui-muted:#a0a0a6;--dsh-htmlui-border:#333338;--dsh-htmlui-accent:#6cb2e8;}',
+  // A document that does scroll (a long one, against the frame's height cap) should
+  // not announce it with a default bar: thin, translucent, no track.
+  'html{scrollbar-width:thin;scrollbar-color:rgba(127,127,127,.35) transparent;}',
+  '::-webkit-scrollbar{width:6px;height:6px;}',
+  '::-webkit-scrollbar-track{background:transparent;}',
+  '::-webkit-scrollbar-thumb{background:rgba(127,127,127,.32);border-radius:3px;}',
+  '::-webkit-scrollbar-thumb:hover{background:rgba(127,127,127,.5);}',
+  '::-webkit-scrollbar-corner{background:transparent;}',
   '</style>',
 ].join('');
 
