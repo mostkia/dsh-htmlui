@@ -280,11 +280,15 @@ test('the composer docks render nothing until their own placement appears', () =
     'the top dock does not claim a bottom placement',
   );
   const bottom = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-bottom'] });
-  assert.match(bottom.text, /ui-33330000/);
+  // A docked split is seamless: the document, and a faint control cluster, without a
+  // title row or a box around either.
+  assert.match(bottom.text, /Preparing interface/u);
+  assert.ok(!bottom.text.includes('ui-33330000'), 'a docked split draws no title row');
+  assert.match(bottom.text, /✕/u);
 
   resetStore([__internals.recordFromMeta(meta('ui-44440000', 'panel'), undefined)]);
   const panel = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-top', 'panel'] });
-  assert.match(panel.text, /ui-44440000/);
+  assert.match(panel.text, /Preparing interface/u);
 });
 
 test('the right pane states its empty case and then hosts its own records', () => {
@@ -296,7 +300,9 @@ test('the right pane states its empty case and then hosts its own records', () =
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-55550000', sessionId: 'session-1', title: 'R', placement: 'dock-right', revision: 1, bytes: 5 }, undefined),
   ]);
   const hosted = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
-  assert.match(hosted.text, /R/);
+  // The tab already carries the title, so the body draws the document alone.
+  assert.match(hosted.text, /Preparing interface/u);
+  assert.ok(!hosted.text.includes('R'), 'the tab title is not repeated inside the body');
 });
 
 test('the template drawer renders nothing closed and a row per template open', () => {

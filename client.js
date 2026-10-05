@@ -37,7 +37,25 @@ window.__ModuleLoader__.load({
     const FRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock';
     const INLINE_MAX_HEIGHT = 560;
     const DOCK_MIN_HEIGHT = 140;
-    const DOCK_MAX_HEIGHT = 720;
+
+    /**
+     * The dock's height limits, in the current window.
+     *
+     * A docked surface is a split of the session view, so its natural size is half the
+     * window and its ceiling is most of it — not a fixed 720 px that made "split the
+     * view" impossible on a tall screen.
+     */
+    function dockLimits() {
+      const viewport = typeof window === 'object' && Number.isFinite(window === null || window === undefined ? undefined : window.innerHeight) ? window.innerHeight : 800;
+      return { min: DOCK_MIN_HEIGHT, max: Math.max(DOCK_MIN_HEIGHT + 80, Math.round(viewport * 0.85)) };
+    }
+
+    /** The height a docked split opens at: half the window. */
+    function defaultDockHeight() {
+      const limits = dockLimits();
+      const viewport = typeof window === 'object' && Number.isFinite(window === null || window === undefined ? undefined : window.innerHeight) ? window.innerHeight : 800;
+      return Math.min(limits.max, Math.max(limits.min, Math.round(viewport * 0.5)));
+    }
     const DEFAULT_FLOAT = { w: 520, h: 360, x: 96, y: 96 };
 
     // ------------------------------------------------------------------ store
@@ -1086,6 +1104,80 @@ window.__ModuleLoader__.load({
           h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, body),
         );
       }
+      // A docked split is seamless: the surface is meant to be one half of the session
+      // view, not a window inside it. No title row, no border, no opaque background —
+      // but the collapse and close controls stay, as a faint cluster in the corner.
+      if (variant === 'dock') {
+        const control = (label, hint, onClick, extra) =>
+          h(
+            'button',
+            Object.assign(
+              {
+                type: 'button',
+                style: Object.assign({}, buttonStyle, { padding: '1px 6px', fontSize: '11px' }),
+                onClick,
+                title: hint,
+                'aria-label': hint,
+              },
+              extra ?? {},
+            ),
+            label,
+          );
+        const controls = [
+          props.onToggleCollapse !== undefined
+            ? control(
+                props.collapsed === true ? '▸' : '▾',
+                props.collapsed === true ? tr('expand', 'Show') : tr('collapse', 'Hide'),
+                () => props.onToggleCollapse(record.uiId),
+                { 'aria-expanded': props.collapsed === true ? 'false' : 'true' },
+              )
+            : null,
+          props.onDismiss !== undefined ? control('✕', tr('close', 'Close'), () => props.onDismiss(record.uiId)) : null,
+        ];
+        if (props.collapsed === true) {
+          // Collapsed: just the controls, on their own line, so the split gives the
+          // whole height back to the conversation.
+          return h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '2px', padding: '2px 4px' } }, ...controls);
+        }
+        return h(
+          'div',
+          {
+            style: {
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              width: '100%',
+              height: '100%',
+              minHeight: '0',
+              overflow: 'hidden',
+              background: 'transparent',
+            },
+          },
+          h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, body),
+          h(
+            'div',
+            {
+              style: {
+                position: 'absolute',
+                top: '2px',
+                right: '4px',
+                display: 'flex',
+                gap: '2px',
+                opacity: 0.35,
+                transition: 'opacity .15s ease',
+              },
+              onMouseEnter: (event) => {
+                event.currentTarget.style.opacity = '1';
+              },
+              onMouseLeave: (event) => {
+                event.currentTarget.style.opacity = '0.35';
+              },
+            },
+            ...controls,
+          ),
+        );
+      }
+
       return h(
         'div',
         {
@@ -1438,7 +1530,7 @@ window.__ModuleLoader__.load({
     function HtmlUiDock(props) {
       useStore();
       const sessionId = resolveSessionId(props);
-      const [height, setHeight] = useState(360);
+      const [height, setHeight] = useState(defaultDockHeight);
       useSessionSync(sessionId);
 
       // Every hook runs before the early returns below. They were once after them,
@@ -1467,7 +1559,8 @@ window.__ModuleLoader__.load({
       const onResizeMove = useCallback((event) => {
         const start = resizeRef.current;
         if (start === null || start === undefined) return;
-        const next = Math.min(DOCK_MAX_HEIGHT, Math.max(DOCK_MIN_HEIGHT, start.h + (start.y - event.clientY)));
+        const limits = dockLimits();
+        const next = Math.min(limits.max, Math.max(limits.min, start.h + (start.y - event.clientY)));
         setHeight(next);
       }, []);
       const onResizeUp = useCallback(() => {
@@ -1502,7 +1595,8 @@ window.__ModuleLoader__.load({
             const step = event.key === 'ArrowUp' ? -24 : event.key === 'ArrowDown' ? 24 : 0;
             if (step === 0) return;
             event.preventDefault();
-            setHeight((current) => Math.min(DOCK_MAX_HEIGHT, Math.max(DOCK_MIN_HEIGHT, current + step)));
+            const limits = dockLimits();
+            setHeight((current) => Math.min(limits.max, Math.max(limits.min, current + step)));
           },
         }),
         ...records.map((record) =>
