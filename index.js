@@ -733,13 +733,21 @@ function createStore(root) {
     if (name.length === 0 || name.includes('..') || name.includes('/') || name.includes('\\')) {
       return { ok: false, error: `not a name in the templates directory: ${name}` };
     }
-    const target = join(root, name);
+    // Addressed by its folder name first, then by the slug in its manifest — the second
+    // is how an adopted project is edited again, whatever its folder is called.
+    let target = join(root, name);
+    if (!existsSync(target)) {
+      const bySlug = readTemplateByDeclaredSlug(root, name);
+      if (bySlug !== undefined) target = dirname(bySlug.documentPath);
+    }
     if (!existsSync(target)) return { ok: false, error: `not found: ${name}` };
     const wanted = input !== null && typeof input === 'object' ? input : {};
     let slug = slugify(typeof wanted.slug === 'string' && wanted.slug.length > 0 ? wanted.slug : name.replace(/\.html?$/iu, ''));
     if (slug === undefined) slug = `project-${Date.now().toString(36)}`;
     const taken = new Set(listTemplates().map((template) => template.slug));
-    if (taken.has(slug)) {
+    // Renaming onto a name another project holds gets a suffix; keeping the slug this
+    // project already has is not a clash.
+    if (taken.has(slug) && slug !== name) {
       let index = 2;
       while (taken.has(`${slug}-${index}`)) index += 1;
       slug = `${slug}-${index}`;
@@ -1685,6 +1693,7 @@ export function apply(ctx, config) {
             slug: String(template.slug ?? ''),
             name: String(template.name ?? template.slug ?? ''),
             description: String(template.description ?? ''),
+            placement: normalizePlacement(template.placement),
             bundled: template.bundled === true,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
           })),

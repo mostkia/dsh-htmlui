@@ -442,6 +442,9 @@ test('the create dialog asks what to start from and where to put it', () => {
   assert.match(withCandidates.text, /my-folder/u);
   assert.match(withCandidates.text, /我的页面\.html/u);
   assert.match(withCandidates.text, /Adopt/u);
+  // A listed project keeps its manifest editable: adopting once is not the last word on
+  // the slug, the name, or where it opens.
+  assert.match(withCandidates.text, /Manifest/u);
 
   // Adopting asks for the manifest instead of writing one behind the reader's back:
   // the slug is what a template is addressed by, so it is filled in and confirmed.

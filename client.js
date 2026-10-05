@@ -662,6 +662,8 @@ window.__ModuleLoader__.load({
         adoptDescription: 'Description',
         adoptPlacement: 'Where it opens',
         adoptConfirm: 'Write the manifest',
+        editManifest: 'Manifest',
+        editManifestHint: 'Edit this project manifest',
         adopted: 'It is a project now.',
         createPlacement: 'Where',
         placementDockRight: 'Right column (a real split)',
@@ -736,6 +738,8 @@ window.__ModuleLoader__.load({
         adoptDescription: '描述',
         adoptPlacement: '默认生成位置',
         adoptConfirm: '写入清单',
+        editManifest: '清单',
+        editManifestHint: '编辑这个项目的清单',
         adopted: '已成为项目。',
         createPlacement: '生成位置',
         placementDockRight: '右侧栏（真正的左右分屏）',
@@ -2661,15 +2665,46 @@ window.__ModuleLoader__.load({
               bump();
             }),
             ...items.map((template) =>
-              radio(
-                'dsh-create-source',
-                template.slug,
-                template.description !== undefined && template.description.length > 0 ? `${template.slug} — ${template.description}` : template.slug,
-                state.create.source === template.slug,
-                () => {
-                  state.create.source = template.slug;
-                  bump();
-                },
+              h(
+                'div',
+                { key: template.slug, style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+                h(
+                  'div',
+                  { style: { flex: '1 1 auto', minWidth: '0' } },
+                  radio(
+                    'dsh-create-source',
+                    template.slug,
+                    template.description !== undefined && template.description.length > 0 ? `${template.slug} — ${template.description}` : template.slug,
+                    state.create.source === template.slug,
+                    () => {
+                      state.create.source = template.slug;
+                      bump();
+                    },
+                  ),
+                ),
+                // A project's manifest stays editable: adopting once must not be the last
+                // word on the slug, the name, or where it opens.
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: Object.assign({}, buttonStyle, { flex: '0 0 auto', fontSize: '11px' }),
+                    title: tr('editManifestHint', 'Edit this project manifest'),
+                    onClick: () => {
+                      state.adopt = {
+                        open: true,
+                        source: template.slug,
+                        slug: template.slug,
+                        name: template.name !== undefined && template.name.length > 0 ? template.name : template.slug,
+                        description: template.description !== undefined ? template.description : '',
+                        placement: template.placement !== undefined ? template.placement : 'dock-right',
+                        busy: false,
+                      };
+                      bump();
+                    },
+                  },
+                  tr('editManifest', 'Manifest'),
+                ),
               ),
             ),
           ),
