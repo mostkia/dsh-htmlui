@@ -663,6 +663,7 @@ window.__ModuleLoader__.load({
         managerView: 'HTML manager',
         managerTitle: 'HTML interfaces in this session',
         managerClose: 'Remove',
+        closeFailed: 'The host refused to remove it; it is still attached.',
         managerRestore: 'Show',
         managerHidden: 'hidden',
         hideBackground: 'Hide background',
@@ -756,6 +757,7 @@ window.__ModuleLoader__.load({
         managerView: 'HTML管理',
         managerTitle: '本会话的 HTML 界面',
         managerClose: '关闭',
+        closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
         managerRestore: '恢复显示',
         managerHidden: '已隐藏',
         hideBackground: '隐藏背景层',
@@ -2040,15 +2042,25 @@ window.__ModuleLoader__.load({
     }
 
     function dismissRecord(uiId) {
+      // The row disappears at once — a button that waits for a round trip feels broken —
+      // but the dismissal is only *kept* once the host confirms the removal. An optimistic
+      // mark that outlived a refusal is how an interface came back on the next load while
+      // the page insisted it was gone.
       state.dismissed.add(uiId);
+      const confirm = (ok) => {
+        if (ok) return;
+        state.dismissed.delete(uiId);
+        state.templates.error = tr('closeFailed', 'The host refused to remove it; it is still attached.');
+        bump();
+      };
       // The token has to be read before the teardown, which drops the cached ticket.
       const token = ticketToken(uiId);
       retire(uiId);
       const close = (capability) =>
         postJson('/rpc', { uiId, op: 'close', t: capability }).then((result) => {
-          if (result !== null && result.ok === false) {
-            logWarn(undefined, `[dsh-htmlui] the host refused to close ${uiId}`, result);
-          }
+          const ok = result !== null && result.ok === true;
+          if (!ok) logWarn(undefined, `[dsh-htmlui] the host refused to close ${uiId}`, result);
+          confirm(ok);
         });
       if (token !== undefined) {
         close(token);
@@ -2060,6 +2072,7 @@ window.__ModuleLoader__.load({
       ensureTicket(uiId).then(() => {
         const fresh = ticketToken(uiId);
         if (fresh !== undefined) close(fresh);
+        else confirm(false);
       });
     }
 
