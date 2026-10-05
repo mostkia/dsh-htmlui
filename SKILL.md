@@ -93,6 +93,12 @@ declares nothing keeps the placement the record already has.
 
 `document` also receives `dsh-htmlui:<type>` CustomEvents with the same payloads.
 
+**Keep durable state in `dshHTML.state`, not in a JavaScript variable.** The host
+manages the surface list, and any change that remounts a seat recreates the iframe,
+which reloads your document and clears everything it held — scroll position, form
+input, a chart's own data. `state.get()`/`state.set()` live on the host, so they
+come back after a reload, and they are the only storage this sandbox has.
+
 ## Design rules
 
 - **Local first.** Selection, validation, sorting, filtering, scoring, tab
