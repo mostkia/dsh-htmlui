@@ -42,6 +42,8 @@ window.__ModuleLoader__.load({
       tickets: new Map(),
       /** One shared /ui/list answer per session, so the seats do not each ask. */
       sessionSync: new Map(),
+      /** Ids the user closed here, so a convergence cannot bring them back. */
+      dismissed: new Set(),
       collapsed: new Map(),
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
@@ -112,6 +114,10 @@ window.__ModuleLoader__.load({
       if (record === null || typeof record !== 'object') return;
       const uiId = String(record.uiId ?? '');
       if (uiId.length === 0) return;
+      // A surface the user closed stays closed. Otherwise the next `/ui/list`
+      // convergence (or any seat's sync) would bring it straight back, which is
+      // exactly what "the close button does nothing" looks like.
+      if (state.dismissed.has(uiId)) return;
       const previous = state.byId.get(uiId);
       const next = Object.assign({}, previous, record, { uiId });
       // Republishing an identical record must not notify: a component effect that
@@ -142,6 +148,11 @@ window.__ModuleLoader__.load({
       removeFromSession(sessionId ?? record?.sessionId, uiId);
       if (state.fullscreen === uiId) state.fullscreen = null;
       bump();
+    }
+
+    /** Forget a dismissal once the host no longer lists the record at all. */
+    function forgetDismissal(uiId) {
+      state.dismissed.delete(uiId);
     }
 
     /**
@@ -191,6 +202,11 @@ window.__ModuleLoader__.load({
       }
       for (const known of recordsFor(sessionId)) {
         if (!seen.has(known.uiId)) retire(known.uiId, sessionId);
+      }
+      // A dismissal ends when the host stops listing the id: from then on a record
+      // with that id is a new interface the user has not closed.
+      for (const uiId of state.dismissed) {
+        if (!seen.has(uiId)) forgetDismissal(uiId);
       }
     }
 
@@ -661,7 +677,7 @@ window.__ModuleLoader__.load({
 
     /** The frame plus, for every variant but `background`, a slim host chrome row. */
     function HtmlUiFrame(props) {
-      const { record, theme, variant } = props;
+      const { record, theme, variant, bare } = props;
       const [url, setUrl] = useState(undefined);
       const [status, setStatus] = useState('loading');
       const [attempt, setAttempt] = useState(0);
@@ -927,6 +943,25 @@ window.__ModuleLoader__.load({
       }
 
       const height = variant === 'inline' ? Math.min(INLINE_MAX_HEIGHT, initial.h ?? 420) : '100%';
+      // A seat that draws its own chrome (the fullscreen layer) asks for the document
+      // alone; otherwise the surface shows two title rows, one from each.
+      if (bare === true) {
+        return h(
+          'div',
+          {
+            style: {
+              display: 'flex',
+              flexDirection: 'column',
+              width: '100%',
+              height: typeof height === 'number' ? `${height}px` : height,
+              minHeight: '0',
+              overflow: 'hidden',
+              background: 'var(--dsw-alias-bg-base, #fff)',
+            },
+          },
+          h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, body),
+        );
+      }
       return h(
         'div',
         {
@@ -1173,8 +1208,17 @@ window.__ModuleLoader__.load({
 
     /** Remove one surface locally and tell the host to drop its record. */
     function dismissRecord(uiId) {
+      state.dismissed.add(uiId);
       retire(uiId);
-      postJson('/rpc', { uiId, op: 'close' });
+      // The host is the only one who can drop the record. Tell it, and if that fails
+      // the id stays in `dismissed`, so the surface stays gone here while the model
+      // can still close it later. A refusal is worth saying out loud; a request that
+      // never left (no network, a test harness) is not.
+      postJson('/rpc', { uiId, op: 'close' }).then((result) => {
+        if (result !== null && result.ok === false) {
+          logWarn(undefined, `[dsh-htmlui] the host refused to close ${uiId}`, result);
+        }
+      });
     }
 
     function toggleCollapsed(uiId) {
@@ -1201,12 +1245,11 @@ window.__ModuleLoader__.load({
       const [height, setHeight] = useState(360);
       useSessionSync(sessionId);
 
-      if (sessionId === undefined) return null;
-      const base = Array.isArray(props.placements) ? props.placements : ['dock-top', 'panel'];
-      const placements = dockPlacements(base);
-      const records = recordsIn(sessionId, placements);
-      if (records.length === 0) return null;
-
+      // Every hook runs before the early returns below. They were once after them,
+      // which was invisible while the session never resolved (the dock always left at
+      // the first return); the moment records started matching, the hook count changed
+      // between renders and React raised error #310 ("rendered more hooks than during
+      // the previous render"), which the surface boundary then showed in red.
       const resizeRef = useRef(null);
       const onResizeDown = useCallback(
         (event) => {
@@ -1234,6 +1277,12 @@ window.__ModuleLoader__.load({
       const onResizeUp = useCallback(() => {
         resizeRef.current = null;
       }, []);
+
+      if (sessionId === undefined) return null;
+      const base = Array.isArray(props.placements) ? props.placements : ['dock-top', 'panel'];
+      const placements = dockPlacements(base);
+      const records = recordsIn(sessionId, placements);
+      if (records.length === 0) return null;
 
       const dismiss = dismissRecord;
       const toggle = toggleCollapsed;
@@ -1533,7 +1582,7 @@ window.__ModuleLoader__.load({
               ),
               h('button', { type: 'button', style: buttonStyle, onClick: () => dismiss(fullscreenRecord.uiId) }, tr('close', 'Close')),
             ),
-            h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: fullscreenRecord, theme: state.theme, variant: 'dock' })),
+            h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: fullscreenRecord, theme: state.theme, variant: 'dock', bare: true })),
           ),
         );
       }

@@ -20,6 +20,9 @@ import { test } from 'node:test';
 
 /** Deterministic hooks: enough to execute a branch, never to run an effect. */
 function stubReact() {
+  const note = (name) => {
+    if (hookLog !== null) hookLog.push(name);
+  };
   return {
     Component: class Component {
       constructor(props) {
@@ -27,13 +30,48 @@ function stubReact() {
       }
     },
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
-    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
-    useEffect: () => {},
-    useRef: (initial) => ({ current: initial }),
-    useCallback: (fn) => fn,
-    useMemo: (fn) => fn(),
-    useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
+    useState: (initial) => {
+      note('useState');
+      return [typeof initial === 'function' ? initial() : initial, () => {}];
+    },
+    useEffect: () => {
+      note('useEffect');
+    },
+    useRef: (initial) => {
+      note('useRef');
+      return { current: initial };
+    },
+    useCallback: (fn) => {
+      note('useCallback');
+      return fn;
+    },
+    useMemo: (fn) => {
+      note('useMemo');
+      return fn();
+    },
+    useSyncExternalStore: (subscribe, getSnapshot) => {
+      note('useSyncExternalStore');
+      return getSnapshot();
+    },
   };
+}
+
+/**
+ * Records one component's OWN hook sequence, so a changing order can be caught.
+ * Children are not walked: React error #310 is about the hooks a component itself
+ * calls being a different count than on its previous render, not about its subtree.
+ */
+let hookLog = null;
+function hookOrder(Component, props) {
+  hookLog = [];
+  try {
+    Component(props);
+  } catch {
+    /* a throw still leaves the order that preceded it, which is the point */
+  }
+  const seen = hookLog.join(' ');
+  hookLog = null;
+  return seen;
 }
 
 const loaded = [];
@@ -280,4 +318,84 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   const overlay = render(__internals.HtmlUiOverlay, { ctx });
   assert.match(overlay.text, /fullscreen/u);
   assert.match(overlay.text, /Back to chat/u, 'the switch back is part of the layer');
+  // The layer draws the chrome, so the frame inside must not draw a second one.
+  assert.equal(overlay.text.match(/fullscreen/gu).length, 1, 'exactly one title row');
+});
+
+test('every surface keeps one hook order, records or not', () => {
+  // React error #310 in the live page came from exactly this: hooks placed after an
+  // early return. The count only changed once a seat actually had records, so no test
+  // noticed. Rendering the same component in both states catches it here.
+  const dockProps = { session: { id: 'session-hooks' }, placements: ['dock-top', 'panel'] };
+  resetStore();
+  const emptyOrder = hookOrder(__internals.HtmlUiDock, dockProps);
+  assert.ok(emptyOrder.includes('useCallback'), 'the dock does call callbacks');
+  const filled = ['dock-top', 'panel'].map((placement) =>
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: `ui-${placement.replace('-', '')}0000`, sessionId: 'session-hooks', title: placement, placement, revision: 1, bytes: 5 },
+      undefined,
+    ),
+  );
+  resetStore(filled);
+  assert.equal(hookOrder(__internals.HtmlUiDock, dockProps), emptyOrder, 'a dock must call the same hooks with and without records');
+  resetStore();
+  assert.equal(hookOrder(__internals.HtmlUiDock, { placements: ['dock-top'] }), emptyOrder, 'nor may a missing session shorten the sequence');
+
+  const withoutRecord = hookOrder(__internals.HtmlUiToolView, { phase: 'result', block: { meta: undefined }, ctx: undefined });
+  const withRecord = hookOrder(__internals.HtmlUiToolView, {
+    phase: 'result',
+    block: { meta: { htmlui: true, op: 'render', uiId: 'ui-hook0001', sessionId: 'session-hooks', title: 'H', placement: 'inline', revision: 1, bytes: 5 } },
+    ctx: undefined,
+  });
+  assert.equal(withRecord, withoutRecord, 'the tool card keeps one order with and without a record');
+
+  resetStore();
+  assert.equal(
+    hookOrder(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-hooks' }),
+    hookOrder(__internals.HtmlUiTemplateDrawer, { sessionId: undefined }),
+    'the drawer keeps one order open or closed',
+  );
+  assert.equal(
+    hookOrder(__internals.HtmlUiRightPane, { sessionId: 'session-hooks' }),
+    hookOrder(__internals.HtmlUiRightPane, { sessionId: undefined }),
+    'the right-pane body keeps one order',
+  );
+  assert.equal(
+    hookOrder(__internals.HtmlUiOverlay, { ctx: { sessions: {} } }),
+    hookOrder(__internals.HtmlUiOverlay, { ctx: { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } } }),
+    'the overlay keeps one order with and without the viewed session',
+  );
+});
+
+test('a closed surface stays closed until the host drops the record', () => {
+  const record = __internals.recordFromMeta(
+    { htmlui: true, op: 'render', uiId: 'ui-close0001', sessionId: 'session-close', title: 'C', placement: 'float', revision: 1, bytes: 5 },
+    undefined,
+  );
+  resetStore([record]);
+  assert.equal(__internals.recordsFor('session-close').length, 1);
+  // The user closes it. The host may still list it for a while (the close request is
+  // in flight, or it failed); a convergence must not resurrect it, or the close looks
+  // like a button that does nothing.
+  __internals.dismissRecord('ui-close0001');
+  assert.equal(__internals.recordsFor('session-close').length, 0);
+  __internals.convergeSession('session-close', [
+    { uiId: 'ui-close0001', sessionId: 'session-close', title: 'C', placement: 'float', revision: 1, bytes: 5, sizeText: '' },
+  ]);
+  assert.equal(__internals.recordsFor('session-close').length, 0, 'a dismissal outlives a stale list');
+  // Once the host stops listing the id, the dismissal is spent and the id is free again.
+  __internals.convergeSession('session-close', []);
+  assert.equal(__internals.state.dismissed.has('ui-close0001'), false);
+  __internals.publish(record);
+  assert.equal(__internals.recordsFor('session-close').length, 1, 'a genuinely new record with that id shows');
+  __internals.state.dismissed.clear();
+});
+
+test('a bare frame draws no chrome of its own', () => {
+  // The fullscreen layer draws its own bar; without this the surface showed two.
+  const framed = render(__internals.HtmlUiFrame, { record: recordFor('dock-top'), theme: 'light', variant: 'dock', onDismiss: () => {} });
+  assert.match(framed.text, /✕/u);
+  const bare = render(__internals.HtmlUiFrame, { record: recordFor('dock-top'), theme: 'light', variant: 'dock', bare: true, onDismiss: () => {} });
+  assert.ok(!bare.text.includes('✕'), 'no close control of its own');
+  assert.match(bare.text, /Preparing interface/u, 'but the document is still rendered');
 });
