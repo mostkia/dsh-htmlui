@@ -209,6 +209,32 @@ test('the right pane states its empty case and then hosts its own records', () =
   assert.match(hosted.text, /R/);
 });
 
+test('the template drawer renders nothing closed and a row per template open', () => {
+  const templates = { open: false, loaded: true, items: [], error: null };
+  state.templates = templates;
+  assert.equal(__internals.HtmlUiTemplateDrawer({ sessionId: 'session-1' }), null, 'a closed drawer occupies nothing');
+
+  templates.open = true;
+  templates.items = [
+    { slug: 'starter', name: 'starter', description: 'demo panel', bundled: true, bytes: 10 },
+    { slug: 'mine', name: 'mine', description: '', bundled: false, bytes: 2 },
+  ];
+  const open = render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' });
+  assert.match(open.text, /HTML UI 模板（2）/u);
+  assert.match(open.text, /starter/);
+  assert.match(open.text, /mine/);
+  assert.match(open.text, /套用/u, 'one action applies it locally');
+  assert.match(open.text, /交给模型/u, 'and one hands it to the model');
+  assert.match(open.text, /自带/u, 'a packaged template is marked');
+
+  // An empty catalogue and an unavailable one both explain themselves.
+  templates.items = [];
+  assert.match(render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' }).text, /还没有模板/u);
+  templates.error = 'unavailable';
+  assert.match(render(__internals.HtmlUiTemplateDrawer, { sessionId: 'session-1' }).text, /模板目录不可用/u);
+  templates.open = false;
+});
+
 test('the overlay renders nothing without a session, and the fullscreen layer when pinned', () => {
   resetStore();
   assert.equal(__internals.HtmlUiOverlay({ ctx: { sessions: {} } }), null);

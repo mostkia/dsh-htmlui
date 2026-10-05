@@ -154,3 +154,8 @@ stored host-side, so they survive sessions — check `html_ui_template op=list`
 before inventing a new one. A hand-written `templates/<name>.html` file in the
 plugin data root is a template too, so the user's own documents are already
 addressable by file name; prefer reusing one over rebuilding it.
+
+The user can also apply a template themselves from the composer's drawer, with no
+model round trip, so an interface may exist that you never created:
+`html_ui op=list` is how you find out what a session already holds, and
+`html_ui op=update` works on it like any other.

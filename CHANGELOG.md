@@ -6,6 +6,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- A template drawer in the composer (`⟨/⟩ 模板`): it lists the catalogue, applies
+  a template straight into the session with no model round trip, and offers to
+  hand the instruction to the model instead. Two page-facing routes back it
+  (`POST /templates`, `POST /templates/render`), guarded by the same loopback
+  origin policy as the rest of the carrier, and a surface created that way is an
+  ordinary record the model can list, update, and close.
 - `test/schema.test.mjs`: the declared schemas are checked with the harness's own
   validators (`assertObjectJsonSchema`, `validateJsonSchemaValue`) whenever a
   harness package is reachable, so a keyword outside the supported subset — which

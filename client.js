@@ -46,6 +46,8 @@ window.__ModuleLoader__.load({
       fullscreenDismissed: new Set(),
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
+      /** The template drawer: what the catalogue holds and whether it is showing. */
+      templates: { open: false, loaded: false, items: [], error: null },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -213,8 +215,7 @@ window.__ModuleLoader__.load({
      * Returns false when the column exposes no tab service, in which case the
      * caller keeps its fallback (the composer dock).
      */
-    function openRightPane(uiId) {
-      const controller = state.rightPane.controller;
+    function openRightPane(uiId) {      const controller = state.rightPane.controller;
       if (controller === undefined || typeof controller.openTab !== 'function') return false;
       try {
         controller.openTab(TAB_KIND, { params: { uiId, source: '@mostkia/dsh-htmlui' } });
@@ -388,6 +389,66 @@ window.__ModuleLoader__.load({
         createdAt: Number.isFinite(meta.createdAt) ? meta.createdAt : undefined,
         updatedAt: Date.now(),
       };
+    }
+
+    // ---------------------------------------------------------------- templates
+
+    /** Load the catalogue the host keeps, so the drawer can offer it. */
+    function loadTemplates() {
+      return postJson('/templates', {}).then((value) => {
+        if (value !== null && value.ok === true && Array.isArray(value.templates)) {
+          state.templates.items = value.templates;
+          state.templates.error = null;
+        } else {
+          state.templates.error = (value !== null && value.error) || 'unavailable';
+        }
+        state.templates.loaded = true;
+        bump();
+        return state.templates.items;
+      });
+    }
+
+    function toggleTemplates() {
+      state.templates.open = state.templates.open !== true;
+      bump();
+      if (state.templates.open && !state.templates.loaded) loadTemplates();
+      return state.templates.open;
+    }
+
+    /**
+     * Apply a template to a session straight from the page: no model round trip,
+     * and the returned record is published so every surface picks it up at once.
+     */
+    function applyTemplate(slug, sessionId) {
+      if (typeof slug !== 'string' || slug.length === 0 || typeof sessionId !== 'string' || sessionId.length === 0) {
+        return Promise.resolve(false);
+      }
+      return postJson('/templates/render', { template: slug, sessionId }).then((value) => {
+        if (value !== null && value.ok === true && value.ui !== undefined) {
+          publish(value.ui);
+          state.templates.error = null;
+          return true;
+        }
+        state.templates.error = (value !== null && value.error) || 'failed';
+        bump();
+        return false;
+      });
+    }
+
+    /** Hand a template to the model instead, by putting the instruction in the draft. */
+    function askModelForTemplate(slug, sessionId, ctx) {
+      if (typeof slug !== 'string' || slug.length === 0) return false;
+      try {
+        const scoped = ctx?.sessions?.scope?.(sessionId);
+        const conversation = scoped?.get?.('conversation');
+        const input = conversation?.input?.for?.(scoped);
+        if (input === undefined || typeof input.setDraft !== 'function') return false;
+        input.setDraft(`用 html_ui 渲染模板 ${slug}`);
+        return true;
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: could not reach the composer draft', error);
+        return false;
+      }
     }
 
     // ------------------------------------------------------------------ styles
@@ -1143,6 +1204,105 @@ window.__ModuleLoader__.load({
       return h('div', { style: { position: 'fixed', inset: '0', pointerEvents: 'none' } }, ...layers);
     }
 
+    // ------------------------------------------------------------ template drawer
+
+    /**
+     * The catalogue the user can reach without the model: a compact strip of
+     * templates, applied straight into the session, plus a way to hand one to the
+     * model instead. It renders nothing while it is closed.
+     */
+    function HtmlUiTemplateDrawer(props) {
+      useStore();
+      const sessionId = sessionIdOf(props) ?? resolveViewedSessionId(props.ctx);
+      if (state.templates.open !== true) return null;
+
+      const items = state.templates.items;
+      const rows = items.slice(0, 40).map((template) =>
+        h(
+          'div',
+          {
+            key: template.slug,
+            style: {
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '8px',
+              padding: '5px 8px',
+              borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
+            },
+          },
+          h(
+            'button',
+            {
+              type: 'button',
+              style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+              title: '套用到当前会话（不经过模型）',
+              onClick: () => applyTemplate(template.slug, sessionId),
+            },
+            '套用',
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+              title: '把指令放进输入框，交给模型',
+              onClick: () => askModelForTemplate(template.slug, sessionId, props.ctx),
+            },
+            '交给模型',
+          ),
+          h('span', { style: Object.assign({}, titleStyle, { flex: '0 0 auto' }) }, template.slug),
+          h(
+            'span',
+            { style: { flex: '1 1 auto', minWidth: '0', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            template.description,
+          ),
+          template.bundled === true ? h('span', { style: { fontSize: '10px', color: 'var(--dsw-alias-label-secondary, #888)' } }, '自带') : null,
+        ),
+      );
+
+      return h(
+        'div',
+        {
+          style: {
+            margin: '4px 0',
+            border: '1px solid var(--dsw-alias-border-l1, #ddd)',
+            borderRadius: '10px',
+            background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.02))',
+            overflow: 'hidden',
+          },
+        },
+        h(
+          'div',
+          { style: surfaceChrome },
+          h('span', { style: titleStyle }, `HTML UI 模板（${items.length}）`),
+          h('button', { type: 'button', style: buttonStyle, onClick: () => toggleTemplates() }, '收起'),
+        ),
+        state.templates.error !== null
+          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)' } }, `模板目录不可用：${state.templates.error}`)
+          : null,
+        state.templates.loaded !== true
+          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, '正在读取模板…')
+          : items.length === 0
+            ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, '还没有模板：让模型用 html_ui_template 存一个，或把你的 .html 放进模板目录。')
+            : h('div', null, ...rows),
+      );
+    }
+
+    /** The one control that opens the drawer, beside the composer. */
+    function HtmlUiTemplateButton(props) {
+      useStore();
+      return h(
+        'button',
+        {
+          type: 'button',
+          style: Object.assign({}, buttonStyle, { height: '26px' }),
+          title: 'HTML UI 模板',
+          onClick: () => toggleTemplates(),
+        },
+        '⟨/⟩ 模板',
+      );
+    }
+
     // -------------------------------------------------------------------- apply
 
     function apply(ctx) {
@@ -1176,6 +1336,22 @@ window.__ModuleLoader__.load({
       disposers.push(
         ctx.slots.inject('shell.overlay', () =>
           ctx.slots.register({ name: 'shell.overlay', id: 'htmlui-overlay', order: 30 }, (props) => h(HtmlUiOverlay, Object.assign({}, props, { ctx }))),
+        ),
+      );
+
+      // The template drawer: a catalogue the user reaches without the model.
+      disposers.push(
+        ctx.slots.inject('conversation.input.right', () =>
+          ctx.slots.register({ name: 'conversation.input.right', id: 'htmlui-templates', order: 40 }, (props) =>
+            h(HtmlUiTemplateButton, Object.assign({}, props, { ctx })),
+          ),
+        ),
+      );
+      disposers.push(
+        ctx.slots.inject('conversation.input.dock', () =>
+          ctx.slots.register({ name: 'conversation.input.dock', id: 'htmlui-templates-dock', order: 41 }, (props) =>
+            h(HtmlUiTemplateDrawer, Object.assign({}, props, { ctx })),
+          ),
         ),
       );
 
@@ -1229,6 +1405,12 @@ window.__ModuleLoader__.load({
         convergeSession,
         activeFullscreen,
         isCurrentRevision,
+        loadTemplates,
+        toggleTemplates,
+        applyTemplate,
+        askModelForTemplate,
+        HtmlUiTemplateDrawer,
+        HtmlUiTemplateButton,
         dismissRecord,
         toggleCollapsed,
         openRightPane,

@@ -59,7 +59,19 @@ Attach one of each and confirm it appears where its placement promises:
 | `background` | A click-through layer: the page under it still receives clicks |
 | `panel` | The same surface updates in place after `html_ui op=update` |
 
-## 3. The round trip
+## 3. The template drawer
+
+The composer carries a `⟨/⟩ 模板` control. Open it and check:
+
+- The catalogue lists the packaged `starter` template (marked 自带) plus anything
+  you saved.
+- **套用** puts a surface in the session immediately — no model turn, no message
+  in the transcript. Ask the model for `html_ui op=list` and it should name the
+  new id.
+- **交给模型** fills the composer draft with an instruction instead of sending it.
+- With the drawer closed, nothing extra occupies the composer.
+
+## 4. The round trip
 
 Inside a document, click a control wired to `dshHTML.send('name', {...})`.
 
@@ -71,13 +83,13 @@ Inside a document, click a control wired to `dshHTML.send('name', {...})`.
 Then update the interface with `html_ui op=update`: the surface must reload and
 show the new document without a manual refresh.
 
-## 4. Theme
+## 5. Theme
 
 Toggle the DSH theme. A document that reads `--dsh-htmlui-*` or calls
 `dshHTML.theme()` must follow; the injected `data-dsh-htmlui-theme` attribute
 flips with it.
 
-## 5. Triage
+## 6. Triage
 
 | Symptom | Likely cause | Check |
 |---|---|---|

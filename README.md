@@ -166,10 +166,16 @@ A hand-written document is a template too. Drop `my-panel.html` into
 write. A managed template of the same name takes precedence while it exists, and
 removing it uncovers the file again.
 
+The composer also carries a **template drawer** (the `⟨/⟩ 模板` control beside
+it). It lists the catalogue, **applies** one straight into the session with no
+model round trip, and offers `交给模型` when the other path is what you want.
+A surface created that way is a normal record: the model sees it in
+`html_ui op=list` and can update or close it.
+
 ## Development
 
 ```sh
-npm test        # 107 assertions: 12 package, 9 doc contract, 30 host, 21 browser, 9 bridge, 9 render smoke, 10 adversarial, 2 packed, 5 harness schema
+npm test        # 111 assertions: 12 package, 9 doc contract, 31 host, 23 browser, 9 bridge, 10 render smoke, 10 adversarial, 2 packed, 5 harness schema
 npm run check   # syntax check for all three shipped scripts, then the suites
 ```
 

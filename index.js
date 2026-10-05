@@ -10,6 +10,8 @@
  * Carrier (all routes live under `/plugins/@mostkia/dsh-htmlui`):
  *   POST /ui/ticket      web page -> short-lived document URL (loopback origin only)
  *   POST /ui/list        session -> UI records, so a reloaded page rebuilds its layout
+ *   POST /templates      the template catalogue, for the page's drawer
+ *   POST /templates/render  apply one template to a session, with no model round trip
  *   GET  /ui/<id>        the composed HTML document (sandboxed iframe target, token in query)
  *   GET  /assets/bridge.js  the injected bridge script
  *   POST /rpc            document -> plugin: action / state / resize / close  (token)
@@ -1316,6 +1318,78 @@ export function apply(ctx, config) {
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
 
+  /**
+   * The template catalogue, for the page rather than the model: the drawer in the
+   * composer lists these, and applying one creates an interface with no model
+   * round trip at all.
+   */
+  function handleTemplates(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then(() => {
+        const all = store.listTemplates();
+        sendJson(res, 200, {
+          ok: true,
+          count: all.length,
+          templates: all.map((template) => ({
+            slug: String(template.slug ?? ''),
+            name: String(template.name ?? template.slug ?? ''),
+            description: String(template.description ?? ''),
+            bundled: template.bundled === true,
+            bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
+          })),
+        });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
+  /** Apply one template to a session straight from the page. */
+  function handleTemplateRender(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        const slug = slugify(body.template);
+        const sessionId = typeof body.sessionId === 'string' && body.sessionId.length > 0 ? body.sessionId : undefined;
+        if (slug === undefined) {
+          sendJson(res, 400, { ok: false, error: 'a valid template name is required' });
+          return;
+        }
+        if (sessionId === undefined) {
+          sendJson(res, 400, { ok: false, error: 'a sessionId is required' });
+          return;
+        }
+        if (store.listUis(sessionId).length >= MAX_UI_PER_SESSION) {
+          sendJson(res, 409, { ok: false, error: `this session already holds ${MAX_UI_PER_SESSION} interfaces` });
+          return;
+        }
+        const template = store.readTemplate(slug);
+        if (template === undefined) {
+          sendJson(res, 404, { ok: false, error: `unknown template: ${slug}` });
+          return;
+        }
+        const variables = body.variables !== null && typeof body.variables === 'object' && !Array.isArray(body.variables) ? body.variables : {};
+        let source = template.source;
+        for (const [key, value] of Object.entries(variables)) {
+          source = source.split(`{{${key}}}`).join(String(value));
+        }
+        const declared = readDocumentDeclaration(source);
+        const meta = createUi({
+          sessionId,
+          title:
+            typeof body.title === 'string' && body.title.length > 0
+              ? body.title.slice(0, 200)
+              : typeof declared.title === 'string'
+                ? declared.title.slice(0, 200)
+                : String(template.meta.name ?? slug),
+          placement: normalizePlacement(body.placement) ?? normalizePlacement(declared.placement),
+          size: normalizeSize(body.size) ?? normalizeSize(declared.size),
+          origin: 'template',
+          template: slug,
+          source,
+        });
+        sendJson(res, 200, { ok: true, ui: publicRecord(meta) });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
   function handleDocument(req, res, url) {
     const pathname = url.pathname.slice(`${ROUTE_PREFIX}/ui/`.length);
     const uiId = pathname.split('/')[0];
@@ -1597,6 +1671,14 @@ export function apply(ctx, config) {
           counts: { uis: store.listUis().length, templates: store.listTemplates().length, sseClients: hub.size() },
         });
         return;
+      }
+      if (path === `${ROUTE_PREFIX}/templates`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplates(req, res);
+      }
+      if (path === `${ROUTE_PREFIX}/templates/render`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplateRender(req, res);
       }
       if (path === `${ROUTE_PREFIX}/ui/ticket`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

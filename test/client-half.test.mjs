@@ -116,12 +116,15 @@ function createClientContext(options = {}) {
 
 // --------------------------------------------------------------------- tests
 
+/** Drain every pending microtask, however long the promise chain is. */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
 test('exposes the harness client contract', () => {
   assert.deepEqual(inject, ['slots', 'sessions']);
   assert.equal(typeof apply, 'function');
 });
 
-test('registers the tool card, both docks, the frame overlay, and the right-pane body', () => {
+test('registers the tool card, both docks, the drawer, the overlay, and the right-pane body', () => {
   const context = createClientContext();
   const dispose = apply(context);
   assert.deepEqual(context.injections, [
@@ -129,6 +132,8 @@ test('registers the tool card, both docks, the frame overlay, and the right-pane
     'conversation.input.dock',
     'conversation.composer.dock',
     'shell.overlay',
+    'conversation.input.right',
+    'conversation.input.dock',
     'sidebar.right.pane.tab',
   ]);
   const byId = context.registrations.map((entry) => `${entry.options.name}#${entry.options.key ?? entry.options.id}`);
@@ -137,9 +142,80 @@ test('registers the tool card, both docks, the frame overlay, and the right-pane
     'conversation.input.dock#htmlui-dock',
     'conversation.composer.dock#htmlui-dock-bottom',
     'shell.overlay#htmlui-overlay',
+    'conversation.input.right#htmlui-templates',
+    'conversation.input.dock#htmlui-templates-dock',
     `sidebar.right.pane.tab#${__internals.TAB_ID}`,
   ]);
   assert.equal(typeof dispose, 'function');
+});
+
+test('the drawer loads the catalogue and applies a template without the model', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    const body = init === undefined ? undefined : JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.endsWith('/templates')) {
+      return Promise.resolve({
+        json: () => Promise.resolve({ ok: true, count: 1, templates: [{ slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 }] }),
+      });
+    }
+    if (url.endsWith('/templates/render')) {
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            ok: true,
+            ui: { uiId: 'ui-99990000', sessionId: body.sessionId, title: 'auto', placement: 'dock-top', sizeText: '', revision: 1, bytes: 4 },
+          }),
+      });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({ ok: false, error: 'unexpected' }) });
+  };
+  try {
+    __internals.state.byId.clear();
+    __internals.state.bySession.clear();
+    __internals.state.templates.open = false;
+    __internals.state.templates.loaded = false;
+    __internals.state.templates.items = [];
+
+    // Opening the drawer is what loads the catalogue, and it loads it once.
+    assert.equal(__internals.toggleTemplates(), true);
+    await settle();
+    assert.equal(__internals.state.templates.items.length, 1);
+    assert.equal(calls.filter((call) => call.url.endsWith('/templates')).length, 1);
+    __internals.toggleTemplates();
+    __internals.toggleTemplates();
+    await settle();
+    assert.equal(calls.filter((call) => call.url.endsWith('/templates')).length, 1, 'the catalogue is loaded once');
+    assert.equal(__internals.state.templates.open, true);
+
+    // Applying one publishes the record the host created, so every surface shows it.
+    assert.equal(await __internals.applyTemplate('starter', 'session-drawer'), true);
+    assert.equal(__internals.state.byId.get('ui-99990000').placement, 'dock-top');
+    assert.equal(__internals.recordsFor('session-drawer').length, 1);
+    const rendered = calls.find((call) => call.url.endsWith('/templates/render'));
+    assert.equal(rendered.body.template, 'starter');
+    assert.equal(rendered.body.sessionId, 'session-drawer');
+
+    // Nothing to apply is a refusal, not a request.
+    assert.equal(await __internals.applyTemplate('', 'session-drawer'), false);
+    assert.equal(await __internals.applyTemplate('starter', ''), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.templates.open = false;
+  }
+});
+
+test('handing a template to the model writes the instruction into the draft', () => {
+  const drafts = [];
+  const scoped = { get: () => ({ input: { for: () => ({ setDraft: (text) => drafts.push(text) }) } }) };
+  const ctx = { sessions: { scope: (id) => (id === 'session-1' ? scoped : undefined) } };
+  assert.equal(__internals.askModelForTemplate('starter', 'session-1', ctx), true);
+  assert.deepEqual(drafts, ['用 html_ui 渲染模板 starter']);
+  // An unreachable composer is a refusal, not a crash.
+  assert.equal(__internals.askModelForTemplate('starter', 'session-none', ctx), false);
+  assert.equal(__internals.askModelForTemplate('', 'session-1', ctx), false);
+  assert.equal(__internals.askModelForTemplate('starter', 'session-1', undefined), false);
 });
 
 test('dock-top and dock-bottom land in different seats', () => {

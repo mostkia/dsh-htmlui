@@ -892,6 +892,62 @@ test('a fragment is served in standards mode, and an authored doctype is kept', 
   assert.equal(stored, '<div>fragment</div>');
 });
 
+test('the page can list templates and apply one without the model', async () => {
+  const listed = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/templates',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: '{}',
+  });
+  assert.equal(listed.status, 200);
+  const catalogue = JSON.parse(listed.text);
+  assert.ok(catalogue.count >= 1);
+  const starter = catalogue.templates.find((template) => template.slug === 'starter');
+  assert.ok(starter !== undefined, 'the packaged template is in the catalogue');
+  assert.equal(starter.bundled, true);
+
+  const applied = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/templates/render',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ template: 'starter', sessionId: 'session-drawer', variables: { title: '抽屉' } }),
+  });
+  assert.equal(applied.status, 200);
+  const record = JSON.parse(applied.text).ui;
+  assert.equal(record.sessionId, 'session-drawer');
+  assert.equal(record.placement, 'dock-top', 'the template declares its own placement');
+  assert.ok(!record.url.includes('t='), 'the record projection stays token-free');
+  // It is a real record: the model can list and close it like any other.
+  const listedAgain = await tool('html_ui').execute({ op: 'list' }, exec('session-drawer'));
+  assert.ok(listedAgain.summary.includes(record.uiId));
+  const closed = await tool('html_ui').execute({ op: 'close', id: record.uiId }, exec('session-drawer'));
+  assert.equal(closed.ok, true);
+
+  // Refusals are statuses, not crashes.
+  const cases = [
+    [{ template: 'starter' }, 400, /sessionId/u],
+    [{ sessionId: 'session-drawer' }, 400, /template name/u],
+    [{ template: 'nope', sessionId: 'session-drawer' }, 404, /unknown template/u],
+  ];
+  for (const [body, status, expected] of cases) {
+    const response = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/templates/render',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, status, JSON.stringify(body));
+    assert.match(JSON.parse(response.text).error, expected);
+  }
+  const foreign = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/templates',
+    headers: { host: '127.0.0.1:3080', origin: 'http://evil.example' },
+    body: '{}',
+  });
+  assert.equal(foreign.status, 403, 'the catalogue is for the page, not for another origin');
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.
