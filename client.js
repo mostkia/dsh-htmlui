@@ -751,11 +751,11 @@ window.__ModuleLoader__.load({
       useSessionSync(sessionId);
 
       if (sessionId === undefined) return null;
+      const base = Array.isArray(props.placements) ? props.placements : ['dock-top', 'panel'];
       // dock-right belongs to the right column whenever that column exposes its
-      // tab service; the composer dock remains its fallback.
-      const placements = state.rightPane.available
-        ? ['dock-top', 'dock-bottom', 'panel']
-        : ['dock-top', 'dock-bottom', 'panel', 'dock-right'];
+      // tab service; the composer dock above the input remains its fallback, and
+      // only that dock claims it so it never renders twice.
+      const placements = base.includes('dock-top') && !state.rightPane.available ? [...base, 'dock-right'] : base;
       const records = recordsIn(sessionId, placements);
       if (records.length === 0) return null;
 
@@ -1056,7 +1056,19 @@ window.__ModuleLoader__.load({
 
       disposers.push(
         ctx.slots.inject('conversation.input.dock', () =>
-          ctx.slots.register({ name: 'conversation.input.dock', id: 'htmlui-dock', order: 40 }, (props) => h(HtmlUiDock, Object.assign({}, props, { ctx }))),
+          ctx.slots.register({ name: 'conversation.input.dock', id: 'htmlui-dock', order: 40 }, (props) =>
+            h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-top', 'panel'] })),
+          ),
+        ),
+      );
+
+      // The seat below the composer card is what makes dock-bottom a real split
+      // rather than a second stack above the input.
+      disposers.push(
+        ctx.slots.inject('conversation.composer.dock', () =>
+          ctx.slots.register({ name: 'conversation.composer.dock', id: 'htmlui-dock-bottom', order: 40 }, (props) =>
+            h(HtmlUiDock, Object.assign({}, props, { ctx, placements: ['dock-bottom'] })),
+          ),
         ),
       );
 

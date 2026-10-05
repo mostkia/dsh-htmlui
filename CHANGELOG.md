@@ -6,6 +6,10 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- `dock-bottom` really sits below the composer card. Both vertical placements
+  used to render in the same seat above the input, which made the documented
+  split untrue; the bottom placement now uses the seat under the composer, and a
+  test asserts the two seats never claim the same record.
 - The tool-result presentation projection now always returns lossless JSON. A
   projection that carried an unset optional field, or that returned `undefined`
   for `list` and `close`, was rejected by the tool registry

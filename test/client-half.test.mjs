@@ -121,18 +121,51 @@ test('exposes the harness client contract', () => {
   assert.equal(typeof apply, 'function');
 });
 
-test('registers the tool card, the composer dock, the frame overlay, and the right-pane body', () => {
+test('registers the tool card, both docks, the frame overlay, and the right-pane body', () => {
   const context = createClientContext();
   const dispose = apply(context);
-  assert.deepEqual(context.injections, ['tool.call.toolview', 'conversation.input.dock', 'shell.overlay', 'sidebar.right.pane.tab']);
+  assert.deepEqual(context.injections, [
+    'tool.call.toolview',
+    'conversation.input.dock',
+    'conversation.composer.dock',
+    'shell.overlay',
+    'sidebar.right.pane.tab',
+  ]);
   const byId = context.registrations.map((entry) => `${entry.options.name}#${entry.options.key ?? entry.options.id}`);
   assert.deepEqual(byId, [
     'tool.call.toolview#html_ui',
     'conversation.input.dock#htmlui-dock',
+    'conversation.composer.dock#htmlui-dock-bottom',
     'shell.overlay#htmlui-overlay',
     `sidebar.right.pane.tab#${__internals.TAB_ID}`,
   ]);
   assert.equal(typeof dispose, 'function');
+});
+
+test('dock-top and dock-bottom land in different seats', () => {
+  resetRightPane();
+  const context = createClientContext();
+  apply(context);
+  const topDock = context.registrations.find((entry) => entry.options.id === 'htmlui-dock');
+  const bottomDock = context.registrations.find((entry) => entry.options.id === 'htmlui-dock-bottom');
+  assert.ok(topDock !== undefined && bottomDock !== undefined);
+  assert.equal(topDock.options.name, 'conversation.input.dock');
+  assert.equal(bottomDock.options.name, 'conversation.composer.dock');
+  // A record is claimed by exactly one dock: the seats do not overlap.
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  for (const placement of ['dock-top', 'dock-bottom', 'panel', 'dock-right']) {
+    __internals.publish(
+      __internals.recordFromMeta(
+        { htmlui: true, op: 'render', uiId: `ui-${placement.replace('-', '')}0000`, sessionId: 'session-dock', placement, revision: 1 },
+        undefined,
+      ),
+    );
+  }
+  const top = __internals.recordsIn('session-dock', ['dock-top', 'panel']).map((record) => record.placement);
+  const bottom = __internals.recordsIn('session-dock', ['dock-bottom']).map((record) => record.placement);
+  assert.deepEqual(top.sort(), ['dock-top', 'panel']);
+  assert.deepEqual(bottom, ['dock-bottom']);
 });
 
 /** The module keeps its store across `apply` calls, so tests reset what they assert. */
