@@ -1054,7 +1054,12 @@ export function apply(ctx, config) {
         if (op === 'list') {
           const sessionId = resolveSessionId(undefined, exec);
           const all = sessionId === undefined ? store.listUis() : store.listUis(sessionId);
-          const summary = all.slice(0, 12).map(recordSummary).join(' | ');
+          // A session holds at most MAX_UI_PER_SESSION, and the model needs every id
+          // to be able to close one; truncation is stated rather than silent.
+          const shown = all.slice(0, MAX_UI_PER_SESSION);
+          const summary = `${shown.map(recordSummary).join(' | ')}${
+            all.length > shown.length ? ` …(+${all.length - shown.length} more)` : ''
+          }`;
           return { ok: true, op, count: all.length, summary, sessionId: sessionId ?? '' };
         }
         if (op === 'close') {
@@ -1199,14 +1204,13 @@ export function apply(ctx, config) {
       try {
         if (op === 'list') {
           const all = store.listTemplates();
+          const shown = all.slice(0, 40);
+          const names = shown.map((t) => `${t.slug}${t.description !== undefined && t.description !== '' ? `(${t.description})` : ''}`);
           return {
             ok: true,
             op,
             count: all.length,
-            summary: all
-              .slice(0, 20)
-              .map((t) => `${t.slug}${t.description !== undefined && t.description !== '' ? `(${t.description})` : ''}`)
-              .join(' | '),
+            summary: `${names.join(' | ')}${all.length > shown.length ? ` …(+${all.length - shown.length} more)` : ''}`,
           };
         }
         if (op === 'show') {

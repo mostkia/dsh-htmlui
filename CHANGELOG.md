@@ -6,6 +6,15 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `test/schema.test.mjs`: the declared schemas are checked with the harness's own
+  validators (`assertObjectJsonSchema`, `validateJsonSchemaValue`) whenever a
+  harness package is reachable, so a keyword outside the supported subset — which
+  fails activation in a way a fake-context test cannot see — is caught here. It
+  also asserts that a real tool result satisfies the declared output schema, and
+  that the schema is not vacuous.
+- `html_ui op=list` reports every interface of a session instead of the first
+  twelve, so each id stays reachable for a follow-up `close`; a truncated list
+  says so. Retiring a surface now drops its collapsed flag too.
 - `test/packed.test.mjs`: the published artifact is now tested as an artifact.
   The suite runs `npm pack`, extracts the tarball, and activates the host half
   from that extraction — the bridge asset, the starter template, `/health`, and

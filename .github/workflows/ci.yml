@@ -53,3 +53,8 @@ jobs:
 
       - name: Packed artifact
         run: node test/packed.test.mjs
+
+      # Skips with a reason unless a harness package is reachable, which is the
+      # case on a plugin developer's machine and not on a clean CI runner.
+      - name: Harness schema
+        run: node test/schema.test.mjs

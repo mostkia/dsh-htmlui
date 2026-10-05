@@ -133,6 +133,7 @@ window.__ModuleLoader__.load({
       const record = state.byId.get(uiId);
       state.byId.delete(uiId);
       state.tickets.delete(uiId);
+      state.collapsed.delete(uiId);
       state.fullscreenDismissed.delete(uiId);
       removeFromSession(sessionId ?? record?.sessionId, uiId);
       if (state.fullscreen === uiId) state.fullscreen = null;

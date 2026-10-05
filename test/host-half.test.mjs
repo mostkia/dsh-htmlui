@@ -818,6 +818,21 @@ test('the template shipped with the package renders like any other', async () =>
   assert.ok(!onDisk.includes('bridge.js'), 'injection stays at serve time');
 });
 
+test('list reports every interface of a session, so each id stays reachable', async () => {
+  const sessionId = 'session-many';
+  const ids = [];
+  for (let index = 0; index < 13; index += 1) {
+    const made = await tool('html_ui').execute({ op: 'render', html: `<p>${index}</p>`, title: `Many ${index}` }, exec(sessionId));
+    assert.equal(made.ok, true);
+    ids.push(made.uiId);
+  }
+  const listed = await tool('html_ui').execute({ op: 'list' }, exec(sessionId));
+  assert.equal(listed.count, 13);
+  for (const id of ids) {
+    assert.ok(listed.summary.includes(id), `${id} must be listed, or the model cannot close it`);
+  }
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.

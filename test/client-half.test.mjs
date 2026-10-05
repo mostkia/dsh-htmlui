@@ -354,10 +354,12 @@ test('retiring a record detaches it from its session and clears fullscreen', () 
   const meta = { htmlui: true, op: 'render', uiId: 'ui-cccc3333', sessionId: 'session-c', title: 'C', placement: 'fullscreen', revision: 1 };
   __internals.publish(__internals.recordFromMeta(meta, undefined));
   store.fullscreen = 'ui-cccc3333';
+  store.collapsed.set('ui-cccc3333', true);
   __internals.retire('ui-cccc3333');
   assert.equal(store.byId.get('ui-cccc3333'), undefined);
   assert.equal(__internals.recordsFor('session-c').length, 0);
   assert.equal(store.fullscreen, null);
+  assert.equal(store.collapsed.has('ui-cccc3333'), false, 'a retired surface leaves no local state behind');
 });
 
 test('the viewed session resolves from the current pointer or the main view', () => {
