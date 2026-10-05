@@ -1173,7 +1173,8 @@ test('a project at a higher security level serves its own files, and only then',
   mkdirSync(join(own, 'site'), { recursive: true });
   writeFileSync(join(own, 'site', 'index.html'), '<p>site</p>', 'utf8');
   writeFileSync(join(own, 'site', 'app.js'), 'console.log(1);', 'utf8');
-  writeFileSync(join(own, 'site', 'meta.json'), JSON.stringify({ slug: 'site', name: 'site', security: 'local' }), 'utf8');
+  // The project starts strict, exactly like a project imported before levels existed.
+  writeFileSync(join(own, 'site', 'meta.json'), JSON.stringify({ slug: 'site', name: 'site' }), 'utf8');
 
   // The ticket route hands out the capability token the frame will use.
   const ticketFor = async (uiId) => {
@@ -1204,7 +1205,16 @@ test('a project at a higher security level serves its own files, and only then',
 
   const rendered = await tool('html_ui').execute({ op: 'render', template: 'site' }, exec('session-sec'));
   assert.equal(rendered.ok, true, rendered.error ?? 'the project renders');
-  assert.equal(rendered.security, 'local', 'the project carries the level it was imported with');
+  assert.equal(rendered.security, 'strict', 'a strict project starts where it always was');
+  const beforeRaise = await ticketFor(rendered.uiId);
+  const preRaiseFile = await getRoute(beforeRaise.file('app.js'));
+  assert.equal(preRaiseFile.status, 404, 'and serves none of its own files yet');
+
+  // Raising the project — what the pencil in the import form does — lifts the interfaces
+  // built from it, including one created before the level existed. Otherwise a reader
+  // raises the project and still sees 404 for its own stylesheet, with nothing on screen
+  // explaining why.
+  writeFileSync(join(own, 'site', 'meta.json'), JSON.stringify({ slug: 'site', name: 'site', security: 'local' }), 'utf8');
   const ticket = await ticketFor(rendered.uiId);
   assert.match(ticket.url, /\/files\/.*\/index\.html/u, 'a project at a higher level is served with a directory URL');
   const file = await getRoute(ticket.file('app.js'));

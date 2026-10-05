@@ -1163,6 +1163,27 @@ export function apply(ctx, config) {
     return `${ROUTE_PREFIX}/ui/${meta.id}?r=${meta.revision ?? 1}`;
   }
 
+  /**
+   * The level an interface actually runs at: its own, or its project's, whichever is
+   * higher.
+   *
+   * A record snapshots the level at creation time, which is right for a sandbox attribute
+   * but wrong as a ceiling: raising a project's level — which is what the pencil in the
+   * import form does — left every interface built from it stuck at the old level, and its
+   * own `css/style.css` answered 404 for reasons nothing on screen explained. The reader
+   * raised the *project*; the interfaces follow it. Lowering the project's level does not
+   * lower an interface's own, because a record that was deliberately given a level keeps
+   * it.
+   */
+  function effectiveSecurity(meta) {
+    const own = securityOf(meta);
+    const name = typeof meta?.template === 'string' && meta.template.length > 0 ? meta.template : undefined;
+    if (name === undefined) return own;
+    const template = store.readTemplate(name);
+    const project = securityOf(template?.meta);
+    return SECURITY_LEVELS.indexOf(project) > SECURITY_LEVELS.indexOf(own) ? project : own;
+  }
+
   /** Public (browser-facing) projection of one UI record. */
   function publicRecord(meta) {
     return {
@@ -1180,7 +1201,7 @@ export function apply(ctx, config) {
       template: meta.template,
       // The page needs this to build the frame: the sandbox attribute is per document,
       // and an interface that may serve its own files must say so to the browser too.
-      security: securityOf(meta),
+      security: effectiveSecurity(meta),
       createdAt: meta.createdAt ?? 0,
       updatedAt: meta.updatedAt ?? 0,
     };
@@ -1531,8 +1552,9 @@ export function apply(ctx, config) {
           url: publicRecord(meta).url,
           bytes: meta.bytes,
           revision: meta.revision,
-          // Reported so a caller can see which level an interface is running at.
-          security: securityOf(meta),
+          // Reported so a caller can see which level an interface is running at — the
+          // effective one, projects included, because that is what will be enforced.
+          security: effectiveSecurity(meta),
           template: meta.template ?? '',
         };
       } catch (error) {
@@ -1711,7 +1733,7 @@ export function apply(ctx, config) {
           return;
         }
         const theme = body.theme === 'dark' ? 'dark' : body.theme === 'light' ? 'light' : undefined;
-        sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme, current.meta.revision, securityOf(current.meta)) });
+        sendJson(res, 200, { ok: true, ui: publicRecord(current.meta), url: documentUrl(uiId, theme, current.meta.revision, effectiveSecurity(current.meta)) });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
@@ -1971,7 +1993,7 @@ export function apply(ctx, config) {
       sendText(res, 404, 'not found');
       return;
     }
-    const security = securityOf(current.meta);
+    const security = effectiveSecurity(current.meta);
     if (security === 'strict') {
       sendText(res, 404, 'not found');
       return;
@@ -2027,7 +2049,7 @@ export function apply(ctx, config) {
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      'content-security-policy': contentSecurityPolicy(req, securityOf(current.meta)),
+      'content-security-policy': contentSecurityPolicy(req, effectiveSecurity(current.meta)),
       'x-content-type-options': 'nosniff',
     });
     res.end(composeDocument(current.source, config));
