@@ -24,7 +24,8 @@ conversation needs it.
 | `placement` | Where it lives |
 |---|---|
 | `inline` | In the transcript, part of the tool call that created it |
-| `dock-top` / `dock-bottom` | Full width above / below the composer |
+| `dock-top` | Full width above the composer card |
+| `dock-bottom` | Below the composer card, in that card's own dock. It is a narrower seat than the one above the input — measured 293 px against 769 px on a 1920 px viewport — so keep its content compact |
 | `panel` | The same dock, updated in place |
 | `float` | A draggable, resizable window (`size: "520x360+80+60"`) |
 | `background` | A click-through layer over the frame |
