@@ -665,9 +665,9 @@ window.__ModuleLoader__.load({
         candidateFile: 'file',
         candidateAdopt: 'Adopt',
         adoptTitle: 'Project details for',
-        adoptSlug: 'Project name',
+        adoptSlug: 'Process ID',
         adoptSlugHint: 'lowercase letters, digits, dot, dash, underscore',
-        adoptName: 'Process name',
+        adoptName: 'Project name',
         adoptDescription: 'Details',
         adoptPlacement: 'Where it opens',
         adoptHint: 'Nothing is written yet: fill this in and the project is created with it.',
@@ -742,9 +742,9 @@ window.__ModuleLoader__.load({
         candidateFile: '文件',
         candidateAdopt: '设为项目',
         adoptTitle: '补全项目信息：',
-        adoptSlug: '项目名称',
+        adoptSlug: '进程ID',
         adoptSlugHint: '仅支持小写英文数字或._-',
-        adoptName: '进程名称',
+        adoptName: '项目名称',
         adoptDescription: '详细描述',
         adoptPlacement: '默认生成位置',
         adoptHint: '此时还没有写入任何东西：填完后点下面的按钮，才会带着这些信息创建项目。',
@@ -2542,9 +2542,9 @@ window.__ModuleLoader__.load({
     function templateListItem(template) {
       const slug = String(template.slug ?? '');
       const name = typeof template.name === 'string' && template.name.length > 0 ? template.name : slug;
-      const description = typeof template.description === 'string' && template.description.length > 0 ? template.description : '';
-      const id = name === slug ? '' : ` (${slug})`;
-      return `${name}${id}${description.length > 0 ? ` — ${description}` : ''}`;
+      // The reader's own format: 项目名称（进程ID）. The id is omitted when it repeats the
+      // name, because `red（red）` tells nobody anything.
+      return name === slug ? name : `${name}（${slug}）`;
     }
 
     /**
@@ -2800,8 +2800,10 @@ window.__ModuleLoader__.load({
                         tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
                       ),
                       ...[
-                        { key: 'slug', label: tr('adoptSlug', 'Project name'), hint: tr('adoptSlugHint', 'lowercase letters, digits, dot, dash, underscore') },
-                        { key: 'name', label: tr('adoptName', 'Process name'), hint: '' },
+                        // The reader's order: the human name first, then the id that
+                        // `template=` takes, then what it is and where it opens.
+                        { key: 'name', label: tr('adoptName', 'Project name'), hint: '' },
+                        { key: 'slug', label: tr('adoptSlug', 'Process ID'), hint: tr('adoptSlugHint', 'lowercase letters, digits, dot, dash, underscore') },
                         { key: 'description', label: tr('adoptDescription', 'Details'), hint: '' },
                       ].map((field) =>
                         h(

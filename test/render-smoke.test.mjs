@@ -431,15 +431,16 @@ test('the create dialog asks what to start from and where to put it', () => {
   const directory = dialog.elements.find((element) => element.props?.type === 'text');
   assert.ok(directory !== undefined, 'a directory box is part of the dialog');
   assert.equal(directory.props.value, '/opt/html-templates', 'showing the directory the catalogue came from');
-  // A catalogue entry reads as its process name, with the project name (the id, which is
-  // what `template=` takes) in parentheses when the two differ.
+  // A catalogue entry reads as 项目名称（进程ID）: the human name leads and the id follows
+  // when the two differ, which is what `template=` takes.
   __internals.state.templates.items = [
     { slug: 'my-page', name: '我的页面', description: '自述', bundled: false, bytes: 10 },
     { slug: 'red', name: 'red', description: '', bundled: false, bytes: 10 },
   ];
   const named = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-  assert.ok(named.text.includes('我的页面 (my-page) — 自述'), 'the human name leads and the id follows');
-  assert.ok(named.text.includes('red'), 'and an entry whose name is its id stays plain');
+  assert.ok(named.text.includes('我的页面（my-page）'), 'the name leads and the id follows');
+  assert.ok(!named.text.includes('我的页面（my-page） — '), 'the description stays out of the row');
+  assert.ok(!named.text.includes('red（red）'), 'and an entry whose name is its id stays plain');
   __internals.state.templates.items = [
     { slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 },
   ];
@@ -460,7 +461,7 @@ test('the create dialog asks what to start from and where to put it', () => {
   // the slug is what a template is addressed by, so it is filled in and confirmed.
   __internals.state.adopt = { open: true, source: 'my-folder', slug: 'my-folder', name: 'my-folder', description: '', placement: 'dock-right', busy: false };
   const adopting = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-  for (const text of ['Project details for my-folder', 'Project name', 'Process name', 'Details', 'Where it opens', 'Write the manifest']) {
+  for (const text of ['Project details for my-folder', 'Project name', 'Process ID', 'Details', 'Where it opens', 'Write the manifest']) {
     assert.ok(adopting.text.includes(text), `the adopt form offers ${text}`);
   }
   const slugBox = adopting.elements.find((element) => element.props?.type === 'text' && element.props.value === 'my-folder');
