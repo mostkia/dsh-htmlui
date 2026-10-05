@@ -69,6 +69,7 @@ function createClientContext(options = {}) {
   const logs = [];
   const effects = [];
   const services = {};
+  const deferred = [];
   if (options.tabs !== undefined) services.sidebarRightTabs = options.tabs;
   if (options.controller !== undefined) services.sidebarRight = options.controller;
   if (options.locale !== undefined) services.locale = options.locale;
@@ -77,6 +78,11 @@ function createClientContext(options = {}) {
     injections,
     logs,
     effects,
+    /** Run the injections that were held back, as a late-resolving slot would. */
+    flushInjections() {
+      const pending = deferred.splice(0, deferred.length);
+      for (const entry of pending) entry.callback();
+    },
     // The documented optional-service access for a dynamic Client half.
     get: (key) => services[key],
     logger: {
@@ -86,6 +92,12 @@ function createClientContext(options = {}) {
     slots: {
       inject(key, callback) {
         injections.push(key);
+        if (options.deferInject === true) {
+          // The real slot injection resolves asynchronously: the callback runs when the
+          // slot becomes available, which can be after a release has already happened.
+          deferred.push({ key, callback });
+          return () => {};
+        }
         const dispose = callback();
         return typeof dispose === 'function' ? dispose : () => {};
       },
@@ -396,6 +408,33 @@ test('the create dialog creates without the model, at the chosen place', async (
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('a release that lands before the slot resolves still leaves the column clean', () => {
+  // Creating and closing quickly used to strand a registration: the release ran while
+  // the injection was still pending, and the callback registered afterwards with nobody
+  // left to dispose it. The tab then survived every refresh, with nothing to show.
+  resetRightPane();
+  const context = createClientContext({ deferInject: true, tabs: { register: () => () => {} } });
+  apply(context);
+  const record = __internals.recordFromMeta(
+    { htmlui: true, op: 'render', uiId: 'ui-ff330000', sessionId: 'session-race', placement: 'dock-right', revision: 1 },
+    undefined,
+  );
+  __internals.publish(record);
+  assert.equal(
+    context.registrations.length,
+    0,
+    'nothing is registered until the slot actually resolves',
+  );
+  __internals.retire('ui-ff330000', 'session-race');
+  context.flushInjections();
+  assert.equal(
+    context.registrations.some((entry) => entry.options.name === 'sidebar.right.pane.tab'),
+    false,
+    'the late callback declines, so no tab is stranded in the column',
+  );
+  assert.equal(__internals.state.rightPane.available, false, 'and the column is not reported as ready');
 });
 
 test('a theme switch does not reload an open document', async () => {

@@ -1902,7 +1902,7 @@ window.__ModuleLoader__.load({
      * the last one goes; the controller binding stays, because it is what opens the
      * column afterwards and it creates nothing on its own.
      */
-    const rightPaneWiring = { ctx: undefined, wired: false, disposes: [] };
+    const rightPaneWiring = { ctx: undefined, wired: false, disposes: [], generation: 0 };
 
     function wireRightPaneController(ctx, disposers) {
       if (typeof ctx.inject !== 'function') return;
@@ -1939,12 +1939,20 @@ window.__ModuleLoader__.load({
       }
       if (!needed) return;
       rightPaneWiring.wired = true;
+      // Slot injection resolves asynchronously, so a release can land before the
+      // callbacks below ever run. Without a generation, that callback would then
+      // register a tab nobody can dispose — which is exactly how an empty session kept
+      // an HTML UI page in its column, and came back with it after every refresh.
+      rightPaneWiring.generation += 1;
+      const generation = rightPaneWiring.generation;
+      const live = () => rightPaneWiring.wired && rightPaneWiring.generation === generation;
       const disposes = [];
       // The registration's own disposer is the one that takes it out of the slot tree:
       // keeping only the injection's disposer left the tab registered forever, which is
       // why an empty session still had an HTML UI page in its column.
       disposes.push(
         ctx.slots.inject('sidebar.right.pane.tab', () => {
+          if (!live()) return () => {};
           const unregister = ctx.slots.register(
             { name: 'sidebar.right.pane.tab', key: TAB_ID },
             guarded(ctx, (props) => h(HtmlUiRightPane, Object.assign({}, props, { ctx }))),
@@ -1956,9 +1964,11 @@ window.__ModuleLoader__.load({
       if (typeof ctx.inject === 'function') {
         ctx.inject(['sidebarRightTabs'], (scope) => {
           try {
+            if (!live()) return;
             const tabs = scope.sidebarRightTabs;
             if (tabs === undefined || typeof tabs.register !== 'function') return;
             scope.effect(() => {
+              if (!live()) return undefined;
               // The registry owns the registration's lifecycle; this effect owns only
               // the flag other components read, and clears it on teardown so dock-right
               // moves back to its fallback instead of vanishing.
@@ -1987,7 +1997,13 @@ window.__ModuleLoader__.load({
 
     /** Take the tab back out of the column. */
     function releaseRightPaneTab() {
-      if (!rightPaneWiring.wired) return;
+      // Bumping the generation invalidates every callback that has not run yet, whether
+      // or not this wiring ever got as far as registering.
+      rightPaneWiring.generation += 1;
+      if (!rightPaneWiring.wired) {
+        state.rightPane.available = false;
+        return;
+      }
       rightPaneWiring.wired = false;
       for (const dispose of rightPaneWiring.disposes) {
         try {
