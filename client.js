@@ -492,7 +492,8 @@ window.__ModuleLoader__.load({
         bundled: 'bundled',
         loading: 'Reading templates…',
         empty: 'No templates yet: have the model save one with html_ui_template, or drop your own .html into the templates directory.',
-        unavailable: 'Template catalogue unavailable',
+        catalogueUnavailable: 'Template catalogue unavailable',
+        frameUnavailable: 'This interface could not be loaded',
         draft: 'Render the template {slug} with html_ui',
       },
       zh: {
@@ -519,7 +520,8 @@ window.__ModuleLoader__.load({
         bundled: '自带',
         loading: '正在读取模板…',
         empty: '还没有模板：让模型用 html_ui_template 存一个，或把你的 .html 放进模板目录。',
-        unavailable: '模板目录不可用',
+        catalogueUnavailable: '模板目录不可用',
+        frameUnavailable: '这个界面加载失败',
         draft: '用 html_ui 渲染模板 {slug}',
       },
     };
@@ -840,7 +842,7 @@ window.__ModuleLoader__.load({
           return h(
             'div',
             { style: Object.assign({}, emptyStyle, { display: 'flex', alignItems: 'center', gap: '8px' }) },
-            h('span', null, tr('unavailable', 'HTML UI unavailable — the document could not be loaded.')),
+            h('span', null, tr('frameUnavailable', 'This interface could not be loaded')),
             h(
               'button',
               {
@@ -1698,7 +1700,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', style: buttonStyle, onClick: () => toggleTemplates() }, tr('collapse', 'Hide')),
         ),
         state.templates.error !== null
-          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)' } }, `${tr('unavailable', 'Template catalogue unavailable')}: ${state.templates.error}`)
+          ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)' } }, `${tr('catalogueUnavailable', 'Template catalogue unavailable')}: ${state.templates.error}`)
           : null,
         state.templates.loaded !== true
           ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('loading', 'Reading templates…'))

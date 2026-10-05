@@ -483,6 +483,30 @@ test('dismissing a surface closes it locally and asks the host with a token', as
   }
 });
 
+test('one message key means one thing everywhere it is used', () => {
+  // `unavailable` was once used for both "the catalogue is unavailable" and "this
+  // document failed to load", so a broken frame said the template catalogue was
+  // missing. A key with two different fallbacks is always that mistake.
+  const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+  const seen = new Map();
+  for (const match of source.matchAll(/tr\('([a-zA-Z]+)',\s*'([^']*)'/gu)) {
+    const [, key, fallback] = match;
+    const known = seen.get(key);
+    if (known === undefined) {
+      seen.set(key, fallback);
+      continue;
+    }
+    assert.equal(known, fallback, `"${key}" is used for two different messages`);
+  }
+  assert.ok(seen.size >= 10, 'the scan should find the interface text');
+  // Every key it uses must exist in both dictionaries, which is what the locale
+  // service is handed.
+  for (const [key] of seen) {
+    assert.equal(typeof __internals.MESSAGES.en[key], 'string', `MESSAGES.en.${key} must exist`);
+    assert.equal(typeof __internals.MESSAGES.zh[key], 'string', `MESSAGES.zh.${key} must exist`);
+  }
+});
+
 test('the activation line names the installed version', () => {
   assert.ok(
     __internals.CLIENT_ACTIVE_LINE.includes(pkg.version),
