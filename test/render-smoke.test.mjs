@@ -342,6 +342,12 @@ test('the template drawer renders nothing closed and a row per template open', (
   assert.match(open.text, /Apply/u, 'one action applies it locally');
   assert.match(open.text, /Ask the model/u, 'and one hands it to the model');
   assert.match(open.text, /bundled/u, 'a packaged template is marked');
+  // A long catalogue must not push the composer off the screen: the list scrolls inside
+  // the drawer instead of growing without limit.
+  assert.ok(
+    open.elements.some((element) => element.props?.style?.overflowY === 'auto' && element.props?.style?.maxHeight !== undefined),
+    'the drawer caps its list height and scrolls it',
+  );
 
   // An empty catalogue and an unavailable one both explain themselves.
   templates.items = [];

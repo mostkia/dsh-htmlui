@@ -2897,9 +2897,27 @@ window.__ModuleLoader__.load({
                   : null,
               )
             : null,
+          // The actions stay put while the rest scrolls. Without this the panel's own
+          // scrolling carries 取消 and 创建 off the bottom of the screen as soon as the
+          // catalogue or the candidate list grows, and the reader has to hunt for the
+          // button that finishes what they started.
           h(
             'div',
-            { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' } },
+            {
+              style: {
+                position: 'sticky',
+                bottom: '-14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '6px',
+                marginTop: '6px',
+                paddingTop: '8px',
+                paddingBottom: '14px',
+                background: 'var(--dsw-alias-bg-overlay, #fff)',
+                borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
+              },
+            },
             h(
               'button',
               {
@@ -3068,7 +3086,16 @@ window.__ModuleLoader__.load({
           ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('loading', 'Reading templates…'))
           : items.length === 0
             ? h('div', { style: { padding: '6px 10px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('empty', 'No templates yet: have the model save one with html_ui_template, or drop your own .html into the templates directory.'))
-            : h('div', null, ...rows),
+            : h(
+                'div',
+                {
+                  // A drawer that grows with the catalogue pushes the composer off the
+                  // screen and stops being a drawer. It scrolls instead, on its own, so
+                  // the conversation and the input stay where they were.
+                  style: { maxHeight: '38vh', overflowY: 'auto', overscrollBehavior: 'contain' },
+                },
+                ...rows,
+              ),
       );
     }
 
