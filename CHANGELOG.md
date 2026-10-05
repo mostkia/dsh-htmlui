@@ -6,6 +6,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- `window.dshHTML.send()` now includes the `op` the host dispatches on. Without
+  it every interaction an interface sent was refused as an unsupported
+  operation — the model round trip was broken end to end, and only a test of the
+  bridge itself could see it.
+- `dshHTML.on('ready', …)` fires for a listener registered after the bridge ran,
+  which is every listener: the document's own script always loads after it.
 - `html_ui op=update` actually refreshes the interface. The document URL now
   carries the revision, so the frame's `src` changes and the browser reloads it;
   before, React kept the same `src` and the surface showed the previous document
@@ -40,6 +46,9 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `test/bridge.test.mjs`: the injected document bridge now has executable tests
+  (surface, action posting, state, resize/close, ready replay, streaming, theme
+  handshake, unconfigured failure), run by `npm test` and CI.
 - `allowedOrigins` row config: a deliberately exposed deployment (a LAN address,
   `webServer.host: 0.0.0.0`, a reverse proxy) can trust its own browser origin
   instead of being refused wholesale by the loopback-only default. The default

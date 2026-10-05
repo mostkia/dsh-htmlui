@@ -31,6 +31,8 @@
   var nonce = null;
   var theme = config.initialTheme === 'dark' ? 'dark' : 'light';
   var lastError = null;
+  /** The author's script always runs after this one, so `ready` must be replayable. */
+  var readyDetail = null;
 
   function emit(type, detail) {
     var bucket = listeners[type];
@@ -152,7 +154,12 @@
     },
     stream: stream,
     send: function (action, data, options) {
-      var body = typeof action === 'object' && action !== null ? action : { action: action, data: data };
+      // `op` is what the host dispatches on: without it every interaction would be
+      // refused as an unsupported operation.
+      var body =
+        typeof action === 'object' && action !== null
+          ? Object.assign({ op: 'action' }, action)
+          : { op: 'action', action: action, data: data };
       if (options !== null && typeof options === 'object' && options.steer === true) body.steer = true;
       if (body.action === undefined || body.action === null || String(body.action).length === 0) {
         return Promise.resolve({ ok: false, error: 'an action name is required' });
@@ -184,6 +191,16 @@
     },
     on: function (type, handler) {
       if (typeof type !== 'string' || typeof handler !== 'function') return function () {};
+      // The document's own script runs after the bridge, so a `ready` handler
+      // registered then would never see the event that already fired.
+      if (type === 'ready' && readyDetail !== null) {
+        try {
+          handler(readyDetail);
+        } catch (error) {
+          console.warn('[dshHTML] listener failed for "ready"', error);
+        }
+        return function () {};
+      }
       stream();
       if (listeners[type] === undefined) listeners[type] = [];
       listeners[type].push(handler);
@@ -205,5 +222,6 @@
     },
   };
 
-  emit('ready', { uiId: uiId, sessionId: sessionId, theme: theme });
+  readyDetail = { uiId: uiId, sessionId: sessionId, theme: theme };
+  emit('ready', readyDetail);
 })();

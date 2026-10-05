@@ -35,3 +35,6 @@ jobs:
 
       - name: Browser half
         run: node test/client-half.test.mjs
+
+      - name: Document bridge
+        run: node test/bridge.test.mjs
