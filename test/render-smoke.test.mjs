@@ -431,6 +431,19 @@ test('the create dialog asks what to start from and where to put it', () => {
   const directory = dialog.elements.find((element) => element.props?.type === 'text');
   assert.ok(directory !== undefined, 'a directory box is part of the dialog');
   assert.equal(directory.props.value, '/opt/html-templates', 'showing the directory the catalogue came from');
+  // A catalogue entry reads as its process name, with the project name (the id, which is
+  // what `template=` takes) in parentheses when the two differ.
+  __internals.state.templates.items = [
+    { slug: 'my-page', name: '我的页面', description: '自述', bundled: false, bytes: 10 },
+    { slug: 'red', name: 'red', description: '', bundled: false, bytes: 10 },
+  ];
+  const named = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  assert.ok(named.text.includes('我的页面 (my-page) — 自述'), 'the human name leads and the id follows');
+  assert.ok(named.text.includes('red'), 'and an entry whose name is its id stays plain');
+  __internals.state.templates.items = [
+    { slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 },
+  ];
+
   // A copied-in folder or file that is not a project yet is reported and can be adopted,
   // which is what stops it from looking like it never arrived.
   __internals.state.templates.candidates = [

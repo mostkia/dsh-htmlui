@@ -2532,6 +2532,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * How one catalogue entry reads in a list.
+     *
+     * The process name is the human name and leads; the project name is the id and
+     * follows in parentheses when the two differ, because `template=` takes the id.
+     */
+    function templateListItem(template) {
+      const slug = String(template.slug ?? '');
+      const name = typeof template.name === 'string' && template.name.length > 0 ? template.name : slug;
+      const description = typeof template.description === 'string' && template.description.length > 0 ? template.description : '';
+      const id = name === slug ? '' : ` (${slug})`;
+      return `${name}${id}${description.length > 0 ? ` — ${description}` : ''}`;
+    }
+
+    /**
      * The user's own way to start an interface: what to start from, and where to put it.
      *
      * Everything here happens without the model — the source is either the blank canvas
@@ -2682,7 +2696,10 @@ window.__ModuleLoader__.load({
               radio(
                 'dsh-create-source',
                 template.slug,
-                template.description !== undefined && template.description.length > 0 ? `${template.slug} — ${template.description}` : template.slug,
+                // The reader's own name first: the slug is an id, and an id is not what a
+                // person looks for in a list. It stays visible beside it, in parentheses,
+                // because it is what `template=` takes.
+                templateListItem(template),
                 state.create.source === template.slug,
                 () => {
                   state.create.source = template.slug;
