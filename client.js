@@ -92,7 +92,7 @@ window.__ModuleLoader__.load({
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
-      templates: { open: false, loaded: false, items: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false },
+      templates: { open: false, loaded: false, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null },
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       listeners: new Set(),
@@ -648,6 +648,14 @@ window.__ModuleLoader__.load({
         createDirNoPicker: 'This build cannot open a folder picker; type the path instead.',
         createDirSave: 'Use this directory',
         createDirUnset: 'No directory yet: choose the folder that holds your HTML projects.',
+        dirSaved: 'Saved. The list is re-read immediately — no restart needed for this.',
+        dirNeedsRestart: 'The setting did not reach the host: restart dsh and try again.',
+        candidatesTitle: 'Not projects yet',
+        candidatesHint: 'These are in the directory but carry no project manifest. Adopt one and it becomes a template you can create from.',
+        candidateDir: 'folder',
+        candidateFile: 'file',
+        candidateAdopt: 'Adopt',
+        adopted: 'It is a project now.',
         createPlacement: 'Where',
         placementDockRight: 'Right column (a real split)',
         placementInline: 'In the conversation',
@@ -707,6 +715,14 @@ window.__ModuleLoader__.load({
         createDirNoPicker: '这个构建打不开文件夹选择器，请手动输入路径。',
         createDirSave: '使用这个目录',
         createDirUnset: '还没有目录：请选择存放你的 HTML 项目的文件夹。',
+        dirSaved: '已保存，列表会立刻重新读取 —— 这一项不需要重启。',
+        dirNeedsRestart: '设置没能到达宿主：请冷启动 dsh 后再试。',
+        candidatesTitle: '尚未登记为项目',
+        candidatesHint: '这些东西已经在目录里，但缺少项目清单（meta.json）。点"设为项目"即可成为可用的模板。',
+        candidateDir: '文件夹',
+        candidateFile: '文件',
+        candidateAdopt: '设为项目',
+        adopted: '已成为项目。',
         createPlacement: '生成位置',
         placementDockRight: '右侧栏（真正的左右分屏）',
         placementInline: '对话流内',
@@ -800,6 +816,7 @@ window.__ModuleLoader__.load({
       return postJson('/templates', {}).then((value) => {
         if (value !== null && value.ok === true && Array.isArray(value.templates)) {
           state.templates.items = value.templates;
+          state.templates.candidates = Array.isArray(value.candidates) ? value.candidates : [];
           state.templates.error = null;
           // The directory travels with the catalogue: the page shows where the list came
           // from instead of leaving the reader to guess, and knows whether to ask.
@@ -824,22 +841,57 @@ window.__ModuleLoader__.load({
      */
     function saveTemplatesDir(dir) {
       state.templates.savingDir = true;
+      state.templates.notice = null;
       bump();
       return postJson('/templates/dir', { dir: typeof dir === 'string' ? dir : '' })
         .then((value) => {
           state.templates.savingDir = false;
           if (value === null || value.ok !== true) {
             state.templates.error = (value !== null && value.error) || 'failed';
+            // The honest wording: a directory change is read live, so a failure here
+            // means the running host predates the route — which a restart fixes.
+            state.templates.notice = tr('dirNeedsRestart', 'The setting did not reach the host: restart dsh and try again.');
             bump();
             return false;
           }
           state.templates.dir = typeof value.dir === 'string' && value.dir.length > 0 ? value.dir : undefined;
           state.templates.configured = value.configured === true;
           state.templates.error = null;
+          state.templates.notice = tr('dirSaved', 'Saved. The list is re-read immediately — no restart needed for this.');
           return loadTemplates().then(() => true);
         })
         .catch(() => {
           state.templates.savingDir = false;
+          state.templates.error = 'failed';
+          state.templates.notice = tr('dirNeedsRestart', 'The setting did not reach the host: restart dsh and try again.');
+          bump();
+          return false;
+        });
+    }
+
+    /**
+     * Adopt one thing the reader copied into the directory.
+     *
+     * The host gives it the manifest that makes it a project — that is the step a copied
+     * file is missing, and why it looked like it never arrived.
+     */
+    function adoptTemplate(name) {
+      state.templates.adopting = typeof name === 'string' ? name : '';
+      bump();
+      return postJson('/templates/adopt', { name })
+        .then((value) => {
+          state.templates.adopting = '';
+          if (value === null || value.ok !== true) {
+            state.templates.error = (value !== null && value.error) || 'failed';
+            bump();
+            return false;
+          }
+          state.templates.error = null;
+          state.templates.notice = tr('adopted', 'It is a project now.');
+          return loadTemplates().then(() => true);
+        })
+        .catch(() => {
+          state.templates.adopting = '';
           state.templates.error = 'failed';
           bump();
           return false;
@@ -2439,6 +2491,7 @@ window.__ModuleLoader__.load({
         state.create.open = false;
         bump();
       };
+      const candidates = Array.isArray(state.templates.candidates) ? state.templates.candidates : [];
       return h(
         'div',
         {
@@ -2594,6 +2647,42 @@ window.__ModuleLoader__.load({
           ),
           state.templates.error !== null
             ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)', marginBottom: '8px' } }, String(state.templates.error))
+            : null,
+          state.templates.notice !== null
+            ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } }, String(state.templates.notice))
+            : null,
+          // Files copied into the directory that are not projects yet: a folder without a
+          // manifest, or a file whose name cannot be a slug. Asking is the whole point —
+          // silently skipping them is what made a copied file look like it never arrived.
+          candidates.length > 0
+            ? h(
+                'div',
+                { style: { marginBottom: '10px' } },
+                h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, `${tr('candidatesTitle', 'Not projects yet')} (${candidates.length})`),
+                h(
+                  'div',
+                  { style: { fontSize: '11.5px', opacity: 0.72, marginBottom: '4px' } },
+                  tr('candidatesHint', 'These are in the directory but carry no project manifest. Adopt one and it becomes a template you can create from.'),
+                ),
+                ...candidates.map((candidate) =>
+                  h(
+                    'div',
+                    { key: candidate.name, style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px' } },
+                    h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0', fontSize: '12px' }) }, candidate.name),
+                    h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, candidate.kind === 'dir' ? tr('candidateDir', 'folder') : tr('candidateFile', 'file')),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+                        disabled: state.templates.adopting === candidate.name,
+                        onClick: () => adoptTemplate(candidate.name),
+                      },
+                      state.templates.adopting === candidate.name ? tr('creating', 'Creating…') : tr('candidateAdopt', 'Adopt'),
+                    ),
+                  ),
+                ),
+              )
             : null,
           h(
             'div',

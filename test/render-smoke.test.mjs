@@ -422,6 +422,18 @@ test('the create dialog asks what to start from and where to put it', () => {
   const directory = dialog.elements.find((element) => element.props?.type === 'text');
   assert.ok(directory !== undefined, 'a directory box is part of the dialog');
   assert.equal(directory.props.value, '/opt/html-templates', 'showing the directory the catalogue came from');
+  // A copied-in folder or file that is not a project yet is reported and can be adopted,
+  // which is what stops it from looking like it never arrived.
+  __internals.state.templates.candidates = [
+    { kind: 'dir', name: 'my-folder', html: 2 },
+    { kind: 'file', name: '我的页面.html', html: 1 },
+  ];
+  const withCandidates = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  assert.match(withCandidates.text, /Not projects yet \(2\)/u);
+  assert.match(withCandidates.text, /my-folder/u);
+  assert.match(withCandidates.text, /我的页面\.html/u);
+  assert.match(withCandidates.text, /Adopt/u);
+  __internals.state.templates.candidates = [];
   // The chosen place is the one the placement has to name.
   assert.equal(__internals.state.create.placement, 'dock-right');
   resetCreate();

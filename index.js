@@ -647,6 +647,93 @@ function createStore(root) {
     return [BLANK_TEMPLATE, ...withoutBlank];
   }
 
+  /**
+   * Things in the reader's directory that are not projects yet.
+   *
+   * A folder is only a project once it carries a `meta.json`, and a loose file is only
+   * one when its name is a lowercase slug — so a folder they filled themselves, or
+   * `我的页面.html`, is silently skipped. That silence is what makes a copied-in file
+   * look like it never arrived, so it is reported instead.
+   */
+  function listTemplateCandidates() {
+    const root = templatesDir();
+    if (root === undefined || !existsSync(root)) return [];
+    const out = [];
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (existsSync(join(root, entry.name, 'meta.json'))) continue;
+        let files = [];
+        try {
+          files = readdirSync(join(root, entry.name)).filter((name) => /\.html?$/iu.test(name));
+        } catch {
+          files = [];
+        }
+        if (files.length === 0) continue;
+        out.push({ kind: 'dir', name: entry.name, html: files.length });
+        continue;
+      }
+      if (!/\.html?$/iu.test(entry.name)) continue;
+      const stem = entry.name.replace(/\.html?$/iu, '');
+      const slug = slugify(stem);
+      // A file that already lists as a template needs no adoption.
+      if (slug !== undefined && slug === stem) continue;
+      out.push({ kind: 'file', name: entry.name, html: 1 });
+    }
+    return out;
+  }
+
+  /**
+   * Adopt one candidate: give it the manifest that makes it a project.
+   *
+   * A folder keeps its files where they are and gains a `meta.json`; a loose file is
+   * copied into a folder of its own, which is the layout every other project already
+   * has — and the copy means nothing the reader wrote is moved or lost.
+   */
+  function adoptTemplateCandidate(input) {
+    const root = templatesDir();
+    if (root === undefined) return { ok: false, error: 'no templates directory is set' };
+    const raw = typeof input === 'string' ? input : '';
+    if (raw.length === 0 || raw.includes('..') || raw.includes('/') || raw.includes('\\')) {
+      return { ok: false, error: `not a name in the templates directory: ${raw}` };
+    }
+    const target = join(root, raw);
+    if (!existsSync(target)) return { ok: false, error: `not found: ${raw}` };
+    let slug = slugify(raw.replace(/\.html?$/iu, ''));
+    if (slug === undefined) slug = `project-${Date.now().toString(36)}`;
+    const taken = new Set(listTemplates().map((template) => template.slug));
+    if (taken.has(slug)) {
+      let index = 2;
+      while (taken.has(`${slug}-${index}`)) index += 1;
+      slug = `${slug}-${index}`;
+    }
+    const info = statSync(target);
+    if (info.isDirectory()) {
+      const dir = target;
+      const files = readdirSync(dir).filter((name) => /\.html?$/iu.test(name));
+      const entry = files.includes('index.html') ? 'index.html' : files[0];
+      if (entry === undefined) return { ok: false, error: `no html file in ${raw}` };
+      if (entry !== 'index.html') {
+        // `readTemplate` looks for index.html, so a differently named file is copied to
+        // it; the original stays where the reader put it.
+        writeTextAtomic(join(dir, 'index.html'), readFileSync(join(dir, entry), 'utf8'));
+      }
+      const source = readFileSync(join(dir, 'index.html'), 'utf8');
+      writeJsonAtomic(join(dir, 'meta.json'), { slug, name: raw, description: '', bytes: byteLength(source), updatedAt: Date.now() });
+      return { ok: true, name: raw, slug, kind: 'dir' };
+    }
+    const dir = ensureDir(join(root, slug));
+    const source = readFileSync(target, 'utf8');
+    writeTextAtomic(join(dir, 'index.html'), source);
+    writeJsonAtomic(join(dir, 'meta.json'), {
+      slug,
+      name: raw.replace(/\.html?$/iu, ''),
+      description: '',
+      bytes: byteLength(source),
+      updatedAt: Date.now(),
+    });
+    return { ok: true, name: raw, slug, kind: 'file' };
+  }
+
   function statePath(sessionId) {
     const key = String(sessionId ?? '').replace(/[^A-Za-z0-9._-]/gu, '_').slice(0, SESSION_ID_MAX);
     if (key.length === 0) throw new Error('missing session id');
@@ -679,6 +766,8 @@ function createStore(root) {
     writeTemplate,
     removeTemplate,
     listTemplates,
+    listTemplateCandidates,
+    adoptTemplateCandidate,
     readSettings,
     setTemplatesDir,
     markTemplatesAsked,
@@ -1535,6 +1624,9 @@ export function apply(ctx, config) {
           dir: settings.templatesDir,
           configured: settings.templatesDir !== undefined,
           asked: settings.templatesAsked === true,
+          // Files the reader copied in that are not projects yet. Reporting them is what
+          // turns "my file did nothing" into a question with a button on it.
+          candidates: store.listTemplateCandidates(),
           count: all.length,
           templates: all.map((template) => ({
             slug: String(template.slug ?? ''),
@@ -1564,6 +1656,20 @@ export function apply(ctx, config) {
           return;
         }
         sendJson(res, 200, { ok: true, dir: result.dir, configured: result.configured, count: store.listTemplates().length });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
+  /** Adopt a folder or a loose file the reader copied in as a project. */
+  function handleTemplatesAdopt(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        const result = store.adoptTemplateCandidate(typeof body.name === 'string' ? body.name : '');
+        if (result.ok !== true) {
+          sendJson(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        sendJson(res, 200, { ok: true, name: result.name, slug: result.slug, kind: result.kind, count: store.listTemplates().length });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
@@ -1916,6 +2022,10 @@ export function apply(ctx, config) {
       if (path === `${ROUTE_PREFIX}/templates/dir`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTemplatesDir(req, res);
+      }
+      if (path === `${ROUTE_PREFIX}/templates/adopt`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplatesAdopt(req, res);
       }
       if (path === `${ROUTE_PREFIX}/ui/ticket`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
