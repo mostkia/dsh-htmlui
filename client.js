@@ -1812,10 +1812,12 @@ window.__ModuleLoader__.load({
           state.hidden.has(record.uiId)
             ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
             : null,
-          // Every form that can be out of sight gets the same control, with the same
-          // words. A background layer is always on screen and cannot be hidden, so it has
-          // none — it is removed with the control beside this one.
-          record.placement === 'background'
+          // Every form that can be out of sight gets the same control, with the same words.
+          // Two forms have none: a background layer is always on screen, and an inline
+          // surface lives in the conversation and is never hidden — offering "Show" for it
+          // was a button that could not do anything. Both are removed with the control
+          // beside this one.
+          record.placement === 'background' || record.placement === 'inline'
             ? null
             : h(
                 'button',
@@ -2529,21 +2531,27 @@ window.__ModuleLoader__.load({
       }
 
       for (const record of floats) {
-        // A minimized window is put away, not deleted: the record stays listed, and the
-        // session page's restore control brings the same window back where it was.
-        if (state.hidden.has(record.uiId)) continue;
+        // A minimized window is put away, not deleted, and not *unmounted* either: taking
+        // the frame out of the tree destroys its document, so restoring it would reload the
+        // interface from scratch and lose everything that lived in it — typed input, scroll
+        // position, the whole runtime state — while also paying for the reload. `display:
+        // none` keeps the document alive and costs nothing to show again.
+        const hidden = state.hidden.has(record.uiId);
         layers.push(
-          h(HtmlUiFrame, {
-            key: record.uiId,
-            record,
-            theme: state.theme,
-            variant: 'float',
-            onMinimize: (uiId) => {
-              state.hidden.add(uiId);
-              bump();
-            },
-            onDismiss: dismiss,
-          }),
+          h(
+            'div',
+            { key: record.uiId, style: { display: hidden ? 'none' : 'contents' } },
+            h(HtmlUiFrame, {
+              record,
+              theme: state.theme,
+              variant: 'float',
+              onMinimize: (uiId) => {
+                state.hidden.add(uiId);
+                bump();
+              },
+              onDismiss: dismiss,
+            }),
+          ),
         );
       }
 

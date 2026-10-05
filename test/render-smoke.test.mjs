@@ -564,7 +564,7 @@ test('a background layer is dimmed by the client, and that is what keeps the int
   resetStore();
 });
 
-test('a float window carries its own minimize, and a hidden one leaves the frame', () => {
+test('a float window carries its own minimize, and a hidden one stays alive', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-88000001', sessionId: 'viewed', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
   ]);
@@ -572,12 +572,16 @@ test('a float window carries its own minimize, and a hidden one leaves the frame
   const shown = render(__internals.HtmlUiOverlay, { ctx });
   assert.match(shown.text, /Preparing interface/u, 'a float renders its document');
 
-  // Minimizing puts it away without deleting the record: the session page can restore it.
+  // Minimizing puts it away without deleting the record — and without unmounting the frame,
+  // because unmounting destroys the document and restoring it would reload the interface
+  // from scratch, losing whatever lived in it.
   const record = __internals.recordsFor('viewed').find((entry) => entry.placement === 'float');
   __internals.state.hidden.add(record.uiId);
   const hidden = render(__internals.HtmlUiOverlay, { ctx });
-  assert.ok(!hidden.text.includes('Preparing interface'), 'a hidden float draws nothing');
-  assert.equal(__internals.recordsFor('viewed').length, 1, 'but the record is still there to restore');
+  assert.match(hidden.text, /Preparing interface/u, 'a hidden float keeps its frame in the tree');
+  const wrapper = hidden.elements.find((element) => element.props?.style?.display === 'none');
+  assert.ok(wrapper !== undefined, 'hidden by style, not by removal');
+  assert.equal(__internals.recordsFor('viewed').length, 1, 'and the record is still there to restore');
 
   // The control itself is offered on the frame, next to the close.
   const frame = render(__internals.HtmlUiFrame, { record, theme: 'light', variant: 'float', onMinimize: () => {}, onDismiss: () => {} });
@@ -612,7 +616,7 @@ test('a float remembers where it was left, and a touch brings it to the front', 
   resetStore();
 });
 
-test('the session page restores every form except the background layer', () => {
+test('the session page restores every form that can be hidden', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000001', sessionId: 'session-1', title: '背景', placement: 'background', revision: 1, bytes: 5 }, undefined),
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000002', sessionId: 'session-1', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
@@ -622,9 +626,9 @@ test('the session page restores every form except the background layer', () => {
   ]);
   const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
   const restores = (listed.text.match(/Show/gu) ?? []).length;
-  // Four of the five: a background layer is always on screen and cannot be hidden, so there
-  // is nothing to restore — it is removed with the control beside this one.
-  assert.equal(restores, 4, 'four of the five forms can be shown again');
+  // Three of the five: a background layer is always on screen and an inline surface lives in
+  // the conversation, so neither can be hidden and neither has anything to restore.
+  assert.equal(restores, 3, 'three of the five forms can be shown again');
   assert.ok(listed.text.includes('Remove'), 'and every one of them can be removed');
   resetStore();
 });
