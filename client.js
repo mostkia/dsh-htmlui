@@ -92,9 +92,9 @@ window.__ModuleLoader__.load({
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
-      templates: { open: false, loaded: false, items: [], error: null },
+      templates: { open: false, loaded: false, items: [], error: null, dir: undefined, dirDefault: '', configured: false, asked: true, savingDir: false },
       /** The user's own create flow: what to start from, and where it should go. */
-      create: { open: false, source: 'blank', placement: 'dock-right', busy: false },
+      create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -641,7 +641,10 @@ window.__ModuleLoader__.load({
         creating: 'Creating…',
         createTitle: 'New HTML interface',
         createHint: 'Nothing here goes through the model; the interface is created in this session right away.',
-        createSource: 'Start from',
+        createSource: 'New HTML project',
+        createDirPlaceholder: 'Templates directory',
+        createDirSave: 'Use this directory',
+        createDirUnset: 'Reading the default directory. Point the box above at a folder of your own to use it instead.',
         createPlacement: 'Where',
         placementDockRight: 'Right column (a real split)',
         placementInline: 'In the conversation',
@@ -694,7 +697,10 @@ window.__ModuleLoader__.load({
         creating: '正在创建…',
         createTitle: '新建 HTML 界面',
         createHint: '整个过程不经过模型：界面会立刻在本会话里建好。',
-        createSource: '从什么开始',
+        createSource: '新建HTML项目',
+        createDirPlaceholder: '模板目录',
+        createDirSave: '使用这个目录',
+        createDirUnset: '当前读取默认目录；把上面的框指向你自己的文件夹即可改用它。',
         createPlacement: '生成位置',
         placementDockRight: '右侧栏（真正的左右分屏）',
         placementInline: '对话流内',
@@ -789,6 +795,12 @@ window.__ModuleLoader__.load({
         if (value !== null && value.ok === true && Array.isArray(value.templates)) {
           state.templates.items = value.templates;
           state.templates.error = null;
+          // The directory travels with the catalogue: the page shows where the list came
+          // from instead of leaving the reader to guess, and knows whether to ask.
+          state.templates.dir = typeof value.dir === 'string' && value.dir.length > 0 ? value.dir : undefined;
+          state.templates.dirDefault = typeof value.dirDefault === 'string' ? value.dirDefault : '';
+          state.templates.configured = value.configured === true;
+          state.templates.asked = value.asked === true;
         } else {
           state.templates.error = (value !== null && value.error) || 'unavailable';
         }
@@ -796,6 +808,44 @@ window.__ModuleLoader__.load({
         bump();
         return state.templates.items;
       });
+    }
+
+    /**
+     * Point the catalogue at a directory of the reader's own.
+     *
+     * The host validates the path — a typo would otherwise look exactly like a directory
+     * with no templates in it — and the catalogue is re-read straight away, so the list
+     * in front of the reader is the list that directory holds.
+     */
+    function saveTemplatesDir(dir) {
+      state.templates.savingDir = true;
+      bump();
+      return postJson('/templates/dir', { dir: typeof dir === 'string' ? dir : '' })
+        .then((value) => {
+          state.templates.savingDir = false;
+          if (value === null || value.ok !== true) {
+            state.templates.error = (value !== null && value.error) || 'failed';
+            bump();
+            return false;
+          }
+          state.templates.dir = typeof value.dir === 'string' && value.dir.length > 0 ? value.dir : undefined;
+          state.templates.configured = value.configured === true;
+          state.templates.error = null;
+          return loadTemplates().then(() => true);
+        })
+        .catch(() => {
+          state.templates.savingDir = false;
+          state.templates.error = 'failed';
+          bump();
+          return false;
+        });
+    }
+
+    /** Tell the host the question has been put, so it is asked once and not every load. */
+    function markTemplatesAsked() {
+      if (state.templates.asked === true) return Promise.resolve(false);
+      state.templates.asked = true;
+      return postJson('/templates/dir', { asked: true }).then(() => true, () => false);
     }
 
     function toggleTemplates() {
@@ -2425,7 +2475,56 @@ window.__ModuleLoader__.load({
             { style: { fontSize: '11.5px', opacity: 0.65, marginBottom: '10px' } },
             tr('createHint', 'Nothing here goes through the model; the interface is created in this session right away.'),
           ),
-          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createSource', 'Start from')),
+          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createSource', 'New HTML project')),
+          // Where the list comes from, read from the host on every open. The reader can
+          // point it at their own directory; an empty value restores the defaults.
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' } },
+            h('input', {
+              type: 'text',
+              value: state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '',
+              placeholder:
+                typeof state.templates.dirDefault === 'string' && state.templates.dirDefault.length > 0
+                  ? `${tr('createDirPlaceholder', 'Templates directory')} · ${state.templates.dirDefault}`
+                  : tr('createDirPlaceholder', 'Templates directory'),
+              onChange: (event) => {
+                state.templates.dirInput = event.target.value;
+                bump();
+              },
+              style: {
+                flex: '1 1 auto',
+                minWidth: '0',
+                font: 'inherit',
+                fontSize: '12px',
+                padding: '4px 8px',
+                borderRadius: '7px',
+                border: '1px solid var(--dsw-alias-border-l2, #ccc)',
+                background: 'var(--dsw-alias-bg-base, #fff)',
+                color: 'inherit',
+              },
+            }),
+            h(
+              'button',
+              {
+                type: 'button',
+                style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+                disabled: state.templates.savingDir === true,
+                onClick: () => {
+                  const value = state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '';
+                  saveTemplatesDir(value);
+                },
+              },
+              state.templates.savingDir === true ? tr('creating', 'Creating…') : tr('createDirSave', 'Use this directory'),
+            ),
+          ),
+          state.templates.dir === undefined
+            ? h(
+                'div',
+                { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } },
+                tr('createDirUnset', 'Reading the default directory. Point the box above at a folder of your own to use it instead.'),
+              )
+            : null,
           h(
             'div',
             { style: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '10px' } },
@@ -2642,6 +2741,26 @@ window.__ModuleLoader__.load({
      */
     function HtmlUiTemplateButton(props) {
       useStore();
+      // First activation asks where the templates live, once: the catalogue is a
+      // directory, and a reader who has one should not have to be told that a box
+      // somewhere can point at it.
+      useEffect(() => {
+        let live = true;
+        loadTemplates().then(
+          () => {
+            if (!live) return undefined;
+            if (state.templates.asked === true || state.create.open === true) return undefined;
+            state.create.open = true;
+            state.create.dirInput = undefined;
+            bump();
+            return markTemplatesAsked();
+          },
+          () => undefined,
+        );
+        return () => {
+          live = false;
+        };
+      }, []);
       return h(
         'button',
         {
@@ -2651,9 +2770,10 @@ window.__ModuleLoader__.load({
           onClick: () => {
             state.create.open = true;
             state.create.busy = false;
+            state.create.dirInput = undefined;
             bump();
             // The source list is the catalogue, so ask for it as the dialog opens.
-            if (state.templates.loaded !== true) loadTemplates();
+            loadTemplates();
           },
         },
         tr('templatesButton', '⟨+⟩ New HTML'),

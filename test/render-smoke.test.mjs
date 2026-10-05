@@ -410,13 +410,18 @@ test('the create dialog asks what to start from and where to put it', () => {
   assert.equal(__internals.HtmlUiCreateDialog({ sessionId: 'session-1' }), null);
   __internals.state.create.open = true;
   __internals.state.templates.loaded = true;
+  __internals.state.templates.dir = '/opt/html-templates';
   __internals.state.templates.items = [
     { slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 },
   ];
   const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-  for (const text of ['New HTML interface', 'Blank canvas', 'starter', 'Right column', 'Floating window', 'Fullscreen', 'Create', 'Cancel']) {
+  for (const text of ['New HTML interface', 'New HTML project', 'Blank canvas', 'starter', 'Right column', 'Floating window', 'Fullscreen', 'Create', 'Cancel', 'Use this directory']) {
     assert.ok(dialog.text.includes(text), `the dialog offers ${text}`);
   }
+  // The catalogue's directory is on screen and editable, not hidden in documentation.
+  const directory = dialog.elements.find((element) => element.props?.type === 'text');
+  assert.ok(directory !== undefined, 'a directory box is part of the dialog');
+  assert.equal(directory.props.value, '/opt/html-templates', 'showing the directory the catalogue came from');
   // The chosen place is the one the placement has to name.
   assert.equal(__internals.state.create.placement, 'dock-right');
   resetCreate();

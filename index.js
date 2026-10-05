@@ -383,6 +383,54 @@ function createStore(root) {
     return join(uiRoot, id);
   }
 
+  /** Where the reader keeps their own templates, if they have said so. */
+  function readSettings() {
+    const value = readJson(join(root, 'settings.json'), undefined);
+    if (value === null || typeof value !== 'object') return {};
+    return {
+      templatesDir: typeof value.templatesDir === 'string' && value.templatesDir.length > 0 ? value.templatesDir : undefined,
+      templatesAsked: value.templatesAsked === true,
+    };
+  }
+
+  function writeSettings(next) {
+    writeJsonAtomic(join(root, 'settings.json'), next);
+    return next;
+  }
+
+  /**
+   * Point the catalogue at a directory of the reader's own.
+   *
+   * Only an absolute path to a directory that exists is accepted: a typo would silently
+   * show an empty catalogue, which looks exactly like having no templates at all. An
+   * empty value clears the setting and returns to the defaults.
+   */
+  function setTemplatesDir(input) {
+    const raw = typeof input === 'string' ? input.trim() : '';
+    if (raw.length === 0) {
+      const settings = readSettings();
+      writeSettings(Object.assign({}, settings, { templatesDir: undefined, templatesAsked: true }));
+      return { ok: true, dir: undefined, configured: false };
+    }
+    if (!isAbsolute(raw)) return { ok: false, error: 'an absolute path is required' };
+    if (!existsSync(raw)) return { ok: false, error: `no such directory: ${raw}` };
+    try {
+      if (!statSync(raw).isDirectory()) return { ok: false, error: `not a directory: ${raw}` };
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+    const settings = readSettings();
+    writeSettings(Object.assign({}, settings, { templatesDir: raw, templatesAsked: true }));
+    return { ok: true, dir: raw, configured: true };
+  }
+
+  /** Remember that the reader has been asked, so the question is put once. */
+  function markTemplatesAsked() {
+    const settings = readSettings();
+    if (settings.templatesAsked === true) return;
+    writeSettings(Object.assign({}, settings, { templatesAsked: true }));
+  }
+
   function readUi(id) {
     const dir = uiPath(id);
     const meta = readJson(join(dir, 'meta.json'), undefined);
@@ -521,6 +569,10 @@ function createStore(root) {
         seen.add(match[1]);
       }
     };
+    // The reader's own directory comes first, so their templates win a name clash with
+    // the ones this plugin ships; then the store's templates; then the bundled ones.
+    const settings = readSettings();
+    if (settings.templatesDir !== undefined) collect(settings.templatesDir, false);
     collect(templateRoot, false);
     collect(bundledTemplateRoot, true);
     out.sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
@@ -559,6 +611,9 @@ function createStore(root) {
     writeTemplate,
     removeTemplate,
     listTemplates,
+    readSettings,
+    setTemplatesDir,
+    markTemplatesAsked,
     readState,
     writeState,
     uiPath,
@@ -1395,8 +1450,16 @@ export function apply(ctx, config) {
     readJsonBody(req, MAX_BODY_BYTES)
       .then(() => {
         const all = store.listTemplates();
+        const settings = store.readSettings();
         sendJson(res, 200, {
           ok: true,
+          // The catalogue is read from disk on every open, and the directory it reads is
+          // reported with it: the page shows the reader where their templates come from
+          // instead of leaving it to a document.
+          dir: settings.templatesDir,
+          dirDefault: store.templateRoot,
+          configured: settings.templatesDir !== undefined,
+          asked: settings.templatesAsked === true,
           count: all.length,
           templates: all.map((template) => ({
             slug: String(template.slug ?? ''),
@@ -1406,6 +1469,26 @@ export function apply(ctx, config) {
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
           })),
         });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
+  /** Point the catalogue at the reader's own directory, or clear it. */
+  function handleTemplatesDir(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        if (body.asked === true) {
+          store.markTemplatesAsked();
+          const settings = store.readSettings();
+          sendJson(res, 200, { ok: true, dir: settings.templatesDir, configured: settings.templatesDir !== undefined });
+          return;
+        }
+        const result = store.setTemplatesDir(typeof body.dir === 'string' ? body.dir : '');
+        if (result.ok !== true) {
+          sendJson(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        sendJson(res, 200, { ok: true, dir: result.dir, configured: result.configured, count: store.listTemplates().length });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
@@ -1754,6 +1837,10 @@ export function apply(ctx, config) {
       if (path === `${ROUTE_PREFIX}/templates/render`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTemplateRender(req, res);
+      }
+      if (path === `${ROUTE_PREFIX}/templates/dir`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplatesDir(req, res);
       }
       if (path === `${ROUTE_PREFIX}/ui/ticket`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
