@@ -1317,6 +1317,9 @@ export function apply(ctx, config) {
       sessionId: value.sessionId,
       title: value.title ?? '',
       placement: value.placement ?? 'inline',
+      // The project an interface was created from: the session page shows it beside the
+      // title, so a reader can tell two interfaces of the same project apart.
+      template: value.template ?? '',
       size: value.size ?? '',
       url: value.url,
       revision: value.revision ?? 1,

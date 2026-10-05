@@ -602,6 +602,9 @@ window.__ModuleLoader__.load({
         title: typeof meta.title === 'string' ? meta.title : '',
         placement: typeof meta.placement === 'string' && meta.placement.length > 0 ? meta.placement : 'inline',
         sizeText: typeof meta.size === 'string' ? meta.size : '',
+        // Which project this interface came from; the session page shows it in
+        // parentheses beside the title.
+        template: typeof meta.template === 'string' && meta.template.length > 0 ? meta.template : undefined,
         url: typeof meta.url === 'string' ? meta.url : undefined,
         revision: Number.isFinite(meta.revision) ? meta.revision : 1,
         bytes: Number.isFinite(meta.bytes) ? meta.bytes : 0,
@@ -1734,7 +1737,13 @@ window.__ModuleLoader__.load({
               borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
             },
           },
-          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) }, record.title.length > 0 ? record.title : record.uiId),
+          h(
+            'span',
+            { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) },
+            // 计算器(jsq): the title a reader recognises, then the project it came from, so
+            // two interfaces built from the same project are told apart at a glance.
+            `${record.title.length > 0 ? record.title : record.uiId}${record.template !== undefined ? `(${record.template})` : ''}`,
+          ),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}${record.sizeText !== undefined && record.sizeText.length > 0 ? ` · ${record.sizeText}` : ''}`),
           h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),

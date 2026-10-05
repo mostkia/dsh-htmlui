@@ -403,6 +403,25 @@ test('the tool card points at the tail instead of drawing a second copy', () => 
   assert.ok(!card.text.includes('Preparing interface'), 'it does not draw the document as well');
 });
 
+test('the session page names each interface with the project it came from', () => {
+  // 计算器(calculator): the title a reader recognises, then the project, so two
+  // interfaces built from the same project are told apart at a glance.
+  resetStore([
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-cc550001', sessionId: 'session-1', title: '计算器', placement: 'float', template: 'calculator', revision: 1, bytes: 5 },
+      undefined,
+    ),
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-cc550002', sessionId: 'session-1', title: '手写', placement: 'inline', revision: 1, bytes: 5 },
+      undefined,
+    ),
+  ]);
+  const page = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.ok(page.text.includes('计算器(calculator)'), 'the project id rides along with the title');
+  assert.ok(page.text.includes('手写') && !page.text.includes('手写('), 'an interface with no project stays plain');
+  resetStore();
+});
+
 test('the session page carries its own way to start a project', () => {
   // The composer control is small and easy to miss; the page the reader is already on
   // offers the same flow in words.
