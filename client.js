@@ -661,6 +661,7 @@ window.__ModuleLoader__.load({
         adoptName: 'Display name',
         adoptDescription: 'Description',
         adoptPlacement: 'Where it opens',
+        adoptHint: 'Nothing is written yet: fill this in and the project is created with it.',
         adoptConfirm: 'Write the manifest',
         adopted: 'It is a project now.',
         createPlacement: 'Where',
@@ -735,6 +736,7 @@ window.__ModuleLoader__.load({
         adoptName: '显示名称',
         adoptDescription: '描述',
         adoptPlacement: '默认生成位置',
+        adoptHint: '此时还没有写入任何东西：填完后点下面的按钮，才会带着这些信息创建项目。',
         adoptConfirm: '写入清单',
         adopted: '已成为项目。',
         createPlacement: '生成位置',
@@ -2753,7 +2755,15 @@ window.__ModuleLoader__.load({
                           background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))',
                         },
                       },
-                      h('div', { style: { fontSize: '12px', fontWeight: 600, marginBottom: '6px' } }, `${tr('adoptTitle', 'Project details for')} ${state.adopt.source}`),
+                      h('div', { style: { fontSize: '12px', fontWeight: 600, marginBottom: '2px' } }, `${tr('adoptTitle', 'Project details for')} ${state.adopt.source}`),
+                      // The reader's own instruction: nothing is written before they say
+                      // so. The files are not touched, no manifest exists yet, and the
+                      // project only comes into being on the confirm button below.
+                      h(
+                        'div',
+                        { style: { fontSize: '11px', opacity: 0.7, marginBottom: '6px' } },
+                        tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
+                      ),
                       ...[
                         { key: 'slug', label: tr('adoptSlug', 'Project id (used by template=)'), hint: 'lowercase letters, digits, dot, dash, underscore' },
                         { key: 'name', label: tr('adoptName', 'Display name'), hint: '' },
