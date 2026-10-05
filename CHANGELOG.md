@@ -50,6 +50,14 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- `test/doc-contract.test.mjs`: the three audiences of this plugin's interface —
+  the model (SKILL.md and the prompt contract), the user (both READMEs), and
+  every authored document (the bridge API) — are checked against the code, so a
+  placement, an operation, or a bridge member can no longer drift out of the
+  documentation that teaches it.
+- The template shipped with the package is covered: it lists, reports its real
+  size, renders with substituted variables, and arrives with the bridge injected
+  and no placeholder left behind.
 - `test/package.test.mjs`: the release checks are now automated — the manifest
   the loader and the marketplace read, the files the package promises, the
   entries the loader resolves by itself, the two import rules, the version stated

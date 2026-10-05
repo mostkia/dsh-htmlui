@@ -33,6 +33,9 @@ jobs:
       - name: Package integrity
         run: node test/package.test.mjs
 
+      - name: Documentation contract
+        run: node test/doc-contract.test.mjs
+
       - name: Host half
         run: node test/host-half.test.mjs
 

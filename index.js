@@ -1163,6 +1163,7 @@ export function apply(ctx, config) {
             ok: true,
             op,
             name: slug,
+            // The file is the truth; a stored byte count is only a cache.
             bytes: byteLength(template.source),
             summary: String(template.meta.description ?? '').slice(0, 400),
           };

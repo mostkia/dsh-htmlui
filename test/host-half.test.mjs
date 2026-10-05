@@ -715,6 +715,38 @@ test('a capability token never reaches a durable projection', async () => {
   assert.equal(framed.status, 200);
 });
 
+test('the template shipped with the package renders like any other', async () => {
+  // Nothing named "starter" exists in this scratch store, so this exercises the
+  // packaged fallback that a fresh install renders from.
+  const listed = await tool('html_ui_template').execute({ op: 'list' }, exec());
+  assert.ok(listed.summary.includes('starter'), 'the packaged template is listed');
+  const shown = await tool('html_ui_template').execute({ op: 'show', name: 'starter' }, exec());
+  assert.equal(shown.ok, true);
+  assert.ok(shown.bytes > 0, 'the reported size comes from the file, not a cache');
+  assert.match(shown.summary, /panel/u);
+
+  const rendered = await tool('html_ui').execute(
+    { op: 'render', template: 'starter', variables: { title: '自检面板' }, title: 'Starter' },
+    exec('session-starter'),
+  );
+  assert.equal(rendered.ok, true);
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: rendered.uiId }),
+  });
+  const framed = await callRoute(route(), { url: JSON.parse(entry.text).url, headers: { host: '127.0.0.1:3080' } });
+  assert.ok(framed.text.includes('自检面板'), 'the variables are substituted');
+  assert.ok(!framed.text.includes('{{title}}'), 'no placeholder is left behind');
+  assert.ok(framed.text.includes('/assets/bridge.js'), 'the bridge is injected into it');
+  assert.ok(framed.text.includes('dshHTML.send'), 'and the packaged template uses the bridge');
+
+  const onDisk = readFileSync(join(process.env.DSH_HTMLUI_ROOT, 'ui', rendered.uiId, 'index.html'), 'utf8');
+  assert.ok(onDisk.includes('自检面板'));
+  assert.ok(!onDisk.includes('bridge.js'), 'injection stays at serve time');
+});
+
 test('every presentation projection stays lossless JSON', async () => {
   // The registry rejects a projection carrying `undefined`, including a bare
   // `undefined` return, so this guards the fix for that failure.
