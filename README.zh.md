@@ -121,7 +121,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
         allowedOrigins: []    # 额外信任的浏览器来源（见「安全」）
 ```
 
-运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`templates/<name>/`（托管模板）或 `templates/<name>.html`（手写模板）、`state/<session>.json`，以及用于能力令牌的 `secret`。随时手动删除某个 `ui/<id>/` 目录都是安全的：记录没了，该界面就会从会话里消失。（会话已不存在的记录会被保留而不会被自动回收，免得界面因为会话被归档而莫名消失。）
+运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`state/<session>.json`，以及用于能力令牌的 `secret`；模板则在你自己指定的**模板目录**里：`<模板目录>/<name>/`（带清单的项目）或 `<模板目录>/<name>.html`（手写单文件）。随时手动删除某个 `ui/<id>/` 目录都是安全的：记录没了，该界面就会从会话里消失。（会话已不存在的记录会被保留而不会被自动回收，免得界面因为会话被归档而莫名消失。）
 
 ## 模板
 
@@ -130,16 +130,16 @@ html_ui_template { "op": "save", "name": "orders-dashboard", "ui_id": "ui-1a2b3c
 html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title": "本周订单" } }
 ```
 
-`{{token}}` 占位符由 `variables` 替换。模板跨会话存活；包内自带 `templates/starter` 作为可直接读的示例。
+`{{token}}` 占位符由 `variables` 替换。模板跨会话存活。
 
-**手写的文档也是模板**：把 `my-panel.html` 直接丢进 `<root>/templates/`，就能用 `template: "my-panel"` 调用，不用写任何清单文件。同名托管模板存在时优先，删掉它又会露出那个手写文件。
+**手写的文档也是模板**：把 `my-panel.html` 直接丢进**模板目录**，就能用 `template: "my-panel"` 调用，不用写任何清单文件。同名托管模板存在时优先，删掉它又会露出那个手写文件。
 
-输入框旁还挂着一个**模板抽屉**（`⟨/⟩ 模板` 按钮）：列出模板目录、**一键套用**到当前会话（完全不经过模型），也可以选「交给模型」。这样产生的界面就是普通记录——模型能在 `html_ui op=list` 里看到它，也能更新或关闭它。
+输入框旁还挂着一个**模板抽屉**（`⟨+⟩ 新建 HTML` 按钮）：列出模板目录、**一键套用**到当前会话（完全不经过模型），也可以选「交给模型」。这样产生的界面就是普通记录——模型能在 `html_ui op=list` 里看到它，也能更新或关闭它。
 
 ## 开发
 
 ```sh
-npm test        # 133 项断言：包完整性 12 + 文档契约 10 + 宿主 35 + 浏览器 33 + 桥 9 + 浅渲染 17 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm test        # 155 项断言：包完整性 13 + 文档契约 10 + 宿主 40 + 浏览器 38 + 桥 10 + 浅渲染 27 + 对抗输入 10 + 打包产物 2 + harness schema 5
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 
