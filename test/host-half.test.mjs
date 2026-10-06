@@ -621,10 +621,18 @@ test('slot rows hold bulk data that never travels inside the document', async ()
   assert.equal(removed.removed, true);
   assert.equal(JSON.parse((await store({ store: 'rows', rows: 'remove', name: 'notepad.rows', key: 'n2' })).text).removed, false, 'removal is idempotent');
 
+  // The health probe names which layers a slot actually has: rows alone first, both once a value
+  // is written beside them.
+  const healthOf = async () => JSON.parse((await callRoute(route(), { url: '/plugins/@mostkia/dsh-htmlui/health' })).text);
+  const rowOnly = (await healthOf()).slots.find((slot) => slot.name === 'notepad.rows');
+  assert.equal(rowOnly.kind, 'rows', `a slot with rows and no value reports itself as rows (${JSON.stringify(rowOnly)})`);
+  assert.equal(rowOnly.rows, 2, 'the count follows the deletes above');
+
   // The two layers of one name are independent, and the value layer still works beside rows.
   const value = await store({ store: 'set', name: 'notepad.rows', value: { activeId: 'n1' } });
   assert.equal(JSON.parse(value.text).ok, true);
   assert.equal(JSON.parse((await store({ store: 'rows', rows: 'get', name: 'notepad.rows', key: 'n3' })).text).row.value, '插槽容量上限的讨论');
+  assert.equal((await healthOf()).slots.find((slot) => slot.name === 'notepad.rows').kind, 'both', 'and both once a value is written too');
   const reread = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}?t=${capability}` });
   assert.ok(reread.text.includes('"activeId":"n1"'), 'the value layer is still inlined');
 

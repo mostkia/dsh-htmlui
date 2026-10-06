@@ -107,6 +107,9 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- `/health` reports a slot's kind from the files that exist. The layers were merged into one entry
+  in directory-read order, so a slot whose value layer had been deleted still called itself `both`
+  instead of `rows`; the probe now decides from presence, not order.
 - `css` and `js` are merged whatever the source, and a dropped argument is reported. Both were
   only merged for `html` and `path`, so a `template` render silently ignored them: the caller saw
   `status=ok`, assumed its script was in the document, and spent turns on why nothing ran. The

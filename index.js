@@ -952,11 +952,14 @@ function createStore(root) {
       if (name === undefined || !SLOT_NAME_RE.test(name)) continue;
       const rows = entry.name.endsWith('.db');
       const slot = rows ? undefined : readSlot(name);
-      const entryFor = byName.get(name) ?? { name, kind: 'value', bytes: 0, rows: undefined, updatedAt: 0 };
+      // Which layers exist is decided by the files present, not by the order they were read in: a
+      // slot whose value layer was deleted is a `rows` slot, not a `both` one.
+      const entryFor = byName.get(name) ?? { name, hasValue: false, hasRows: false, bytes: 0, rows: undefined, updatedAt: 0 };
       if (rows) {
-        entryFor.kind = entryFor.kind === 'value' ? 'both' : 'rows';
+        entryFor.hasRows = true;
         entryFor.updatedAt = Math.max(entryFor.updatedAt, statSync(join(storeRoot, entry.name)).mtimeMs);
       } else {
+        entryFor.hasValue = true;
         entryFor.valueBytes = slot === undefined ? 0 : slot.bytes;
         entryFor.updatedAt = Math.max(entryFor.updatedAt, slot === undefined ? 0 : slot.updatedAt ?? 0);
       }
@@ -964,8 +967,11 @@ function createStore(root) {
     }
     const out = [...byName.values()];
     for (const entry of out) {
+      entry.kind = entry.hasValue && entry.hasRows ? 'both' : entry.hasRows ? 'rows' : 'value';
       entry.bytes = (entry.valueBytes ?? 0) + rowsBytes(entry.name);
       delete entry.valueBytes;
+      delete entry.hasValue;
+      delete entry.hasRows;
       entry.rows = rowsCount(entry.name);
     }
     out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
