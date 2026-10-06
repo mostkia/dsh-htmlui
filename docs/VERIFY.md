@@ -50,7 +50,7 @@ Attach one of each and confirm it appears where its placement promises:
 
 | Placement | What to look for |
 |---|---|
-| `inline` | The document renders at the end of the turn that attached it, seamlessly: no chrome, no border, no background, height taken from the document (680×383 measured). It scrolls only past the height cap |
+| `inline` | The document renders at the end of the turn that attached it, seamlessly: no chrome, no border, no background, height taken from the document (680×383 measured). It scrolls only past the height cap. A template applied from the drawer was attached by no call, so it lands at the end of the last turn that had *closed* when it was applied — and, like a tool-created one, it stays there |
 | `dock-right` | The session's right column opens a tab hosting it (851×830 measured): no title row of its own, and **each object keeps a faint ▾ collapse and ✕ close** in the corner — the column can hold several independent surfaces, so one of them being in the way must not close the tab for all of them. Closing the tab itself retires the session's right-column interfaces (after a delay that a mere column hide or session switch survives), so the session page cannot list surfaces nothing can show. The tab is registered only while something needs it: with no `dock-right` record the column holds **no HTML UI page at all**. While that column cannot open a tab (no controller bound) it falls back to the wide dock above the composer, never to both |
 | `float` | A window that drags by its **title text** and resizes from the corner (arrows work on the focused handle); `size` sets where it starts. The ✕ closes it for good: the record leaves the host store |
 | `fullscreen` | The surface covers the **conversation column**, not the frame: the left sidebar keeps its width and stays usable (measured from our own seat inside the column, so no other plugin's DOM is read). "Back to chat" gives the chat back while **keeping** the record; ✕ deletes it |
@@ -70,6 +70,37 @@ Two constraints of the host layout, worth knowing before judging a failure:
 - The measurement to expect from a document is its own `innerWidth`/`innerHeight`.
   A first reading of `0×0` with `visibility: hidden` happens while a seat is still
   activating; the next reading settles. Do not judge a seat on one sample.
+- **A window survives a Session switch.** Put something into a `float` (type into it,
+  or scroll its document), switch to another Session, and switch back: the window is
+  still there with its state, and its document never reloaded. `background` and
+  `fullscreen` behave the same, and so does an `inline` document. The console names
+  the mechanism — with `DEBUG_FRAMES` on, the session being left must log **no**
+  `frame unmounted` for it.
+- **An inline document is hosted, and you can see it.** It is drawn from the frame-wide
+  layer and clipped to the transcript's own viewport, while the transcript keeps a seat
+  of exactly its height (the seat carries `data-htmlui-inline-seat`, the host
+  `data-htmlui-inline-host`). So, in a session holding one: scroll the transcript and the
+  document stays glued to its place instead of floating over the composer; scroll its turn
+  out of the virtualized window and it stops being painted (the document keeps running —
+  nothing is unmounted); switch Session and come back, and it is there with whatever state
+  it held. The seat reserves the room the document asks for, so the conversation around it
+  does not move when it loads.
+- **The wheel still works through an inline document.** With the pointer over a document that
+  has nothing to scroll, the wheel scrolls the conversation as before; with the pointer over a
+  document that *can* scroll (or one of its inner lists), the document keeps the wheel and the
+  conversation does not move. Past the end of either one the delta carries on, which is the
+  chain the frame had when it was a child of the transcript. The bridge forwards only what the
+  document could not use, and the host applies it to the transcript.
+- **The document never paints over the input box.** The composer is drawn *over* the
+  transcript, so the band a hosted document is clipped to ends where the composer begins:
+  scroll a session with an inline document to its very bottom — the document is cut off at the
+  input box and the input box stays fully usable.
+- **The height convention still holds.** A document taller than the cap (560 px) is drawn at the
+  cap and scrolls *inside its own frame*; an ordinary one is drawn at whatever it measured; a
+  very short one keeps a 60 px floor; and a document that reports nothing — everything in it is
+  `position: absolute`/`fixed`, so it has no measurable height — gets the 220 px default box.
+  The seat in the transcript reserves exactly the height the frame draws, because one function
+  answers for both, so the conversation around it never shifts when the document loads.
 
 ## 3. The template drawer
 
@@ -82,6 +113,14 @@ The composer carries a `⟨/⟩ 模板` control. Open it and check:
   new id.
 - **交给模型** fills the composer draft with an instruction instead of sending it.
 - With the drawer closed, nothing extra occupies the composer.
+- **The applied surface stays put.** Start a turn, then 套用 a template while the
+  answer is still streaming: it appears at once, in the transcript where the
+  conversation stood — and the answer *finishing* must not add a copy of it at the
+  bottom. Talk to the model two or three more times: the surface stays exactly
+  where it is and scrolls up with the transcript, and its document is never
+  reloaded (console: one `frame mount` for that id, no later unmount/remount).
+  This is the regression the "newest tail" election caused: an extra copy at the
+  end of every answer.
 
 ## 4. The round trip
 

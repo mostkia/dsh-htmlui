@@ -44,7 +44,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.1';
+const PLUGIN_VERSION = '0.1.0';
 
 /**
  * Placements this plugin offers.
@@ -501,11 +501,6 @@ function createStore(root) {
     return out;
   }
 
-  function templatePath(slug) {
-    if (!TEMPLATE_SLUG_RE.test(String(slug ?? ''))) throw new Error(`invalid template name: ${slug}`);
-    return join(templateRoot, slug);
-  }
-
   /**
    * The blank canvas: a project with nothing in it yet.
    *
@@ -624,18 +619,6 @@ function createStore(root) {
       documentPath,
       source: readFileSync(documentPath, 'utf8'),
     };
-  }
-
-  /** Read one template shipped inside the package (read-only fallback). */
-  function readBundledTemplate(slug) {
-    if (!TEMPLATE_SLUG_RE.test(String(slug ?? ''))) return undefined;
-    const dir = join(bundledTemplateRoot, slug);
-    const meta = readJson(join(dir, 'meta.json'), undefined);
-    const documentPath = join(dir, 'index.html');
-    if (meta !== undefined && existsSync(documentPath)) {
-      return { meta: { ...meta, bundled: true }, documentPath, source: readFileSync(documentPath, 'utf8') };
-    }
-    return readBareTemplate(bundledTemplateRoot, slug);
   }
 
   /**
@@ -849,7 +832,6 @@ function createStore(root) {
   return {
     root,
     uiRoot,
-    templateRoot,
     stateRoot,
     secret,
     readUi,

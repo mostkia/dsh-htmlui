@@ -45,7 +45,13 @@ attributed to the wrong surface.
 | `float` | `520×343, visible` for a requested `520x380+140+140` (343 = 380 minus its chrome); its ✕ drops the record from the host (`/ui/list` count 1 → 0) | works |
 | `fullscreen` | `1920×882, visible`; "Back to chat" leaves the layer and keeps the record (host count stays 1); ✕ deletes it | works |
 | `background` | `1920×919, visible` — the whole frame, because this layer has no chrome | works |
-| `inline` | `680×383, visible`, rendered in the newest turn's tail | works |
+| `inline` | `680×383, visible`, rendered at the end of a turn | works |
+
+The `inline` seat moved after this sweep. It rendered in whichever turn was newest, so an
+interface applied while an answer streamed was redrawn — and its document reloaded — at
+the bottom of the conversation as soon as that answer, and every later one, finished. It
+now renders in the turn that owns it and stays there as the conversation grows;
+[VERIFY.md](VERIFY.md) carries the check for it.
 
 Sizes depend on the window; the pairs are what matter. `dock-top`/`panel` were the
 same seat (1633 px wide here) and `dock-bottom` was a different and narrower one

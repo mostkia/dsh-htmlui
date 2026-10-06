@@ -115,9 +115,11 @@ test('the host half carries no runtime harness import', () => {
 
 test('the version is stated the same way everywhere it is stated', () => {
   assert.match(read('index.js'), new RegExp(`PLUGIN_VERSION = '${pkg.version}'`, 'u'));
-  // The packaged version, optionally followed by the build tag the create dialog shows
-  // (the source states it through its own constant, so both spellings are accepted).
-  assert.match(read('client.js'), new RegExp(`client active \\(${pkg.version.replace(/\./gu, '\\.')}(?: · (?:[a-z0-9-]+|\\$\\{[A-Z_]+\\}))?\\)`, 'u'));
+  // The client states it through its own constant, which the activation line and the create
+  // dialog both read — so the two can never drift apart, and this is what holds the constant to
+  // the manifest.
+  assert.match(read('client.js'), new RegExp(`const CLIENT_VERSION = '${pkg.version.replace(/\./gu, '\\.')}'`, 'u'));
+  assert.match(read('client.js'), /client active \(\$\{CLIENT_VERSION\}\)/u);
   const headings = [...read('CHANGELOG.md').matchAll(/^## (\d+\.\d+\.\d+)/gmu)].map((match) => match[1]);
   assert.equal(headings[0], pkg.version, 'the newest changelog heading must be the packaged version');
 });

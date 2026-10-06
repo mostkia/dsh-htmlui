@@ -150,6 +150,11 @@ function resetStore(records = []) {
   state.fullscreenDismissed.clear();
   state.rightPane.available = false;
   state.rightPane.controller = undefined;
+  // Inline hosting is per page, not per record: a reset has to forget it too, or one suite's
+  // hosted document would appear in the next one's overlay.
+  state.inlineHosted.clear();
+  state.inlineSeats.clear();
+  state.inlineHeights.clear();
   resetCreate();
   for (const entry of records) __internals.publish(entry);
 }
@@ -183,6 +188,19 @@ test('an inline frame is seamless: no chrome, no border, content-sized', () => {
     initialSize: { h: 180 },
   });
   assert.match(measured.text, /Preparing interface/u);
+  // The height convention, unchanged by hosting: a document taller than the cap scrolls inside
+  // its own frame instead of swallowing the conversation, a very short one keeps a floor, and a
+  // document that reports nothing — everything in it positioned, so it has no measurable height
+  // — gets a sensible box. The seat and the frame ask one function for this number, so the room
+  // the transcript reserves and the room the document is drawn in can never disagree.
+  const boxHeight = (initialSize) =>
+    render(__internals.HtmlUiFrame, { record: recordFor('inline', { sizeText: '' }), theme: 'light', variant: 'inline', initialSize }).elements[0]
+      .props.style.height;
+  assert.equal(boxHeight({ h: 4000 }), '560px', 'a very long document is capped, so it scrolls itself');
+  assert.equal(boxHeight({ h: 12 }), '60px', 'a very short one keeps a floor');
+  assert.equal(boxHeight(undefined), '220px', 'a document that reports nothing gets the default box');
+  assert.equal(boxHeight({ h: 300 }), '300px', 'and an ordinary one is taken as it measures');
+  assert.equal(__internals.inlineHeightOf(4000), 560, 'the seat reserves exactly what the frame draws');
 });
 
 test('a failing surface reports itself instead of rendering nothing', () => {
@@ -382,43 +400,252 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   const surfaces = both.elements.filter((element) => element.props?.['aria-modal'] === 'true');
   assert.equal(surfaces.length, 2, 'both fullscreen surfaces stay in the tree');
   assert.equal(surfaces.filter((surface) => surface.props.style.display === 'none').length, 1, 'and the inactive one is hidden, not removed');
+
+  // A Session switch swaps the *visibility* of the overlay groups and nothing else: every
+  // session keeps its frames mounted while another is on screen, so a float or fullscreen
+  // layer comes back exactly as it was instead of being reloaded from scratch. Unmounting them
+  // with the session they belonged to is what lost their documents' state on every switch.
+  const floatOf = (uiId, sessionId) =>
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId, sessionId, title: uiId, placement: 'float', revision: 1, bytes: 5 }, undefined);
+  resetStore([floatOf('ui-77770001', 'viewed'), floatOf('ui-77770002', 'other')]);
+  const ctxOther = { sessions: { list: { getSnapshot: () => ({ current: 'other', byId: {} }), subscribe: () => () => {} } } };
+  const drawn = (other) => {
+    const tree = render(__internals.HtmlUiOverlay, { ctx: other ? ctxOther : ctx });
+    return {
+      frames: tree.elements.filter((element) => element.type === __internals.HtmlUiFrame).map((element) => element.props.record.uiId),
+      group: (owner) => tree.elements.find((element) => element.props?.['data-htmlui-overlay'] === owner),
+    };
+  };
+  const here = drawn(false);
+  assert.deepEqual([...here.frames].sort(), ['ui-77770001', 'ui-77770002'], 'both sessions keep their frames while one is viewed');
+  assert.equal(here.group('viewed').props.style.display, 'contents', 'the viewed session is shown');
+  assert.equal(here.group('other').props.style.display, 'none', 'the other one is only hidden');
+  const there = drawn(true);
+  assert.deepEqual([...there.frames].sort(), ['ui-77770001', 'ui-77770002'], 'and the switch mounts nothing and drops nothing');
+  assert.equal(there.group('viewed').props.style.display, 'none', 'the session left behind is hidden');
+  assert.equal(there.group('other').props.style.display, 'contents', 'and the one entered is shown');
+  resetStore();
 });
 
-test('an inline interface renders in the newest turn tail, and only there', () => {
-  // A turn tail renders once per turn, so rendering inline interfaces in every tail
-  // would stack a copy per turn; rendering them in the tail that created them would
-  // need the record to carry its turn. The newest tail is the one seat that needs
-  // neither, and it is where "the current interfaces" belong.
-  const inline = __internals.recordFromMeta(
-    { htmlui: true, op: 'render', uiId: 'ui-bb660001', sessionId: 'session-tail', title: 'T', placement: 'inline', revision: 1, bytes: 5 },
-    undefined,
-  );
-  resetStore([inline]);
-  __internals.state.tailSeq.clear();
-  // The newest tail is learned by rendering: the first tail claims the slot, and a
-  // later tail takes it over.
-  const older = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 10 });
-  assert.match(older.text, /Preparing interface/u, 'the first tail seen renders the interface');
-  const newer = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 40 });
-  assert.match(newer.text, /Preparing interface/u, 'a newer turn takes the interface over');
-  const olderAgain = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 10 });
-  assert.equal(olderAgain.text, '', 'and the older turn stops drawing it');
-  // Without a session or a sequence there is nothing to decide.
+/**
+ * One Tool row as the Chat snapshot materializes it: a `tool-call` Node whose `data.root` is
+ * the tool block. The block that carries the host's answer is the `tool-result`, and the
+ * presentation meta rides on it — which is where the tail reads the interface from.
+ */
+const toolRow = (meta, turn) => ({
+  kind: 'tool-call',
+  location: { kind: 'turn', turn: { turn } },
+  data: { root: { kind: 'tool-result', meta, subCalls: [] } },
+});
+
+/**
+ * A Chat-snapshot stand-in for the tail's selectors: the ordered node keys, those nodes, and
+ * the Turn windows (`[turn, startTime, endTime]`, the end omitted while a turn is open).
+ */
+function chatSnapshot({ windows, rows = {} }) {
+  const entries = new Map(Object.entries(rows));
+  const turns = new Map();
+  for (const [turn, start, end] of windows) {
+    turns.set(turn, {
+      turn,
+      start: { seq: 0, time: start },
+      ...(end === undefined ? {} : { end: { seq: 0, time: end } }),
+    });
+  }
+  return {
+    order: [...entries.keys()],
+    nodes: { get: (key) => entries.get(key) },
+    timeline: { turnOrder: windows.map(([turn]) => turn), turns },
+  };
+}
+
+const useChatOf = (snapshot) => (selector) => selector(snapshot);
+
+/** The inline seats a tree holds: the transcript's placeholders, in order. */
+const seatsOf = (tree) =>
+  tree.elements
+    .filter((element) => element.props?.['data-htmlui-inline-seat'] !== undefined)
+    .map((element) => element.props['data-htmlui-inline-seat']);
+
+test('an inline interface is seated in the turn that made it, and only there', () => {
+  // An interface belongs to the turn whose tool call made it: that turn's own chat nodes name
+  // it, so its tail — and only its tail — holds its seat. Nothing is elected while rendering:
+  // re-deciding mid-flight is what tore an interface out of one tail and rebuilt it in another.
+  // The seat is a placeholder, not the document: the document itself is hosted by the overlay
+  // (see the hosting test below), so a rebuilt transcript cannot destroy it.
+  resetStore([
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-bb660001', sessionId: 'session-tail', title: 'T', placement: 'inline', revision: 1, bytes: 5 },
+      undefined,
+    ),
+  ]);
+  const snapshot = chatSnapshot({
+    windows: [
+      [7, 100, 200],
+      [8, 300, 400],
+      [9, 600, undefined],
+    ],
+    rows: {
+      // The call that made it.
+      k1: toolRow({ htmlui: true, op: 'render', uiId: 'ui-bb660001', sessionId: 'session-tail' }, 7),
+      // A later call that merely *mentions* it — listing a session's interfaces, updating it —
+      // must not claim it: claiming it is what made the turn that ended draw a copy of
+      // somebody else's interface.
+      k2: toolRow({ htmlui: true, op: 'list', uiId: 'ui-bb660001', sessionId: 'session-tail' }, 8),
+      k3: toolRow({ htmlui: true, op: 'update', uiId: 'ui-bb660001', sessionId: 'session-tail' }, 9),
+    },
+  });
+  const useChat = useChatOf(snapshot);
+  const owner = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 40, turn: { turn: 7 }, useChat });
+  assert.deepEqual(seatsOf(owner), ['ui-bb660001'], 'the turn that made the interface holds its seat');
+  for (const turn of [8, 9]) {
+    const stranger = render(__internals.HtmlUiInlineTail, { sessionId: 'session-tail', seq: 41 + turn, turn: { turn }, useChat });
+    assert.deepEqual(seatsOf(stranger), [], `a turn that only mentions it holds no seat (turn ${turn})`);
+  }
+  // Without a session, a sequence, or the turn this tail closes there is nothing to decide.
   assert.equal(__internals.HtmlUiInlineTail({ sessionId: 'session-tail' }), null);
   assert.equal(__internals.HtmlUiInlineTail({ seq: 40 }), null);
-  // A session with no inline interface draws nothing even in its newest tail.
-  __internals.state.tailSeq.clear();
-  assert.equal(render(__internals.HtmlUiInlineTail, { sessionId: 'session-other', seq: 1 }).text, '');
+  // A session holding no inline interface holds no seat.
+  assert.deepEqual(seatsOf(render(__internals.HtmlUiInlineTail, { sessionId: 'session-other', seq: 1, turn: { turn: 7 }, useChat })), []);
 });
 
-test('the tool card points at the tail instead of drawing a second copy', () => {
-  const block = {
-    meta: { htmlui: true, op: 'render', uiId: 'ui-bb660002', sessionId: 'session-tail', title: 'Card', placement: 'inline', revision: 1, bytes: 5 },
+test('an inline document is hosted by the overlay, and its seat holds the space', () => {
+  // The document is drawn from the frame-wide overlay, never from the transcript: the transcript
+  // is rebuilt whenever the reader switches Session — or a turn scrolls out of the virtualized
+  // window — and a frame inside it would be destroyed by that rebuild, losing its state. The
+  // seat in the transcript only reserves the room the document takes, and says where it goes.
+  resetStore([
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-99000001', sessionId: 'viewed', title: 'Inline', placement: 'inline', revision: 1, bytes: 5 },
+      undefined,
+    ),
+  ]);
+  const record = state.byId.get('ui-99000001');
+  const ctxFor = (current) => ({ sessions: { list: { getSnapshot: () => ({ current, byId: {} }), subscribe: () => () => {} } } });
+  const hosted = (tree) => tree.elements.filter((element) => element.props?.['data-htmlui-inline-host'] !== undefined);
+
+  // A page load must not build the document of every old turn: hosting starts when a seat has
+  // actually been on screen.
+  assert.equal(hosted(render(__internals.HtmlUiOverlay, { ctx: ctxFor('viewed') })).length, 0, 'nothing is hosted before its seat appears');
+
+  __internals.claimInlineSeat('ui-99000001', { isConnected: true, parentElement: null });
+  assert.equal(state.inlineHosted.has('ui-99000001'), true, 'the first seat is what starts hosting');
+  const here = render(__internals.HtmlUiOverlay, { ctx: ctxFor('viewed') });
+  assert.equal(hosted(here).length, 1, 'the overlay hosts the document');
+  assert.equal(here.elements.filter((element) => element.type === __internals.HtmlUiFrame).length, 1, 'with the frame inside it');
+
+  // The height the document asks for is what the seat reserves, and the bounds are shared with
+  // the frame, so the two can never disagree about how much room the interface takes.
+  state.inlineHeights.set('ui-99000001', 321);
+  assert.equal(render(__internals.InlineSeat, { record }).elements[0].props.style.height, '321px', 'the seat holds the document height');
+  assert.equal(__internals.inlineHeightOf(undefined), 220, 'an unmeasured document gets the fallback');
+  assert.equal(__internals.inlineHeightOf(10), 60, 'a tiny one keeps a floor');
+  assert.equal(__internals.inlineHeightOf(4000), 560, 'and a very long one is capped');
+
+  // Switching Session hides the group; it does not unmount the document.
+  const away = render(__internals.HtmlUiOverlay, { ctx: ctxFor('other') });
+  assert.equal(hosted(away).length, 1, 'the document stays mounted while another session is on screen');
+  assert.equal(away.elements.find((element) => element.props?.['data-htmlui-overlay'] === 'viewed').props.style.display, 'none', 'and its group is the hidden one');
+
+  // Losing the seat only hides it; closing the interface is what stops the hosting.
+  __internals.releaseInlineSeat('ui-99000001');
+  assert.equal(state.inlineHosted.has('ui-99000001'), true, 'a lost seat keeps hosting the document');
+  __internals.retire('ui-99000001');
+  assert.equal(state.inlineHosted.has('ui-99000001'), false, 'closing it forgets the hosting');
+  assert.equal(state.inlineHeights.has('ui-99000001'), false, 'and its height');
+  resetStore();
+});
+
+test('a template applied from the drawer stays put instead of being redrawn per turn', () => {
+  // The reported bug: applying a template from the composer drawer during a streaming answer
+  // put a fresh copy at the bottom of the conversation as soon as that answer — and every later
+  // one — finished, because the newest tail kept adopting whatever the session held. The
+  // interface belongs where the conversation stood when the reader applied it, and it must not
+  // move from there.
+  const windows = [
+    [7, 100, 200],
+    [8, 300, 400],
+    [9, 600, undefined],
+  ];
+  const snapshot = chatSnapshot({ windows });
+  const useChat = useChatOf(snapshot);
+  const tail = (turn, seq) => render(__internals.HtmlUiInlineTail, { sessionId: 'session-drawer', seq, turn: { turn }, useChat });
+
+  // Applied while turn 8 was answering: it lands where the conversation stood — turn 7 — and
+  // turn 8's own tail, the one that appears the instant that answer ends, holds no seat for it.
+  resetStore([
+    { uiId: 'ui-dd770001', sessionId: 'session-drawer', title: '日历', placement: 'inline', revision: 1, bytes: 5, createdAt: 350 },
+  ]);
+  assert.deepEqual(seatsOf(tail(7, 50)), ['ui-dd770001'], 'it appears at once, where the conversation stood');
+  assert.deepEqual(seatsOf(tail(8, 51)), [], 'the answer that was streaming holds no copy of it');
+  assert.deepEqual(seatsOf(tail(9, 52)), [], 'and neither does any later turn');
+
+  // Applied with the session idle: the last closed turn is the bottom of the conversation, so
+  // it appears there — and the next answer still does not re-seat it.
+  resetStore([
+    { uiId: 'ui-dd770002', sessionId: 'session-drawer', title: '计算器', placement: 'inline', revision: 1, bytes: 5, createdAt: 500 },
+  ]);
+  assert.deepEqual(seatsOf(tail(8, 60)), ['ui-dd770002'], 'an idle insertion lands at the end of the last turn');
+  assert.deepEqual(seatsOf(tail(9, 61)), [], 'the next turn does not carry it down to itself');
+
+  // Older than every loaded turn: the window can open mid-conversation, and the first loaded
+  // turn is the honest seat — anything is better than dropping the interface.
+  resetStore([
+    { uiId: 'ui-dd770003', sessionId: 'session-drawer', title: '早', placement: 'inline', revision: 1, bytes: 5, createdAt: 50 },
+  ]);
+  assert.deepEqual(seatsOf(tail(7, 70)), ['ui-dd770003'], 'an interface older than the window sits at its top');
+  assert.deepEqual(seatsOf(tail(8, 71)), [], 'and is not seated again below');
+  resetStore();
+});
+
+test('the forwarded wheel scrolls the conversation, and the band stops at the composer', () => {
+  resetStore();
+  // The band a hosted document is clipped to ends where the composer begins. The composer is
+  // drawn *over* the transcript, so clipping to the scroll container alone let a document
+  // scrolled to the bottom paint on top of the input box.
+  const composerSeat = { isConnected: true, getBoundingClientRect: () => ({ top: 700 }) };
+  state.composerSeat = composerSeat;
+  assert.equal(__internals.transcriptBandBottom(900), 700, 'the band ends at the composer');
+  assert.equal(__internals.transcriptBandBottom(600), 600, 'and it never extends the band it is given');
+  composerSeat.isConnected = false;
+  assert.equal(__internals.transcriptBandBottom(900), 900, 'with no composer seat the band is the fallback');
+  state.composerSeat = null;
+
+  // A wheel the document could not use scrolls the transcript the frame used to be a child of,
+  // and past its end it goes on to the page — the same chain the frame had before it was hosted.
+  const scroller = {
+    top: 100,
+    get scrollTop() {
+      return this.top;
+    },
+    set scrollTop(value) {
+      this.top = Math.min(300, Math.max(0, value));
+    },
+    scrollLeft: 0,
+    isConnected: true,
   };
-  const card = render(__internals.HtmlUiToolView, { phase: 'result', block, ctx: undefined });
-  assert.match(card.text, /Card/u, 'the row still names the interface');
-  assert.match(card.text, /shown at the end of this turn/u, 'and says where it is drawn');
-  assert.ok(!card.text.includes('Preparing interface'), 'it does not draw the document as well');
+  const seat = { isConnected: true, parentElement: null };
+  __internals.claimInlineSeat('ui-wheel0001', seat);
+  state.inlineSeats.set('ui-wheel0001', { element: seat, scroller });
+  __internals.scrollTranscriptBy('ui-wheel0001', 0, 120);
+  assert.equal(scroller.scrollTop, 220, 'the conversation takes the forwarded delta');
+  scroller.scrollTop = 300;
+  const page = {
+    top: 0,
+    get scrollTop() {
+      return this.top;
+    },
+    set scrollTop(value) {
+      this.top = value;
+    },
+    scrollLeft: 0,
+  };
+  const previous = document.scrollingElement;
+  document.scrollingElement = page;
+  __internals.scrollTranscriptBy('ui-wheel0001', 0, 120);
+  assert.equal(page.scrollTop, 120, 'past the end of the transcript it chains on to the page');
+  document.scrollingElement = previous;
+  resetStore();
 });
 
 test('the session page names each interface with the project it came from', () => {

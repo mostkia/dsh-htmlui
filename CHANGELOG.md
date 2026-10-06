@@ -2,7 +2,7 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.1.1
+## 0.1.0
 
 ### Added
 
@@ -65,6 +65,19 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   plugin adds, what it deliberately does not do (no install scripts, no
   dependencies, no third-party egress), and the security posture a reviewer
   should check.
+- Host half: the `html_ui` tool (`render` / `update` / `close` / `list`) and the
+  `html_ui_template` tool (`save` / `list` / `show` / `remove`), storage under
+  `$DSH_HOME/htmlui`, and an HTTP carrier with document tickets, composed
+  documents, a POST action channel, and an SSE event stream.
+- Browser half: sandboxed iframes rendered inline in the transcript, docked above
+  and below the composer, floating, as a click-through background layer, in
+  fullscreen with a switch back to chat, and as a resident panel.
+- Bridge: `window.dshHTML` with `send`, `state`, `resize`, `close`, and
+  `on('assistant' | 'session' | 'action' | 'ui' | 'theme' | 'ready')`.
+- Capability tokens per document, a loopback-only origin policy, POST-only
+  mutating routes, a per-document rate limit, and a document CSP.
+- Model-facing `SKILL.md`, a shipped `starter` template, bilingual READMEs, and
+  the host-half assertions.
 
 ### Fixed
 
@@ -78,6 +91,48 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   document adds one when the author wrote none, and never rewrites what is stored.
 ### Fixed
 
+- The wheel still reaches the conversation through a hosted `inline` document. Hosting moved the
+  frame out of the transcript, so the browser's own scroll chaining — which used to carry a wheel
+  the document could not use up to the conversation — had nowhere to go, and a wheel over a
+  document with nothing to scroll did nothing. The bridge now forwards exactly what the document
+  could not use: the decision is made synchronously on a passive listener (a scrollable ancestor
+  of the pointer with room in that direction keeps the wheel), the host scrolls the transcript by
+  the same delta, and past the end of the transcript the delta carries on to the page. Line- and
+  page-mode deltas are converted to pixels, and a pinch gesture is left alone.
+- A hosted `inline` document can no longer paint over the input box. The composer is drawn
+  *over* the transcript, so the scroll container's own rectangle reaches under it, and clipping a
+  document to that rectangle let it cover the input box once the conversation was scrolled down.
+  The band a hosted document is clipped to now ends where the composer begins, measured from the
+  plugin's own seat inside that block (the column's edges were already measured the same way).
+- An `inline` interface now survives a Session switch, and a turn scrolling out of the
+  virtualized transcript, the way the other forms do. Its document is *hosted* by the
+  frame-wide overlay — clipped to the transcript's own viewport and placed over a seat the
+  transcript keeps at exactly the document's height — instead of being a child of the turn
+  that attached it. A child frame is destroyed the moment the product rebuilds the
+  transcript (a Session switch, or the virtualized window moving past its turn), which is
+  why the interface came back empty; a hosted frame is hidden in those moments and never
+  unmounted, so its runtime state is still there on the way back. Hosting starts when the
+  seat is first on screen, so a page load still builds only the documents of the turns
+  actually rendered, and the seat reserves the height the document reports, so the
+  conversation around it does not move when it loads.
+- A `float`, `background` or `fullscreen` interface survives a Session switch. The overlay
+  seat rendered the viewed Session's records alone, so switching away unmounted that
+  session's windows and switching back reloaded every document from scratch — the same loss
+  the minimize/restore path had already been fixed for, one level up. The seat now keeps
+  every session's overlay surfaces mounted and merely hides the groups that are not on
+  screen (`display: none`), so a window comes back exactly as it was left.
+- An `inline` interface stays where it was put. The turn tail elected a "newest
+  tail" while rendering, so every tail adopted whatever the session held and drew
+  another copy of it at the bottom of the conversation: a template applied from
+  the drawer was rebuilt — and its document reloaded — at the instant every later
+  answer ended. A tail now draws exactly what belongs to its own turn: the
+  interfaces a render call *in that turn* made, read from the tool result's
+  presentation meta on the `tool-call` node's `tool-result` block (the result
+  text is the human-readable ack, and a `list`/`update`/`close` that merely names
+  an id must not claim it), plus the ones the reader applied while the
+  conversation stood there, for a template that no call made. Nothing is elected
+  while rendering, so one interface is drawn by one tail and it scrolls up with
+  the transcript like anything else in it.
 - A `dock-right` interface always has a seat. The tab *type* registering was
   treated as "the column works", but opening the tab needs the controller too, and
   the composer dock stopped claiming `dock-right` as soon as the type registered —
@@ -229,21 +284,3 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   contract, slot registrations, frame sandbox, placement parsing, record store,
   viewed-session resolution).
 - GitHub Actions CI runs both suites on Ubuntu and Windows across Node 22 and 24.
-
-## 0.1.0
-
-### Added
-
-- Host half: the `html_ui` tool (`render` / `update` / `close` / `list`) and the
-  `html_ui_template` tool (`save` / `list` / `show` / `remove`), storage under
-  `$DSH_HOME/htmlui`, and an HTTP carrier with document tickets, composed
-  documents, a POST action channel, and an SSE event stream.
-- Browser half: sandboxed iframes rendered inline in the transcript, docked above
-  and below the composer, floating, as a click-through background layer, in
-  fullscreen with a switch back to chat, and as a resident panel.
-- Bridge: `window.dshHTML` with `send`, `state`, `resize`, `close`, and
-  `on('assistant' | 'session' | 'action' | 'ui' | 'theme' | 'ready')`.
-- Capability tokens per document, a loopback-only origin policy, POST-only
-  mutating routes, a per-document rate limit, and a document CSP.
-- Model-facing `SKILL.md`, a shipped `starter` template, bilingual READMEs, and
-  17 host-half assertions.

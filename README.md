@@ -91,13 +91,13 @@ dsh plugin --profile web add github:mostkia/dsh-htmlui
 
 Requires DSH `>=0.1.7-0` (the pre-release line is included on purpose, so
 `0.1.7-rc.*` installs too). Hard-refresh the page after installing; when the
-browser half activates it logs `[dsh-htmlui] client active (0.1.1)` to the console.
+browser half activates it logs `[dsh-htmlui] client active (0.1.0)` to the console.
 
 The easiest way to confirm which generation a running host actually has:
 
 ```sh
 curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
-# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.1",...}
+# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.0",...}
 ```
 
 Changing the host half (`index.js`) does **not** take effect in a running host: the
@@ -224,7 +224,7 @@ model sees it in `html_ui op=list`, and can update or close it.
 ## Development
 
 ```sh
-npm test        # 155 assertions: package integrity 13 + doc contract 10 + host 40 + browser 38 + bridge 10 + shallow render 27 + adversarial input 10 + packed artefact 2 + harness schema 5
+npm test        # 158 assertions: package integrity 13 + doc contract 10 + host 40 + browser 38 + bridge 11 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
 npm run check   # syntax-checks the three shipped scripts, then runs the tests
 ```
 

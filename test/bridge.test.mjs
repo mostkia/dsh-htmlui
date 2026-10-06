@@ -23,9 +23,18 @@ function loadBridge(config) {
   const logs = [];
   const frames = new Set();
   const element = { attributes: {}, setAttribute: (name, value) => { element.attributes[name] = value; } };
+  const documentListeners = new Map();
   const document = {
     documentElement: element,
     dispatchEvent: (event) => dispatched.push(event),
+    addEventListener: (name, handler) => {
+      const bucket = documentListeners.get(name) ?? [];
+      bucket.push(handler);
+      documentListeners.set(name, bucket);
+    },
+    emit: (name, event) => {
+      for (const handler of documentListeners.get(name) ?? []) handler(event);
+    },
   };
   const window_ = {
     __DSH_HTMLUI__: config,
@@ -220,6 +229,41 @@ test('the handshake makes the document state its height again', async () => {
   assert.ok(report !== undefined, 'the handshake is answered with the measured height');
   assert.equal(report.height, 337);
   assert.equal(report.nonce, 'n-2', 'and it carries the nonce the host just sent');
+});
+
+test('a wheel the document cannot use is forwarded to the conversation', () => {
+  // An inline document is hosted outside the transcript, so the browser's scroll chaining has
+  // nowhere to go: without this, a wheel over a document with nothing to scroll would do nothing
+  // at all. The bridge forwards exactly what the document could not use — decided synchronously
+  // on a passive listener, so a scrollable document keeps its own wheel and never both.
+  const env = loadBridge(baseConfig);
+  const wheel = () => env.posted.filter((message) => message.__dshHtmlUi === 'wheel');
+  const flat = { scrollTop: 0, scrollHeight: 100, clientHeight: 100, scrollWidth: 100, clientWidth: 100, parentElement: null };
+
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  assert.equal(wheel().length, 1, 'a wheel nothing can use is forwarded');
+  assert.equal(wheel()[0].deltaY, 120);
+  assert.equal(wheel()[0].uiId, 'ui-1a2b3c4d', 'and it names the document it came from');
+
+  // A scrollable ancestor with room keeps the wheel: the browser scrolls it and nothing is sent.
+  const inner = { scrollTop: 0, scrollHeight: 900, clientHeight: 200, scrollWidth: 100, clientWidth: 100, parentElement: null };
+  const nested = Object.assign({}, flat, { parentElement: inner });
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: nested });
+  assert.equal(wheel().length, 1, 'a document that can scroll keeps its own wheel');
+  // At the end of that scrollable there is no room left, so the conversation takes it again.
+  inner.scrollTop = 700;
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: nested });
+  assert.equal(wheel().length, 2, 'and the conversation takes it at the end of the document');
+  // Scrolling back up inside the document keeps it there too.
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: -120, deltaMode: 0, target: nested });
+  assert.equal(wheel().length, 2, 'upwards inside a document that has room stays inside it');
+
+  // Lines and pages are converted to pixels, because the host scrolls in pixels.
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 3, deltaMode: 1, target: flat });
+  assert.equal(wheel()[2].deltaY, 48, 'a line-wise delta is converted');
+  // A pinch gesture zooms; it is not a scroll to hand over.
+  env.document.emit('wheel', { ctrlKey: true, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  assert.equal(wheel().length, 3, 'a pinch gesture is left alone');
 });
 
 test('an unconfigured bridge fails closed instead of throwing', async () => {

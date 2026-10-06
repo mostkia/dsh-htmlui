@@ -65,13 +65,13 @@ dsh plugin --profile web add @mostkia/dsh-htmlui
 dsh plugin --profile web add github:mostkia/dsh-htmlui
 ```
 
-要求 DSH `>=0.1.7-0`（故意包含预发布线，`0.1.7-rc.*` 也能装）。装完硬刷新页面；客户端半部生效时浏览器控制台会打印 `[dsh-htmlui] client active (0.1.1)`。
+要求 DSH `>=0.1.7-0`（故意包含预发布线，`0.1.7-rc.*` 也能装）。装完硬刷新页面；客户端半部生效时浏览器控制台会打印 `[dsh-htmlui] client active (0.1.0)`。
 
 两条最省事的"确认运行中的宿主装的是哪一代"：
 
 ```sh
 curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
-# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.1",...}
+# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.0",...}
 ```
 
 改宿主半部（`index.js`）**不会**在运行中的宿主里热生效：加载器仍用它已激活的模块代际。改完宿主半部要冷启动 `dsh`；浏览器半部只需刷新页面。
@@ -139,7 +139,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 155 项断言：包完整性 13 + 文档契约 10 + 宿主 40 + 浏览器 38 + 桥 10 + 浅渲染 27 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm test        # 158 项断言：包完整性 13 + 文档契约 10 + 宿主 40 + 浏览器 38 + 桥 11 + 浅渲染 29 + 对抗输入 10 + 打包产物 2 + harness schema 5
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 

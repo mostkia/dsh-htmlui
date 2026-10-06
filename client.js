@@ -24,15 +24,16 @@ window.__ModuleLoader__.load({
 
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
     /**
-     * The client's activation marker.
+     * The version this browser half belongs to, and the line that announces it.
      *
-     * The build tag is not decoration: during acceptance it was repeatedly unclear
-     * whether a page was running the current browser half, and each wrong guess cost a
-     * round. The tag is logged *and* shown in the create dialog, so the answer is one
-     * glance instead of one assumption.
+     * The marker is not decoration: during acceptance it was repeatedly unclear whether a page was
+     * running the current browser half, and each wrong guess cost a round. It is logged *and*
+     * shown in the create dialog, so the answer is one glance instead of one assumption. This
+     * constant is the only place the client states its version, and `package.test.mjs` holds it
+     * to the packaged one.
      */
-    const CLIENT_BUILD = 'adopt-form-2';
-    const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (0.1.1 · ${CLIENT_BUILD})`;
+    const CLIENT_VERSION = '0.1.0';
+    const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (${CLIENT_VERSION})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its
      * document, and during acceptance that was indistinguishable from a URL change
@@ -79,6 +80,21 @@ window.__ModuleLoader__.load({
     }
     const DEFAULT_FLOAT = { w: 520, h: 360, x: 96, y: 96 };
 
+    /**
+     * True once the page is going away. The right column's body unmounts on a reload just
+     * as it does when its tab is closed, so the two have to be told apart before a
+     * teardown may be read as "the reader closed the tab".
+     */
+    let pageUnloading = false;
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('pagehide', () => {
+        pageUnloading = true;
+      });
+      window.addEventListener('beforeunload', () => {
+        pageUnloading = true;
+      });
+    }
+
     // ------------------------------------------------------------------ store
 
     const state = {
@@ -97,8 +113,29 @@ window.__ModuleLoader__.load({
       hostSyncing: new Set(),
       /** The conversation column's own left edge and width, measured from our seats. */
       column: { left: 0, width: 0 },
-      /** The newest turn tail seen per session, where inline interfaces render. */
-      tailSeq: new Map(),
+      /**
+       * Inline interfaces whose transcript seat has been on screen at least once.
+       *
+       * An inline document is hosted by the overlay, because the transcript it belongs to is
+       * rebuilt whenever the reader switches Session — a frame living in it is destroyed by that
+       * rebuild, and the document comes back empty. Hosting starts when the seat first appears,
+       * so a page load still only loads the documents whose turn is actually rendered.
+       */
+      inlineHosted: new Set(),
+      /** The transcript seat of each hosted inline interface, with the scroller that clips it. */
+      inlineSeats: new Map(),
+      /** The height each inline document asked for, so its seat can hold the space it occupies. */
+      inlineHeights: new Map(),
+      /**
+       * The plugin's own seat inside the composer block, when one is mounted.
+       *
+       * The composer sits *over* the transcript rather than beside it, so the scroll container's
+       * own rectangle reaches under the input box. Clipping a hosted inline document to that
+       * rectangle would paint it on top of the input box; the composer's top edge is what the
+       * band really ends at, and this seat is inside that block, which is how it is known
+       * without reading anyone else's DOM.
+       */
+      composerSeat: null,
       /** Interfaces the reader put away without deleting: floats, for now. */
       hidden: new Set(),
       /** Where each float was left, so hiding and restoring it keeps its place. */
@@ -304,6 +341,9 @@ window.__ModuleLoader__.load({
       state.tickets.delete(uiId);
       state.collapsed.delete(uiId);
       state.fullscreenDismissed.delete(uiId);
+      state.inlineHosted.delete(uiId);
+      state.inlineSeats.delete(uiId);
+      state.inlineHeights.delete(uiId);
       removeFromSession(sessionId ?? record?.sessionId, uiId);
       if (state.fullscreen === uiId) state.fullscreen = null;
       syncRightPane();
@@ -1139,6 +1179,185 @@ window.__ModuleLoader__.load({
       wordBreak: 'break-word',
     };
 
+    // -------------------------------------------------------------- inline hosting
+
+    /**
+     * The height an inline document asks for.
+     *
+     * One function for both halves of the arrangement: the hosted frame renders at this height,
+     * and the transcript seat holds exactly the same space, so the conversation lays out as if
+     * the document were still a child of it.
+     */
+    function inlineHeightOf(measured) {
+      return measured !== undefined && Number.isFinite(measured) ? Math.min(INLINE_MAX_HEIGHT, Math.max(60, measured)) : 220;
+    }
+
+    /** The scroll container an element lives in: the box that clips and scrolls the transcript. */
+    function scrollContainerOf(element) {
+      if (element === null || element === undefined) return null;
+      if (typeof window !== 'object' || window === null || typeof window.getComputedStyle !== 'function') return null;
+      let node = element.parentElement;
+      while (node !== null && node !== undefined && node !== document.body) {
+        const overflowY = window.getComputedStyle(node).overflowY;
+        if (overflowY === 'auto' || overflowY === 'scroll') return node;
+        node = node.parentElement;
+      }
+      return null;
+    }
+
+    /**
+     * Where the transcript's visible band ends.
+     *
+     * The composer is drawn *over* the transcript — the scroll container reaches under the input
+     * box, which is why a hosted document clipped to the container alone covered the input box.
+     * The band ends where the composer begins, and the plugin's own seat inside that block says
+     * where that is (see `state.composerSeat`); without one, the band simply ends where it did.
+     */
+    function transcriptBandBottom(fallback) {
+      const seat = state.composerSeat;
+      const top =
+        seat !== null && seat !== undefined && seat.isConnected === true && typeof seat.getBoundingClientRect === 'function'
+          ? seat.getBoundingClientRect().top
+          : Number.NaN;
+      return Number.isFinite(top) && top > 0 ? Math.min(fallback, top) : fallback;
+    }
+
+    /**
+     * The hosted boxes, by interface.
+     *
+     * Each entry is the fixed wrapper the sync loop places; its first child is the frame itself,
+     * placed inside it at the seat's offset. The overlay's refs write this map and the loop reads
+     * it — never through React, because scrolling must not re-render the page.
+     */
+    const inlineBoxes = new Map();
+    let inlineSyncQueued = false;
+
+    /**
+     * Place every hosted inline frame over the seat it belongs to.
+     *
+     * A hosted frame is a fixed layer clipped to the transcript's own viewport, not a child of
+     * the transcript: it scrolls away with its seat instead of floating over the rest of the
+     * page, and it is not painted at all while its seat is gone — which is what happens to a
+     * Session's seats while another Session is on screen. The frame itself never unmounts, which
+     * is the entire point: the document keeps its runtime state through all of it.
+     */
+    function syncInlineBoxes() {
+      for (const [uiId, wrapper] of inlineBoxes) {
+        const inner = wrapper.firstElementChild;
+        if (inner === null) continue;
+        const seat = state.inlineSeats.get(uiId);
+        const element = seat === undefined ? undefined : seat.element;
+        if (element === undefined || element.isConnected !== true) {
+          // No seat on screen: the document stays mounted and simply is not painted.
+          if (wrapper.style.display !== 'none') wrapper.style.display = 'none';
+          continue;
+        }
+        const scroller =
+          seat.scroller !== null && seat.scroller !== undefined && seat.scroller.isConnected === true
+            ? seat.scroller
+            : scrollContainerOf(element);
+        // With no scroll container of its own the transcript scrolls with the page, and the
+        // window is then the box to clip to — bounded by the conversation column, so a fallback
+        // never paints over the sidebar either. Guessing wrong the other way — and hiding the
+        // document whenever no scroller was found — would make an inline interface disappear for
+        // a layout this does not recognize, which is far worse.
+        const raw = scroller === null || scroller === undefined ? null : scroller.getBoundingClientRect();
+        const columnKnown = state.column.width > 0;
+        const left = raw !== null ? raw.left : columnKnown ? state.column.left : 0;
+        const width = raw !== null ? raw.width : columnKnown ? state.column.width : window.innerWidth;
+        const top = raw !== null ? raw.top : 0;
+        const height = Math.max(0, transcriptBandBottom(raw !== null ? raw.top + raw.height : window.innerHeight) - top);
+        const at = element.getBoundingClientRect();
+        if (wrapper.style.display !== 'block') wrapper.style.display = 'block';
+        wrapper.style.position = 'fixed';
+        wrapper.style.left = `${Math.round(left)}px`;
+        wrapper.style.top = `${Math.round(top)}px`;
+        wrapper.style.width = `${Math.round(width)}px`;
+        wrapper.style.height = `${Math.round(height)}px`;
+        wrapper.style.overflow = 'hidden';
+        wrapper.style.pointerEvents = 'none';
+        inner.style.position = 'absolute';
+        inner.style.left = `${Math.round(at.left - left)}px`;
+        inner.style.top = `${Math.round(at.top - top)}px`;
+        inner.style.width = `${Math.round(at.width)}px`;
+        inner.style.height = `${Math.round(at.height)}px`;
+        inner.style.pointerEvents = 'auto';
+      }
+    }
+
+    /**
+     * Scroll the conversation for a hosted document that could not take the wheel itself.
+     *
+     * The document's bridge forwards the wheel only when nothing inside it could scroll, so this
+     * restores what the interface did before it was hosted: the document keeps its own scrolling
+     * and the transcript takes everything else. Scrolling past the end of the transcript goes on
+     * to the page, which is the same chain the frame had when it was a child of the transcript.
+     */
+    function scrollTranscriptBy(uiId, dx, dy) {
+      const seat = state.inlineSeats.get(uiId);
+      const element = seat === undefined ? undefined : seat.element;
+      const known = seat === undefined ? undefined : seat.scroller;
+      // A wheel can arrive before any scroll has taught us which box scrolls this seat, so the
+      // ancestors are walked once more rather than falling straight through to the page.
+      const scroller =
+        known !== null && known !== undefined && known.isConnected === true
+          ? known
+          : element !== undefined && element !== null && element.isConnected === true
+            ? scrollContainerOf(element)
+            : undefined;
+      const move = (target) => {
+        if (target === null || target === undefined) return false;
+        const beforeTop = target.scrollTop;
+        const beforeLeft = target.scrollLeft;
+        if (Number.isFinite(dy) && dy !== 0) target.scrollTop = beforeTop + dy;
+        if (Number.isFinite(dx) && dx !== 0) target.scrollLeft = beforeLeft + dx;
+        return target.scrollTop !== beforeTop || target.scrollLeft !== beforeLeft;
+      };
+      if (move(scroller)) return;
+      const page = document.scrollingElement;
+      if (page === null || page === undefined || page === scroller) return;
+      move(page);
+    }
+
+    /** Place the hosted frames again, at most once per animation frame. */
+    function scheduleInlineSync() {
+      if (inlineSyncQueued) return;
+      inlineSyncQueued = true;
+      const run = () => {
+        inlineSyncQueued = false;
+        syncInlineBoxes();
+      };
+      if (typeof window === 'object' && window !== null && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(run);
+      else if (typeof setTimeout === 'function') setTimeout(run, 16);
+    }
+
+    /**
+     * Bind an inline interface to the seat it occupies in the transcript.
+     *
+     * The first claim is what starts hosting it: from then on the overlay owns the frame and this
+     * element only says where it belongs. Losing the seat — a Session switch, a turn scrolled out
+     * of the virtualized transcript — hides the frame and never destroys it.
+     */
+    function claimInlineSeat(uiId, element) {
+      const known = state.inlineSeats.get(uiId);
+      if (known !== undefined && known.element === element) {
+        scheduleInlineSync();
+        return;
+      }
+      state.inlineSeats.set(uiId, { element, scroller: scrollContainerOf(element) });
+      if (!state.inlineHosted.has(uiId)) {
+        state.inlineHosted.add(uiId);
+        bump();
+      }
+      scheduleInlineSync();
+    }
+
+    /** The seat is gone; the hosted frame is hidden until another one claims it. */
+    function releaseInlineSeat(uiId) {
+      state.inlineSeats.delete(uiId);
+      scheduleInlineSync();
+    }
+
     // ---------------------------------------------------------------- surfaces
 
     /** The frame plus, for every variant but `background`, a slim host chrome row. */
@@ -1242,6 +1461,13 @@ window.__ModuleLoader__.load({
           if (data.nonce !== nonceRef.current && !allowedBeforeHandshake) return;
           if (data.__dshHtmlUi === 'ready') setStatus('ready');
           if (data.__dshHtmlUi === 'close') props.onDismiss?.(record.uiId);
+          // A hosted inline document cannot chain its wheel to the transcript any more (it is no
+          // longer a descendant of it), so its bridge forwards what it could not use and this
+          // scrolls the conversation with it. Other forms are overlays, where a wheel over them
+          // has never moved the chat behind them.
+          if (data.__dshHtmlUi === 'wheel' && variant === 'inline') {
+            scrollTranscriptBy(record.uiId, Number(data.deltaX), Number(data.deltaY));
+          }
           if (data.__dshHtmlUi === 'resize') {
             const next = parseSizeText(data.size);
             if (next !== undefined) setSize((current) => Object.assign({}, current, next));
@@ -1256,7 +1482,19 @@ window.__ModuleLoader__.load({
         }
         window.addEventListener('message', onMessage);
         return () => window.removeEventListener('message', onMessage);
-      }, [record.uiId, props.onDismiss]);
+      }, [record.uiId, props.onDismiss, variant]);
+
+      // An inline document is hosted by the overlay (`HtmlUiInlineHost`, through the seat the
+      // transcript keeps for it), so its height has to be published: the seat holds exactly that
+      // much space, and the two must agree or the conversation would lay out around a gap.
+      useEffect(() => {
+        if (variant !== 'inline') return undefined;
+        const height = inlineHeightOf(contentHeight ?? initial.h);
+        if (state.inlineHeights.get(record.uiId) === height) return undefined;
+        state.inlineHeights.set(record.uiId, height);
+        bump();
+        return undefined;
+      }, [variant, record.uiId, contentHeight, initial.h]);
 
       const dragRef = useRef(null);
       const onPointerDown = useCallback(
@@ -1483,12 +1721,9 @@ window.__ModuleLoader__.load({
         // Seamless by design: no chrome, no border, no background, and the height is
         // whatever the document measured for itself (capped, so a very long document
         // scrolls rather than swallowing the transcript). It reads as part of the
-        // conversation, not as a window parked in it.
-        const measured = contentHeight ?? initial.h;
-        const height =
-          measured !== undefined && Number.isFinite(measured)
-            ? Math.min(INLINE_MAX_HEIGHT, Math.max(60, measured))
-            : 220;
+        // conversation, not as a window parked in it — even though the fixed host layer,
+        // clipped to the transcript's own viewport, is what draws it.
+        const height = inlineHeightOf(contentHeight ?? initial.h);
         return h(
           'div',
           {
@@ -1691,11 +1926,164 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Which turn made each interface, over the transcript this page has materialized.
+     *
+     * A turn's own chat nodes are the authority. A Tool row is a `tool-call` Node whose
+     * `data.root` is the tool block itself; the block carrying the host's answer is a
+     * `tool-result`, and the presentation meta *on that block* — not the result text, which is
+     * the human-readable ack (`ui_id=…`) — names the interface and says what the call did.
+     * Only a *render* counts: an update, a list, or a close that happens to name the id must
+     * not claim it, or the turn that merely mentioned an interface would draw a copy of it.
+     *
+     * The answer is one index over the whole transcript, because the question is "did any turn
+     * *make* this interface?": a per-turn scan cannot tell a template the reader applied from a
+     * template a call rendered, and treating the second as the first is what would draw it
+     * twice. Every tail asks the same question of the same node set, so the scan is memoized by
+     * that set's own array identity.
+     */
+    let renderCallMemo = { order: undefined, made: new Map() };
+
+    /** Collect one tool block's render call and, recursively, those of its sub-calls. */
+    function collectRenderCalls(block, turn, made) {
+      if (block === null || typeof block !== 'object') return;
+      if (block.kind === 'tool-result') {
+        const meta = block.meta;
+        if (
+          meta !== null &&
+          meta !== undefined &&
+          typeof meta === 'object' &&
+          meta.htmlui === true &&
+          meta.op === 'render' &&
+          typeof meta.uiId === 'string' &&
+          meta.uiId.length > 0
+        ) {
+          made.set(meta.uiId, turn);
+        }
+      }
+      const subCalls = block.subCalls;
+      if (Array.isArray(subCalls)) for (const sub of subCalls) collectRenderCalls(sub, turn, made);
+    }
+
+    function renderCallsIn(order, nodes) {
+      if (renderCallMemo.order === order) return renderCallMemo.made;
+      const made = new Map();
+      if (Array.isArray(order) && nodes !== undefined && typeof nodes.get === 'function') {
+        for (const key of order) {
+          const node = nodes.get(key);
+          if (node === null || node === undefined || node.kind !== 'tool-call') continue;
+          const location = node.location;
+          const turn = location === null || location === undefined || location.turn === undefined ? undefined : location.turn.turn;
+          if (!Number.isFinite(turn)) continue;
+          collectRenderCalls(node.data === null || node.data === undefined ? undefined : node.data.root, turn, made);
+        }
+      }
+      renderCallMemo = { order, made };
+      return made;
+    }
+
+    /**
+     * The turn an interface made outside any tool call belongs to.
+     *
+     * A template applied from the drawer is made by the reader, not by a call, so no turn's
+     * nodes name it. Its home is where the conversation stood when it was made: the last turn
+     * that had already closed. That is the seat the reader is looking at when they press Apply,
+     * the interface appears there at once, and — unlike "the newest turn", which is what an
+     * earlier revision used — it does not move when the next answer lands. It stays in the
+     * transcript and scrolls up with it, like anything else in the conversation.
+     *
+     * A record older than every loaded turn (the window can open mid-conversation) has no
+     * loaded seat of its own, so the first loaded turn is the honest approximation; that keeps
+     * it on screen instead of dropping it.
+     */
+    function turnOwningRecord(createdAt, timeline) {
+      if (timeline === null || timeline === undefined) return undefined;
+      const order = Array.isArray(timeline.turnOrder) ? timeline.turnOrder : [];
+      if (order.length === 0) return undefined;
+      // A record with no readable creation time is read as "just now": the newest closed turn
+      // is where a reader who just applied something is looking.
+      const madeAt = Number.isFinite(createdAt) ? createdAt : Number.POSITIVE_INFINITY;
+      const turns = timeline.turns;
+      let owner;
+      for (const turn of order) {
+        const location = turns !== undefined && typeof turns.get === 'function' ? turns.get(turn) : undefined;
+        const end = location === null || location === undefined ? undefined : location.end;
+        const closedAt = end !== null && end !== undefined && Number.isFinite(end.time) ? end.time : undefined;
+        if (closedAt !== undefined && closedAt <= madeAt) owner = turn;
+      }
+      return owner === undefined ? order[0] : owner;
+    }
+
     /** Wrap one registered component in that boundary. */
     function guarded(ctx, Component) {
       return function GuardedSurface(props) {
         return h(HtmlUiBoundary, { ctx }, h(Component, props));
       };
+    }
+
+    /**
+     * The transcript's seat for one inline interface.
+     *
+     * It holds the space the document occupies and nothing else. The document itself is drawn by
+     * the overlay, because a frame living here is destroyed every time the product rebuilds the
+     * transcript — a Session switch, or a turn scrolling out of the virtualized window — and the
+     * interface would come back empty. The height comes from the frame (`HtmlUiFrame`), so the
+     * seat and the document always agree on how much room it takes.
+     */
+    function InlineSeat(props) {
+      useStore();
+      const { record } = props;
+      const height = state.inlineHeights.get(record.uiId) ?? inlineHeightOf(undefined);
+      const bind = useCallback(
+        (element) => {
+          if (element === null) releaseInlineSeat(record.uiId);
+          else claimInlineSeat(record.uiId, element);
+        },
+        [record.uiId],
+      );
+      return h('div', {
+        ref: bind,
+        'data-htmlui-inline-seat': record.uiId,
+        style: { width: '100%', height: `${height}px`, minHeight: '0' },
+      });
+    }
+
+    /**
+     * The hosted inline document itself.
+     *
+     * A fixed wrapper, clipped to the transcript's own viewport, with the frame placed at its
+     * seat's offset inside it; the sync loop writes both. It is rendered from the overlay — a
+     * frame-wide seat — so leaving the Session hides it rather than unmounting it, which is what
+     * keeps the document's runtime state.
+     */
+    function HtmlUiInlineHost(props) {
+      const { record } = props;
+      const bind = useCallback(
+        (element) => {
+          if (element === null) {
+            inlineBoxes.delete(record.uiId);
+            return;
+          }
+          inlineBoxes.set(record.uiId, element);
+          scheduleInlineSync();
+        },
+        [record.uiId],
+      );
+      return h(
+        'div',
+        {
+          ref: bind,
+          'data-htmlui-inline-host': record.uiId,
+          // Below the background layer (z-index 1) so a dimmed frame dims this too, and below the
+          // floats and the fullscreen layer, exactly where the transcript itself sits.
+          style: { position: 'fixed', left: '0', top: '0', width: '0', height: '0', display: 'none', overflow: 'hidden', pointerEvents: 'none', zIndex: 0 },
+        },
+        h(
+          'div',
+          { style: { position: 'absolute' } },
+          h(HtmlUiFrame, { record, theme: state.theme, variant: 'inline', onDismiss: dismissRecord }),
+        ),
+      );
     }
 
     /**
@@ -1707,39 +2095,47 @@ window.__ModuleLoader__.load({
      * one for in-flow contributions, and every other feature that appends to a turn
      * uses it.
      *
-     * It renders the session's inline interfaces in the *newest* turn's tail only:
-     * a turn tail renders once per turn, so rendering them in every tail would stack
-     * a copy per turn, and scoping them to the turn that created them would need the
-     * record to carry that turn. "The current interfaces appear at the end of the
-     * conversation" needs neither.
+     * A turn tail renders once per turn, so this seat claims exactly the interfaces that belong
+     * to *its* turn and nothing else: the ones a render call in this turn made, and the ones
+     * the reader applied while the conversation stood here (`turnOwningRecord`). That is what
+     * makes an interface behave like the rest of the transcript — it stays where it was put and
+     * scrolls up as the conversation grows — instead of appearing again at the bottom of every
+     * new turn, which is what electing a "newest tail" while rendering did.
+     *
+     * What it claims is a seat, not the document: an inline frame is hosted by the overlay
+     * (`HtmlUiInlineHost`), because everything under this tail is destroyed whenever the product
+     * rebuilds the transcript — switching Session, or scrolling this turn out of the virtualized
+     * window — and a hosted document simply stops being painted instead.
      */
     function HtmlUiInlineTail(props) {
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
       const seq = Number.isFinite(props.seq) ? props.seq : undefined;
-      if (sessionId === undefined || seq === undefined) return null;
+      const turnNumber = props.turn !== undefined && Number.isFinite(props.turn.turn) ? props.turn.turn : undefined;
+      const useChatHook = typeof props.useChat === 'function' ? props.useChat : undefined;
+      // Subscribe to the identity-stable stores, never to a derived array: a selector that
+      // mints a new array on every read re-renders forever, which is what happened the last
+      // time this was attempted.
+      const order = useChatHook === undefined ? undefined : useChatHook((snapshot) => snapshot.order);
+      const nodes = useChatHook === undefined ? undefined : useChatHook((snapshot) => snapshot.nodes);
+      const timeline = useChatHook === undefined ? undefined : useChatHook((snapshot) => snapshot.timeline);
 
-      const newest = state.tailSeq.get(sessionId);
-      if (newest === undefined || seq > newest) {
-        // Rendering is not the place to notify, but this is the one chance to learn
-        // which tail is last; the re-render it triggers is what settles the choice.
-        state.tailSeq.set(sessionId, seq);
-      }
-      if (state.tailSeq.get(sessionId) !== seq) return null;
+      // Without a session, a sequence, or the turn this tail closes there is nothing to decide.
+      if (sessionId === undefined || seq === undefined || turnNumber === undefined) return null;
 
-      const records = recordsIn(sessionId, ['inline']);
+      const made = renderCallsIn(order, nodes);
+      const records = recordsIn(sessionId, ['inline']).filter((record) => {
+        const maker = made.get(record.uiId);
+        // Who owns it is decided by exactly one of the two, so one interface is drawn by one
+        // tail: nothing here may be adopted a second time by a turn that did not make it.
+        return (maker === undefined ? turnOwningRecord(record.createdAt, timeline) : maker) === turnNumber;
+      });
       if (records.length === 0) return null;
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: '8px', margin: '4px 0', flexShrink: 0 } },
-        ...records.map((record) =>
-          h(
-            'div',
-            { key: record.uiId, style: { display: 'flex', flexDirection: 'column', minHeight: '0' } },
-            h(HtmlUiFrame, { record, theme: state.theme, variant: 'inline', onDismiss: dismissRecord }),
-          ),
-        ),
+        ...records.map((record) => h(InlineSeat, { key: record.uiId, record })),
       );
     }
 
@@ -2121,6 +2517,10 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         const node = measureRef.current;
         if (node === null || node === undefined || typeof node.getBoundingClientRect !== 'function') return undefined;
+        // The composer's own top edge, for the band a hosted inline document is clipped to: this
+        // seat is inside that block, so its top is the end of the transcript's visible area.
+        state.composerSeat = node;
+        scheduleInlineSync();
         const apply = () => {
           const rect = node.getBoundingClientRect();
           const left = Math.round(rect.left);
@@ -2129,10 +2529,14 @@ window.__ModuleLoader__.load({
             state.column = { left, width };
             bump();
           }
+          scheduleInlineSync();
         };
         apply();
         window.addEventListener('resize', apply);
-        return () => window.removeEventListener('resize', apply);
+        return () => {
+          window.removeEventListener('resize', apply);
+          if (state.composerSeat === node) state.composerSeat = null;
+        };
       }, []);
       const onResizeDown = useCallback(
         (event) => {
@@ -2242,16 +2646,24 @@ window.__ModuleLoader__.load({
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
-      // Unmounting this body is deliberately *not* treated as "the reader closed the
-      // tab". An earlier revision did exactly that — it waited 500 ms and retired the
-      // session's interfaces when nothing had remounted — and it destroyed work: a
-      // session switch unmounts the old body, the new session's column can mount later
-      // than the delay (or not at all), and the previous session's interfaces were
-      // deleted, host-side, so not even a reload brought them back. Switching to
-      // another tab in the same column unmounts it too. "Not on screen right now" and
-      // "closed" are simply not distinguishable from here, so the records are removed
-      // only where the reader says so: the ✕ on a row, or the session page's controls.
-      //
+      // The ✕ on the HTML UI tab belongs to the host and offers no callback, so the tab's
+      // own teardown is the only signal there is. That signal used to be useless: a Session
+      // switch, or another tab taking the column, unmounted this body too, and an earlier
+      // revision that acted on it deleted a session's interfaces for no reason. With
+      // `keepMounted: true` the host holds this body for as long as the tab exists — it
+      // survives hiding, Session changes and docking — so an unmount now means what it
+      // looks like: the reader closed the tab. Riding along with it, this session's
+      // dock-right interfaces are closed as well, because their documents went with the
+      // body: leaving them listed would show the session page rows whose content is gone.
+      // Two teardowns are not the reader's doing and are ignored: the page going away, and
+      // the plugin itself letting the tab go.
+      useEffect(
+        () => () => {
+          if (pageUnloading || rightPaneWiring.released) return;
+          for (const record of recordsIn(sessionId, ['dock-right'])) dismissRecord(record.uiId);
+        },
+        [],
+      );
       // Nothing to show means showing nothing: an explanatory line in an open column
       // costs the reader half the frame for no content. The column itself is not ours
       // to open or close — it may host other plugins' tabs — so the plugin simply never
@@ -2303,7 +2715,7 @@ window.__ModuleLoader__.load({
      * the last one goes; the controller binding stays, because it is what opens the
      * column afterwards and it creates nothing on its own.
      */
-    const rightPaneWiring = { ctx: undefined, wired: false, disposes: [] };
+    const rightPaneWiring = { ctx: undefined, wired: false, released: false, disposes: [] };
 
     function wireRightPaneController(ctx, disposers) {
       if (typeof ctx.inject !== 'function') return;
@@ -2330,6 +2742,7 @@ window.__ModuleLoader__.load({
       const ctx = rightPaneWiring.ctx;
       if (rightPaneWiring.wired || ctx === undefined) return;
       rightPaneWiring.wired = true;
+      rightPaneWiring.released = false;
       const disposes = [];
       // The registration's own disposer is the one that takes it out of the slot tree:
       // keeping only the injection's disposer left the tab registered forever, which is
@@ -2362,6 +2775,12 @@ window.__ModuleLoader__.load({
                 id: TAB_ID,
                 kind: TAB_KIND,
                 multiple: false,
+                // The column hides its pane, and the pane changes Session, without the
+                // reader asking for anything: an unmounted body would destroy every
+                // interface's document and reload it on the way back, losing whatever
+                // lived in it. Keeping a visited body mounted through hiding, Session
+                // changes and docking is what makes dock-right survive.
+                keepMounted: true,
                 title: () => 'HTML UI',
               });
               if (typeof unregister === 'function') disposes.push(unregister);
@@ -2388,6 +2807,9 @@ window.__ModuleLoader__.load({
         return;
       }
       rightPaneWiring.wired = false;
+      // The plugin is taking its tab away, which tears the body down too: not the reader's
+      // doing, and not a reason to close their interfaces.
+      rightPaneWiring.released = true;
       for (const dispose of rightPaneWiring.disposes) {
         try {
           dispose();
@@ -2414,83 +2836,16 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------ overlay
 
-    function HtmlUiOverlay(props) {
-      useStore();
-      const [, force] = useState(0);
-      const viewedRef = useRef(undefined);
-
-      viewedRef.current = resolveViewedSessionId(props.ctx);
-      const sessionId = viewedRef.current;
-
-      useEffect(() => {
-        if (sessionId === undefined) return undefined;
-        let cancelled = false;
-        // The same answer every seat asks for, and the same convergence: publishing
-        // alone would leave a record the host dropped on screen forever.
-        syncSession(sessionId).then((value) => {
-          if (cancelled) return undefined;
-          return value;
-        });
-        return () => {
-          cancelled = true;
-        };
-      }, [sessionId]);
-
-      const themeWatcher = useRef(null);
-      useEffect(() => {
-        const update = () => {
-          const next = readTheme();
-          if (next !== state.theme) {
-            state.theme = next;
-            bump();
-          }
-        };
-        update();
-        if (typeof MutationObserver === 'function' && document.body !== null) {
-          themeWatcher.current = new MutationObserver(update);
-          themeWatcher.current.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'data-theme', 'class'] });
-        }
-        return () => {
-          if (themeWatcher.current !== null) themeWatcher.current.disconnect();
-        };
-      }, []);
-
-      useEffect(() => {
-        const subscriptions = props.ctx.sessions?.list?.subscribe;
-        if (typeof subscriptions !== 'function') return undefined;
-        const unsubscribe = subscriptions.call(props.ctx.sessions.list, () => force((n) => n + 1));
-        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
-      }, [props.ctx]);
-
-      // Every hook runs before any early return: a conditional hook would break the
-      // order the moment a session gains or loses its first record.
-      const sessionRecords = sessionId === undefined ? [] : recordsFor(sessionId);
-      const fullscreenId = activeFullscreen(sessionRecords)?.uiId;
-
-      // Escape is the reflex for leaving a fullscreen layer, and the button alone
-      // would be the only way out for anyone not using a pointer.
-      useEffect(() => {
-        if (fullscreenId === undefined) return undefined;
-        const onKeyDown = (event) => {
-          if (event.key !== 'Escape') return;
-          // Switch back to the chat and keep this interface closed until the user
-          // asks for it again; a newly attached one still opens.
-          state.fullscreen = null;
-          state.fullscreenDismissed.add(fullscreenId);
-          bump();
-        };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-      }, [fullscreenId]);
-
-      if (sessionId === undefined) return null;
-      const records = sessionRecords;
-
+    /**
+     * Every overlay surface of one session, in stacking order.
+     *
+     * The float, background and fullscreen forms live in the frame-wide overlay seat, and so does
+     * every hosted `inline` document — that is what lets all of them outlive a Session switch.
+     * This builds one session's share; the caller decides whether the group is shown.
+     */
+    function overlayLayers(records, fullscreenRecord, dismiss) {
       const floats = records.filter((record) => record.placement === 'float');
       const backgrounds = records.filter((record) => record.placement === 'background');
-      const fullscreenRecord = activeFullscreen(records);
-
-      const dismiss = dismissRecord;
 
       const leaveFullscreen = (uiId) => {
         state.fullscreen = null;
@@ -2499,6 +2854,14 @@ window.__ModuleLoader__.load({
       };
 
       const layers = [];
+
+      for (const record of records) {
+        // An interface is hosted once its seat has been on screen — the transcript still decides
+        // *where* an inline document belongs, this only takes over *drawing* it. A page load
+        // therefore builds the documents of the turns actually rendered, not every old one.
+        if (record.placement !== 'inline' || !state.inlineHosted.has(record.uiId)) continue;
+        layers.push(h(HtmlUiInlineHost, { key: `inline-${record.uiId}`, record }));
+      }
 
       for (const record of backgrounds) {
         layers.push(
@@ -2607,10 +2970,155 @@ window.__ModuleLoader__.load({
         );
       }
 
+      return layers;
+    }
+
+    function HtmlUiOverlay(props) {
+      useStore();
+      const [, force] = useState(0);
+      const viewedRef = useRef(undefined);
+
+      viewedRef.current = resolveViewedSessionId(props.ctx);
+      const sessionId = viewedRef.current;
+
+      useEffect(() => {
+        if (sessionId === undefined) return undefined;
+        let cancelled = false;
+        // The same answer every seat asks for, and the same convergence: publishing
+        // alone would leave a record the host dropped on screen forever.
+        syncSession(sessionId).then((value) => {
+          if (cancelled) return undefined;
+          return value;
+        });
+        return () => {
+          cancelled = true;
+        };
+      }, [sessionId]);
+
+      const themeWatcher = useRef(null);
+      useEffect(() => {
+        const update = () => {
+          const next = readTheme();
+          if (next !== state.theme) {
+            state.theme = next;
+            bump();
+          }
+        };
+        update();
+        if (typeof MutationObserver === 'function' && document.body !== null) {
+          themeWatcher.current = new MutationObserver(update);
+          themeWatcher.current.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'data-theme', 'class'] });
+        }
+        return () => {
+          if (themeWatcher.current !== null) themeWatcher.current.disconnect();
+        };
+      }, []);
+
+      useEffect(() => {
+        const subscriptions = props.ctx.sessions?.list?.subscribe;
+        if (typeof subscriptions !== 'function') return undefined;
+        const unsubscribe = subscriptions.call(props.ctx.sessions.list, () => force((n) => n + 1));
+        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+      }, [props.ctx]);
+
+      // Every hook runs before any early return: a conditional hook would break the
+      // order the moment a session gains or loses its first record.
+      const sessionRecords = sessionId === undefined ? [] : recordsFor(sessionId);
+      const fullscreenId = activeFullscreen(sessionRecords)?.uiId;
+
+      // Escape is the reflex for leaving a fullscreen layer, and the button alone
+      // would be the only way out for anyone not using a pointer.
+      useEffect(() => {
+        if (fullscreenId === undefined) return undefined;
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return;
+          // Switch back to the chat and keep this interface closed until the user
+          // asks for it again; a newly attached one still opens.
+          state.fullscreen = null;
+          state.fullscreenDismissed.add(fullscreenId);
+          bump();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      }, [fullscreenId]);
+
+      // The hosted inline frames are placed imperatively: a fixed layer does not scroll with the
+      // transcript by itself, so every scroll and resize re-places them. The scroll listener is
+      // captured, which hears the transcript's own scroller without this seat being inside it.
+      useEffect(() => {
+        if (typeof window !== 'object' || window === null || typeof window.addEventListener !== 'function') return undefined;
+        const place = (event) => {
+          // A scroll teaches us which box actually scrolls a seat: the event's target *is* that
+          // scroller. The walk up the ancestors finds it as well, but this is the ground truth,
+          // and preferring it means a layout the walk misreads corrects itself on first scroll.
+          const target = event === null || event === undefined ? undefined : event.target;
+          if (
+            target !== undefined &&
+            target !== null &&
+            typeof target.getBoundingClientRect === 'function' &&
+            typeof target.contains === 'function'
+          ) {
+            for (const [uiId, seat] of state.inlineSeats) {
+              if (seat.scroller !== target && target.contains(seat.element)) {
+                state.inlineSeats.set(uiId, { element: seat.element, scroller: target });
+              }
+            }
+          }
+          syncInlineBoxes();
+        };
+        window.addEventListener('scroll', place, { capture: true, passive: true });
+        window.addEventListener('resize', place);
+        return () => {
+          window.removeEventListener('scroll', place, { capture: true });
+          window.removeEventListener('resize', place);
+        };
+      }, []);
+
+      // Any render of this seat may have moved something a hosted frame is placed against: a
+      // height arrived, a turn closed, a record appeared, the theme changed. One coalesced
+      // re-placement per frame keeps them aligned without a permanent loop.
+      useEffect(() => {
+        scheduleInlineSync();
+      });
+
+      // One group per session that holds an overlay surface, and only the reader's own is
+      // shown. This seat is frame-wide, so it is the one place a document can outlive a
+      // Session switch: rendering the viewed session alone — which is what this did before —
+      // unmounted every float and fullscreen layer of the session being left, so coming back
+      // reloaded those documents and lost whatever lived in them. Hiding a group with
+      // `display: none` keeps its documents alive, exactly as a minimized float already was.
+      //
+      // The order is by session id and every group is keyed by its session, so a switch leaves
+      // each group exactly where it was and React reconciles the whole subtree as unchanged.
+      const owners = Array.from(state.bySession.keys()).sort();
+      const groups = [];
+
+      for (const owner of owners) {
+        const records = recordsFor(owner);
+        const layers = overlayLayers(records, activeFullscreen(records), dismissRecord);
+        if (layers.length === 0) continue;
+        groups.push(
+          h(
+            'div',
+            {
+              key: owner,
+              // Which session's surfaces this group holds, so the page (and anyone reading the
+              // DOM while a switch is being diagnosed) can tell two groups apart.
+              'data-htmlui-overlay': owner,
+              style: { display: owner === sessionId ? 'contents' : 'none' },
+            },
+            ...layers,
+          ),
+        );
+      }
+
+      // Nothing to show and nothing to keep alive: no session, no surfaces.
+      if (groups.length === 0 && sessionId === undefined) return null;
+
       return h(
         'div',
         { style: { position: 'fixed', inset: '0', pointerEvents: 'none' } },
-        ...layers,
+        ...groups,
         h(HtmlUiCreateDialog, { ctx: props.ctx }),
       );
     }
@@ -3207,7 +3715,7 @@ window.__ModuleLoader__.load({
                 style: { fontSize: '10.5px', fontFamily: 'ui-monospace, Consolas, monospace', color: 'var(--dsw-alias-label-secondary, #888)', opacity: 0.8 },
                 title: tr('buildTagHint', 'The browser half this page is running'),
               },
-              CLIENT_BUILD,
+              CLIENT_VERSION,
             ),
             h(
               'div',
@@ -3588,6 +4096,13 @@ window.__ModuleLoader__.load({
         HtmlUiManager,
         HtmlUiTemplateButton,
         HtmlUiInlineTail,
+        InlineSeat,
+        HtmlUiInlineHost,
+        inlineHeightOf,
+        claimInlineSeat,
+        releaseInlineSeat,
+        scrollTranscriptBy,
+        transcriptBandBottom,
         HtmlUiBoundary,
         guarded,
         ReactComponent,

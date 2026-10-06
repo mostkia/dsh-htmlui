@@ -145,8 +145,48 @@
     if (data.__dshHtmlUi === 'theme') applyTheme(data.theme);
   });
 
-  /** Subscribe to one event type; the single path both `on` and `ready` take. */
-  function subscribe(type, handler) {
+  /**
+   * Hand the wheel to the conversation when nothing here can use it.
+   *
+   * An inline document used to be a child of the transcript, so the browser's own scroll chaining
+   * carried a wheel it could not use up to the conversation. It is hosted outside the transcript
+   * now, which means that chain has nowhere to go and a wheel over a document with nothing to
+   * scroll would do nothing at all. The decision is made synchronously and without
+   * `preventDefault`, on a passive listener: when a scrollable ancestor of the pointer still has
+   * room in the wheel's direction the browser scrolls it and nothing is forwarded; otherwise the
+   * host scrolls the conversation by the same delta, which is exactly what chaining did.
+   */
+  function watchWheel() {
+    if (typeof document.addEventListener !== 'function') return;
+
+    /** Whether this element can still scroll the way the wheel is pushing. */
+    function hasRoom(element, dx, dy) {
+      if (element === null || element === undefined) return false;
+      var vertical = dy < 0 ? element.scrollTop > 0 : dy > 0 ? element.scrollTop + element.clientHeight < element.scrollHeight - 1 : false;
+      var horizontal = dx < 0 ? element.scrollLeft > 0 : dx > 0 ? element.scrollLeft + element.clientWidth < element.scrollWidth - 1 : false;
+      return vertical || horizontal;
+    }
+
+    document.addEventListener(
+      'wheel',
+      function (event) {
+        // A pinch gesture zooms; it is not a scroll to forward.
+        if (event.ctrlKey === true) return;
+        var dx = event.deltaX;
+        var dy = event.deltaY;
+        var node = event.target;
+        while (node !== null && node !== undefined) {
+          if (hasRoom(node, dx, dy)) return;
+          node = node.parentElement;
+        }
+        var factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight || 800 : 1;
+        notifyHost('wheel', { deltaX: dx * factor, deltaY: dy * factor });
+      },
+      { passive: true },
+    );
+  }
+
+  /** Subscribe to one event type; the single path both `on` and `ready` take. */  function subscribe(type, handler) {
     if (typeof type !== 'string' || typeof handler !== 'function') return function () {};
     // The document's own script runs after the bridge, so a `ready` handler
     // registered then would never see the event that already fired.
@@ -278,6 +318,7 @@
   window.addEventListener('resize', measure);
   window.addEventListener('load', measure);
   measure();
+  watchWheel();
 
   readyDetail = { uiId: uiId, sessionId: sessionId, theme: theme };
   emit('ready', readyDetail);
