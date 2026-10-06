@@ -3,6 +3,43 @@
 This is the release checklist for maintainers. It contains no account names,
 machine paths, or tokens: fill those in from your own environment.
 
+## Pushing, on a machine behind a proxy
+
+`git` does **not** read the Windows system proxy — a browser or `gh` can be online
+while `git` still answers `Failed to connect to github.com:443`. `gh` reads the
+system proxy by itself, which is why repository creation succeeds while a push
+fails. The observed sequence, and the one worth repeating:
+
+1. **Try the network bare first**, without touching any configuration:
+
+   ```sh
+   git -c http.proxy= -c https.proxy= push
+   ```
+
+   `-c` applies to that one command, so a machine that does not need a proxy is
+   never made to use one.
+
+2. **If it fails, stop and say so.** Do not hunt for a proxy port, probe ports, or
+   switch to a mirror: ask the operator to start the proxy and to confirm it.
+
+3. **Push through the proxy** once they confirm. A permanent answer is a global
+   setting, which costs nothing while the proxy runs and makes `git` fail fast
+   when it does not:
+
+   ```sh
+   git config --global http.proxy  http://127.0.0.1:<http-inbound-port>
+   git config --global https.proxy http://127.0.0.1:<http-inbound-port>
+   git config --global --unset http.proxy   # to undo both
+   ```
+
+   For v2rayN that inbound is **10809** (SOCKS is 10808). The `127.0.0.1:58341`
+   style lines in its log are per-connection *source* ports, not the listener —
+   do not read a port out of them.
+
+A sandboxed runner may also fail with `schannel: SEC_E_NO_CREDENTIALS`: the
+credential manager talks over a named pipe, which a confined process cannot open,
+so the push needs a one-shot wider permission. That is unrelated to the proxy.
+
 ## 0. Preconditions
 
 Walk [VERIFY.md](VERIFY.md) on a live host before tagging: it is the acceptance
