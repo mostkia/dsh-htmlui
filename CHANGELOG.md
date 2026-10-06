@@ -6,6 +6,32 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Added
 
+- Slot rows: the bulk half of a slot. A slot *value* is inlined into the document, which is what
+  makes `dshHTML.store.get` synchronous — and also why it has to stay small (192 KiB), so a
+  notebook ran out of room. `dshHTML.store.rows` adds records addressed by key, kept in one
+  SQLite file per slot (`$DSH_HOME/htmlui/store/<name>.db`, through `node:sqlite`, which ships
+  with Node — still no dependency, and the package's engine floor already guarantees it):
+  `keys()` pages metadata (key, title, size, time) so a list is drawn without fetching any body,
+  `get()` / `set()` / `remove()` move one record at a time so a large collection never rewrites
+  itself, and `search()` scans keys, titles, and text — a `LIKE` scan rather than FTS5, because
+  the trigram tokenizer cannot answer a two-character Chinese query, which was measured before it
+  was written. A row may be 16 MiB, and the number of rows and of slots is no longer limited. No
+  SQL text crosses the bridge: keys and values are bound parameters against host-written
+  statements, so a document cannot reach anything outside its own slot (a raw-SQL channel would
+  have had to block `ATTACH`, which `node:sqlite` does not expose a lever for). Row change events
+  carry the key rather than the body, and row reads have their own, wider rate limit. `/health`
+  now reports each slot's kind, row count, and bytes.
+- The shared store: named slots a document can keep data in when the data has to outlive the
+  panel. `dshHTML.state` is keyed by the interface — closing the panel makes its value
+  unreachable — and the sandbox has no `localStorage`, so a notebook had no honest place to put
+  its pages. A document declares the names it uses
+  (`<meta name="dsh-htmlui" content="store=notes">`), reads them synchronously (the values are
+  inlined with the document, so the first frame can already paint them), writes them with
+  `dshHTML.store.set(...)`, and hears about another panel's write over the existing SSE stream
+  (`dshHTML.store.on(...)`, which carries the new value so no second request is needed). The
+  declaration is also the permission model: an interface may touch exactly the slots it named.
+  A slot value lives in `$DSH_HOME/htmlui/store/<name>.json`, eight names per document, and
+  nothing but an explicit `store.remove(name)` — or deleting the file by hand — ever removes it.
 - A template drawer in the composer (`⟨/⟩ 模板`): it lists the catalogue, applies
   a template straight into the session with no model round trip, and offers to
   hand the instruction to the model instead. Two page-facing routes back it
@@ -81,6 +107,13 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- `css` and `js` are merged whatever the source, and a dropped argument is reported. Both were
+  only merged for `html` and `path`, so a `template` render silently ignored them: the caller saw
+  `status=ok`, assumed its script was in the document, and spent turns on why nothing ran. The
+  merge is uniform now, and the result names what happened — `merged=css,js`, and `ignored=…` plus
+  a hint when a call passed more than one source (`template` > `path` > `html`) or `variables`
+  without a template. A file- or template-backed document keeps its old latitude for inline
+  supplements: only the composed-document cap applies, not the inline-fragment cap.
 - Reasoning no longer arrives as assistant text. `StreamChunk` is a tagged union
   in which `text-delta` and `reasoning-delta` both carry `text`, so the previous
   mapping leaked the model's thinking into the answer an interface displayed; the
@@ -89,8 +122,6 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   declares no doctype, and a document without one is parsed in quirks mode, where
   the box model differs from what any modern stylesheet assumes. The composed
   document adds one when the author wrote none, and never rewrites what is stored.
-### Fixed
-
 - The wheel still reaches the conversation through a hosted `inline` document. Hosting moved the
   frame out of the transcript, so the browser's own scroll chaining — which used to carry a wheel
   the document could not use up to the conversation — had nowhere to go, and a wheel over a

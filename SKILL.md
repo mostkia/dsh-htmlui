@@ -43,6 +43,11 @@ folder picker). Nothing else is listed — no bundled samples, no hidden store �
 - `html_ui op=render template=blank` starts an empty project.
 - `html_ui_template op=save name=<slug>` writes into that directory, so the user can
   reuse it from the dialog. With no directory chosen it fails and says so.
+- `css` and `js` are merged into the document **whatever the source** — `html`, `path`,
+  and `template` alike — and the result says so (`merged=css,js`). If you pass more than
+  one source, one wins (`template` > `path` > `html`) and the others come back as
+  `ignored=…` with a hint: nothing is dropped silently. `variables` only mean something
+  with a template, and are reported the same way.
 
 ## Placement
 | `placement` | Where it lives |
@@ -98,10 +103,12 @@ declares nothing keeps the placement the record already has.
 |---|---|
 | `dshHTML.send(action, data)` | Send an interaction to the model. It arrives as a user message carrying `[html-ui:action]`. Returns `{ ok, actionId }`. |
 | `dshHTML.send(action, data, { steer: true })` | Same, but steers the running turn instead of queueing the next one. |
-| `dshHTML.state.get()` / `.set(value)` | Server-side state for this document; survives reloads (this sandbox has no `localStorage`). |
+| `dshHTML.state.get()` / `.set(value)` | Server-side state for this document; survives reloads (this sandbox has no `localStorage`). It belongs to *this panel of this session*: closing the interface throws the key away. |
+| `dshHTML.store.get(name)` / `.set(name, value)` | The **value layer** of a named slot: small, synchronous, shared by every panel that declared it, kept on disk. `get` is synchronous, `set` returns `{ ok, bytes }`, and the data outlives this panel, this session, and a host restart. `remove(name)` forgets one, `list()` reports what this document declared, `on(handler)` hears about writes from any other panel. |
+| `dshHTML.store.rows.*` | The **row layer** of the same slot: many records addressed by a key, in SQLite, fetched when wanted — this is where bulk data goes. `keys(name, {offset, limit})`, `get(name, key)`, `set(name, key, value, {title})`, `remove(name, key)`, `search(name, text, {limit})`, `on(handler)`. All of them return promises. |
 | `dshHTML.resize('520x420')` | Ask the host to resize the surface. |
 | `dshHTML.close()` | Ask the host to remove the surface. |
-| `dshHTML.on(type, handler)` | `assistant` (streamed model text, and `{ type: 'tool', name }` while a tool call streams), `reasoning` (the model's thinking, kept apart from its answer), `session`, `action`, `ui`, `theme`, `ready`. |
+| `dshHTML.on(type, handler)` | `assistant` (streamed model text, and `{ type: 'tool', name }` while a tool call streams), `reasoning` (the model's thinking, kept apart from its answer), `session`, `action`, `store`, `ui`, `theme`, `ready`. |
 | `dshHTML.ready(handler)` | The immediate form of `on('ready', …)`: it fires right away with `{ uiId, sessionId, theme }`, and returns a disposer. |
 | `dshHTML.stream()` | Open the SSE stream explicitly. |
 | `dshHTML.theme()` | `'light'` or `'dark'`. |
@@ -113,6 +120,48 @@ manages the surface list, and any change that remounts a seat recreates the ifra
 which reloads your document and clears everything it held — scroll position, form
 input, a chart's own data. `state.get()`/`state.set()` live on the host, so they
 come back after a reload, and they are the only storage this sandbox has.
+
+**When the data has to outlive the panel, use a slot.** `state` is keyed by the
+interface, so closing the panel makes its value unreachable; a slot is keyed by name
+and stays on disk. Declare the names in the document head, and only those names are
+readable and writable:
+
+```html
+<meta name="dsh-htmlui" content="placement=dock-right; store=notes">
+```
+
+A slot has two layers, and picking the right one is the whole design decision:
+
+```js
+// Value layer — small, and it travels with the document.
+const prefs = dshHTML.store.get('notes') ?? {};        // synchronous: it came with the document
+await dshHTML.store.set('notes', { ...prefs, tab: id }); // { ok, bytes }; capped at 192 KiB
+dshHTML.store.on((change) => {                          // another panel wrote the value
+  if (change.slot === 'notes' && change.uiId !== dshHTML.uiId) render(change.value);
+});
+
+// Row layer — many records, fetched when wanted. This is where a notebook's pages go.
+const page = await dshHTML.store.rows.keys('notes', { limit: 200 });   // metadata only
+const one = await dshHTML.store.rows.get('notes', id);                 // { value, title, … }
+await dshHTML.store.rows.set('notes', id, text, { title: firstLine }); // one row, not the corpus
+const hits = await dshHTML.store.rows.search('notes', '插槽');          // keys, titles, text
+await dshHTML.store.rows.remove('notes', id);
+dshHTML.store.rows.on((change) => { reload(change.key); });            // carries the key, not the body
+```
+
+- **Value layer**: whatever it holds is inlined into every load of the page, so it is
+  capped at 192 KiB — settings, the active tab, a small cache. Reads are synchronous.
+- **Row layer**: rows live in one SQLite file per slot and are fetched on demand, so
+  there is no size ceiling worth planning around — one row may be up to 16 MiB, a slot
+  may hold as many rows as you like, and there is no limit on how many slots exist.
+  A write of one row touches one row, so a big collection never rewrites itself.
+- Both layers use the same declared name, and are independent: the value holds your
+  preferences while the rows hold your data.
+- Search is a substring scan over keys, titles, and text — correct for Chinese at any
+  query length, which an FTS5 trigram index is not (it needs three characters).
+- Eight declared names per document. Use slots for the user's data, never for secrets:
+  everything a document writes is readable by every other document that declares the
+  same name.
 
 ## Design rules
 

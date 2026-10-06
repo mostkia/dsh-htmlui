@@ -6,10 +6,11 @@
  * document to reach the model:
  *
  *   dshHTML.send(action, data)          -> POST an action; the model receives it
- *   dshHTML.state.get() / .set(value)   -> server-side state, survives reload
+ *   dshHTML.state.get() / .set(value)   -> per-interface scratch state; survives a reload only
+ *   dshHTML.store.get(name) / .set(...) -> named slots shared by every panel, kept on disk
  *   dshHTML.resize('520x360')           -> ask the host to resize the surface
  *   dshHTML.close()                     -> ask the host to remove the surface
- *   dshHTML.on(type, handler)           -> 'assistant' | 'session' | 'action' | 'theme' | 'ready'
+ *   dshHTML.on(type, handler)           -> 'assistant' | 'session' | 'action' | 'store' | 'theme' | 'ready'
  *   dshHTML.stream()                    -> open the SSE stream explicitly
  *
  * The document runs in an opaque-origin sandbox: it has no cookies, no storage,
@@ -31,6 +32,14 @@
   var nonce = null;
   var theme = config.initialTheme === 'dark' ? 'dark' : 'light';
   var lastError = null;
+  /**
+   * The shared slots this document declared, as the host sent them: one
+   * `{ value, bytes, updatedAt }` per name. Reads are synchronous because the values travel with
+   * the document, so the first frame can already show them; writes go back over the action
+   * channel. Unlike `state`, a slot belongs to its name — it outlives the panel it was written
+   * from, and every other panel that declared the same name sees the same value.
+   */
+  var slots = config.store !== null && typeof config.store === 'object' ? config.store : {};
   /** The author's script always runs after this one, so `ready` must be replayable. */
   var readyDetail = null;
 
@@ -114,6 +123,18 @@
     });
     events.addEventListener('ui', function (event) {
       emit('ui', JSON.parse(event.data));
+    });
+    events.addEventListener('store', function (event) {
+      var payload = JSON.parse(event.data);
+      // Keep the local copy of the value layer current before announcing it, so a listener that
+      // reads right away sees the value it was told about. A row event carries no body on purpose
+      // — a row can be megabytes — so the reader fetches the row it wants.
+      var isRows = payload !== null && typeof payload === 'object' && payload.layer === 'rows';
+      if (!isRows && payload !== null && typeof payload === 'object' && typeof payload.slot === 'string') {
+        if (payload.removed === true) delete slots[payload.slot];
+        else slots[payload.slot] = { value: payload.value === undefined ? null : payload.value, bytes: payload.bytes, updatedAt: payload.updatedAt };
+      }
+      emit('store', payload);
     });
     events.onerror = function () {
       emit('error', { error: 'stream disconnected; the browser will retry' });
@@ -248,6 +269,124 @@
       },
       set: function (value) {
         return post({ op: 'state', value: value === undefined ? null : value });
+      },
+    },
+    /**
+     * The shared store: named slots that outlive this panel.
+     *
+     * A document reads only the slots it declared in its own `dsh-htmlui` meta
+     * (`content="store=notes"`), which is also all it may write. A slot has two layers: a small
+     * *value* that travels with the document (so `get` is synchronous and a panel paints its
+     * first frame already filled), and *rows* — many records addressed by key, kept in SQLite and
+     * fetched when they are wanted, which is where bulk data belongs. Writes answer `{ ok, bytes }`.
+     */
+    store: {
+      /** One slot's value, or `null` when it was never written. */
+      get: function (name) {
+        var entry = slots[String(name)];
+        return entry !== undefined && entry !== null && entry.value !== undefined ? entry.value : null;
+      },
+      /** Write one slot. Declare it first, or the host refuses with `ok: false`. */
+      set: function (name, value) {
+        var key = String(name);
+        var stored = value === undefined ? null : value;
+        return post({ op: 'store', store: 'set', name: key, value: stored }).then(function (result) {
+          if (result.ok === true) {
+            slots[key] = { value: stored, bytes: result.bytes, updatedAt: result.updatedAt };
+          }
+          return result;
+        });
+      },
+      /** Forget one slot, everywhere: both its value and its rows. */
+      remove: function (name) {
+        var key = String(name);
+        return post({ op: 'store', store: 'remove', name: key }).then(function (result) {
+          if (result.ok === true) delete slots[key];
+          return result;
+        });
+      },
+      /** What this document declared, with the current size of its value. */
+      list: function () {
+        return Object.keys(slots).map(function (name) {
+          var entry = slots[name];
+          return {
+            name: name,
+            bytes: entry !== undefined && entry !== null && typeof entry.bytes === 'number' ? entry.bytes : 0,
+            updatedAt: entry !== undefined && entry !== null && entry.updatedAt !== undefined ? entry.updatedAt : null,
+          };
+        });
+      },
+      /**
+       * Hear about a slot *value* written anywhere — another panel, another session. The handler
+       * gets `{ slot, layer, uiId, value, bytes, updatedAt, removed }`.
+       */
+      on: function (handler) {
+        return subscribe('store', function (change) {
+          if (change !== null && typeof change === 'object' && change.layer === 'rows') return;
+          handler(change);
+        });
+      },
+      /**
+       * The row layer: many records in one slot, each addressed by a key.
+       *
+       * Everything here is asynchronous, because a row is fetched rather than inlined — a
+       * notebook keeps one row per note, lists them with `keys()` (metadata only: key, title,
+       * size, time), and loads a body only when somebody opens it. Rows are stored in SQLite
+       * (`store/<slot>.db`); no SQL text crosses this bridge, so the shape of the data is the
+       * whole API and a document cannot reach anything outside its own slot.
+       */
+      rows: {
+        /**
+         * One page of the index, newest first: `{ ok, total, rows: [{ key, title, bytes, updatedAt }] }`.
+         * Page through `total` with `offset`/`limit` (limit is capped at 500).
+         */
+        keys: function (name, options) {
+          var opts = options !== null && typeof options === 'object' ? options : {};
+          return post({ op: 'store', store: 'rows', rows: 'keys', name: String(name), offset: opts.offset, limit: opts.limit });
+        },
+        /** One row with its value: `{ ok, key, row }`, where `row` is `null` when the key is unused. */
+        get: function (name, key) {
+          return post({ op: 'store', store: 'rows', rows: 'get', name: String(name), key: String(key) });
+        },
+        /**
+         * Write one row. `title` is stored beside the value so a list can show it without
+         * fetching bodies; it is also what `search` looks at, together with the value when the
+         * value is a string.
+         */
+        set: function (name, key, value, options) {
+          var opts = options !== null && typeof options === 'object' ? options : {};
+          return post({
+            op: 'store',
+            store: 'rows',
+            rows: 'set',
+            name: String(name),
+            key: String(key),
+            value: value === undefined ? null : value,
+            title: opts.title,
+          });
+        },
+        /** Delete one row: `{ ok, removed }` (`false` when the key was already unused). */
+        remove: function (name, key) {
+          return post({ op: 'store', store: 'rows', rows: 'remove', name: String(name), key: String(key) });
+        },
+        /**
+         * Substring search over keys, titles, and text — case-insensitive for ASCII, and correct
+         * for Chinese at any query length. Answers metadata only: `{ ok, rows }`.
+         */
+        search: function (name, text, options) {
+          var opts = options !== null && typeof options === 'object' ? options : {};
+          return post({ op: 'store', store: 'rows', rows: 'search', name: String(name), text: String(text), limit: opts.limit });
+        },
+        /**
+         * Hear about rows written anywhere. The handler gets `{ slot, layer: 'rows', key, uiId,
+         * bytes, updatedAt, removed }` — no body, so fetch the row you care about.
+         */
+        on: function (handler) {
+          return subscribe('store', function (change) {
+            if (change === null || typeof change !== 'object' || change.layer !== 'rows') return;
+            handler(change);
+          });
+        },
       },
     },
     resize: function (size) {

@@ -266,6 +266,69 @@ test('a wheel the document cannot use is forwarded to the conversation', () => {
   assert.equal(wheel().length, 3, 'a pinch gesture is left alone');
 });
 
+test('the shared store reads at once, writes through the host, and follows other panels', async () => {
+  // The store is the one place a document's data outlives the panel that wrote it, so the bridge
+  // has to be honest about both halves: reads are synchronous (the values travel with the
+  // document, which is what lets a notebook paint its pages in the first frame) and writes are a
+  // round trip that also updates the local copy.
+  const env = loadBridge(Object.assign({}, baseConfig, { store: { notes: { value: { pages: 2 }, bytes: 20, updatedAt: 1 } } }));
+  const store = env.window.dshHTML.store;
+  assert.deepEqual(store.get('notes'), { pages: 2 }, 'a declared slot is readable immediately');
+  assert.equal(store.get('elsewhere'), null, 'an undeclared name reads as null');
+  assert.deepEqual(store.list().map((entry) => entry.name), ['notes']);
+
+  const written = await store.set('notes', { pages: 3 });
+  assert.equal(written.ok, true);
+  const call = env.calls.find((entry) => entry.kind === 'fetch' && entry.body.op === 'store');
+  assert.deepEqual(call.body, { t: 'tok-123', uiId: 'ui-1a2b3c4d', op: 'store', store: 'set', name: 'notes', value: { pages: 3 } });
+  assert.deepEqual(store.get('notes'), { pages: 3 }, 'the local copy follows the write');
+
+  // Another panel's write arrives over the stream, and the local copy is current by the time a
+  // listener runs: a reader that reacts to the event never sees a stale value.
+  const seen = [];
+  store.on((detail) => seen.push([detail.slot, store.get(detail.slot)]));
+  env.window.dshHTML.stream().emit('store', { slot: 'notes', uiId: 'ui-remote', value: { pages: 9 }, bytes: 21, updatedAt: 2 });
+  assert.deepEqual(seen, [['notes', { pages: 9 }]], 'the change is applied before the listener reads it');
+
+  await store.remove('notes');
+  assert.equal(store.get('notes'), null, 'a removed slot reads as empty again');
+});
+
+test('the row layer speaks keys, pages, and search, and keeps its events apart', async () => {
+  // A row is fetched rather than inlined, so the whole rows API is promises; and its events are
+  // metadata only, which is why they must not be confused with the value layer's value-carrying
+  // events on the same stream.
+  const env = loadBridge(Object.assign({}, baseConfig, { store: { notes: { value: null, bytes: 0, updatedAt: null } } }));
+  const rows = env.window.dshHTML.store.rows;
+
+  await rows.set('notes', 'n1', '第一条', { title: '会议' });
+  const setCall = env.calls.filter((entry) => entry.kind === 'fetch' && entry.body.rows === 'set').pop();
+  assert.deepEqual(setCall.body, { t: 'tok-123', uiId: 'ui-1a2b3c4d', op: 'store', store: 'rows', rows: 'set', name: 'notes', key: 'n1', value: '第一条', title: '会议' });
+
+  await rows.keys('notes', { offset: 0, limit: 20 });
+  assert.equal(env.calls.filter((entry) => entry.body.rows === 'keys').pop().body.limit, 20);
+  await rows.get('notes', 'n1');
+  assert.equal(env.calls.filter((entry) => entry.body.rows === 'get').pop().body.key, 'n1');
+  await rows.search('notes', '插槽', { limit: 5 });
+  const search = env.calls.filter((entry) => entry.body.rows === 'search').pop();
+  assert.equal(search.body.text, '插槽');
+  assert.equal(search.body.limit, 5);
+  await rows.remove('notes', 'n1');
+  assert.equal(env.calls.filter((entry) => entry.body.rows === 'remove').pop().body.key, 'n1');
+
+  // Two subscriptions, one stream: each sees only its own layer.
+  const valueSeen = [];
+  const rowSeen = [];
+  env.window.dshHTML.store.on((change) => valueSeen.push(change));
+  rows.on((change) => rowSeen.push(change));
+  const stream = env.window.dshHTML.stream();
+  stream.emit('store', { slot: 'notes', layer: 'rows', uiId: 'ui-remote', key: 'n2', bytes: 12, updatedAt: 3, removed: false });
+  stream.emit('store', { slot: 'notes', layer: 'value', uiId: 'ui-remote', value: { a: 1 }, bytes: 8, updatedAt: 4, removed: false });
+  assert.deepEqual(rowSeen.map((change) => change.key), ['n2']);
+  assert.deepEqual(valueSeen.map((change) => change.value), [{ a: 1 }], 'the value layer ignores row events');
+  assert.deepEqual(env.window.dshHTML.store.get('notes'), { a: 1 }, 'and its local copy follows only its own');
+});
+
 test('an unconfigured bridge fails closed instead of throwing', async () => {
   const env = loadBridge(undefined);
   const bridge = env.window.dshHTML;

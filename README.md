@@ -120,9 +120,23 @@ shows up in the conversation, and what to inspect for a given symptom.
   tool card, the composer dock, the frame-wide overlay, and puts each document in an
   iframe.
 - **Bridge** (`assets/bridge.js`, injected when served): exposes `window.dshHTML`
-  with `send`, `state`, `resize`, `close`, `on(...)` and `ready(...)`. Visible text
+  with `send`, `state`, `store`, `store.rows`, `resize`, `close`, `on(...)` and `ready(...)`. Visible text
   in the interfaces goes through the client locale service (en/zh dictionaries
   ship with the package), falling back to English constants when it is absent.
+- **Slots** (`$DSH_HOME/htmlui/store/`): the one storage that is not tied to a
+  session or a panel. A document declares the names it uses
+  (`<meta name="dsh-htmlui" content="store=notes">`) and then reaches them through
+  `dshHTML.store`. A slot has two layers: its *value* is small and travels with the
+  document (synchronous reads, 192 KiB cap — settings, the active tab), while its *rows*
+  live in one SQLite file per slot (`<name>.db`, via `node:sqlite`, so still no
+  dependency), are fetched on demand, and are where bulk data belongs — a row may be up
+  to 16 MiB, one write touches one row, and neither the number of rows nor the number of
+  slots is limited. Data survives closing the panel, closing the session, and restarting
+  the host, and every other document that declared the same name hears about a change
+  over SSE (a value event carries the value; a row event carries the key, and the reader
+  fetches the body). Nothing is removed except by an explicit `store.remove(name)` /
+  `store.rows.remove(name, key)`, or by deleting the file. There is no manager yet:
+  `GET /health` reports each slot's kind, row count, and bytes.
 
 **The model never receives the document body**: it reads a compact summary of the
 tool result (`ui_id` / `placement` / `bytes` / revision), while the browser loads the
@@ -196,7 +210,8 @@ All row configuration is optional, and none of it needs a machine path:
 Runtime data lives under `$DSH_HOME/htmlui`: `ui/<id>/index.html` (the document as
 authored — clean and portable on disk, with nothing injected into it),
 `templates/<name>/` (hosted templates) or `templates/<name>.html` (hand-written ones),
-`state/<session>.json`, and `secret`, which backs the capability tokens. Deleting a
+`state/<session>.json` (per-panel scratch), `store/<name>.json` (the shared slots),
+and `secret`, which backs the capability tokens. Deleting a
 `ui/<id>/` directory by hand is always safe: the record goes with it and the interface
 disappears from the session. (Records whose session no longer exists are kept rather
 than collected, so an interface never vanishes just because its session was archived.)
@@ -224,7 +239,7 @@ model sees it in `html_ui op=list`, and can update or close it.
 ## Development
 
 ```sh
-npm test        # 158 assertions: package integrity 13 + doc contract 10 + host 40 + browser 38 + bridge 11 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
+npm test        # 165 assertions: package integrity 13 + doc contract 10 + host 45 + browser 38 + bridge 13 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
 npm run check   # syntax-checks the three shipped scripts, then runs the tests
 ```
 

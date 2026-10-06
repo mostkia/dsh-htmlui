@@ -225,6 +225,27 @@ function exec(sessionId = 'session-test') {
   return { agent: { session: { id: sessionId, header: { cwd: scratch } } } };
 }
 
+/** Mint a capability token the way a browser does: through the ticket route, not by hand. */
+async function capabilityFor(uiId) {
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId }),
+  });
+  return /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+}
+
+/** One rpc call from a document, with the ticket already attached. */
+async function rpc(uiId, capability, body) {
+  return callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+    body: JSON.stringify(Object.assign({ t: capability, uiId }, body)),
+  });
+}
+
 test('registers the http carrier, both tools, and the prompt contract', () => {
   assert.equal(harness.server.routes.length, 1);
   assert.equal(route().kind, 'prefix');
@@ -482,6 +503,201 @@ test('state written by a frame survives a host restart', async () => {
   assert.equal(written.status, 200);
   const reloaded = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}?t=${capability}` });
   assert.ok(reloaded.text.includes('"step":3'), 'the persisted state is re-injected on reload');
+});
+
+test('a shared slot outlives the interface that wrote it, and follows its name', async () => {
+  // The whole point of the store: `state` dies with the panel it belongs to, while a slot belongs
+  // to its *name*. A notebook that declares `store=notes` has to still find its pages after that
+  // panel is closed and another one — in another session — is opened.
+  const declaration = '<meta name="dsh-htmlui" content="store=notes">';
+  const first = await tool('html_ui').execute({ op: 'render', html: `${declaration}<p>notebook</p>` }, exec('session-slots'));
+  assert.equal(first.ok, true);
+  assert.equal(first.store, 'notes', 'the declaration is reported back to the model');
+
+  const capabilityOf = async (uiId) => {
+    const entry = await callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+      headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+      body: JSON.stringify({ uiId }),
+    });
+    return /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+  };
+
+  const capability = await capabilityOf(first.uiId);
+  const served = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${first.uiId}?t=${capability}` });
+  assert.ok(served.text.includes('"store":{"notes":{"value":null'), 'a declared slot travels with the document, empty to begin with');
+
+  const written = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/rpc',
+    headers: { host: '127.0.0.1:3080', origin: 'null' },
+    body: JSON.stringify({ t: capability, uiId: first.uiId, op: 'store', store: 'set', name: 'notes', value: { pages: ['a', 'b'] } }),
+  });
+  assert.equal(written.status, 200);
+  assert.equal(JSON.parse(written.text).ok, true);
+
+  const reread = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${first.uiId}?t=${capability}` });
+  assert.ok(reread.text.includes('"pages":["a","b"]'), 'the next load reads it synchronously, with no second request');
+
+  // Closing the interface removes its record, and must not touch the slot.
+  await tool('html_ui').execute({ op: 'close', id: first.uiId }, exec('session-slots'));
+  assert.ok(!existsSync(join(scratch, 'data', 'ui', first.uiId)), 'the interface is gone');
+  assert.ok(existsSync(join(scratch, 'data', 'store', 'notes.json')), 'the slot it wrote is not');
+
+  // Another interface, in another session, declaring the same name, finds the same data.
+  const second = await tool('html_ui').execute({ op: 'render', html: `${declaration}<p>again</p>` }, exec('session-slots-other'));
+  const secondServed = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${second.uiId}?t=${await capabilityOf(second.uiId)}` });
+  assert.ok(secondServed.text.includes('"pages":["a","b"]'), 'a slot is shared by name, across panels and sessions');
+});
+
+test('the store refuses an undeclared name, and caps one slot', async () => {
+  const created = await tool('html_ui').execute(
+    { op: 'render', html: '<meta name="dsh-htmlui" content="store=notes"><p>x</p>' },
+    exec('session-slot-guard'),
+  );
+  const entry = await callRoute(route(), {
+    method: 'POST',
+    url: '/plugins/@mostkia/dsh-htmlui/ui/ticket',
+    headers: { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' },
+    body: JSON.stringify({ uiId: created.uiId }),
+  });
+  const capability = /t=([A-Za-z0-9_-]+)/u.exec(JSON.parse(entry.text).url)[1];
+  const write = (body) =>
+    callRoute(route(), {
+      method: 'POST',
+      url: '/plugins/@mostkia/dsh-htmlui/rpc',
+      headers: { host: '127.0.0.1:3080', origin: 'null' },
+      body: JSON.stringify(Object.assign({ t: capability, uiId: created.uiId, op: 'store', store: 'set' }, body)),
+    });
+
+  // The declaration is the permission: a document cannot reach a slot it never named, and a name
+  // that is not a name cannot steer a write anywhere.
+  assert.equal((await write({ name: 'secrets', value: 1 })).status, 403, 'an undeclared slot is refused');
+  assert.equal((await write({ name: '../../escape', value: 1 })).status, 403, 'a traversal-shaped name is refused');
+  assert.equal((await write({ name: 'notes', value: 'x'.repeat(200 * 1024) })).status, 413, 'an oversized slot is refused');
+  assert.equal((await write({ name: 'notes', value: { ok: true } })).status, 200, 'and a declared one is accepted');
+});
+
+test('slot rows hold bulk data that never travels inside the document', async () => {
+  // A slot has two halves. Its value travels with the document, which is why it stays small; its
+  // rows live in SQLite and are fetched when wanted, which is where a notebook's pages go. The
+  // document itself must stay small no matter how much the rows hold.
+  const declaration = '<meta name="dsh-htmlui" content="store=notepad.rows">';
+  const created = await tool('html_ui').execute({ op: 'render', html: `${declaration}<p>rows</p>` }, exec('session-rows'));
+  assert.equal(created.ok, true);
+  const capability = await capabilityFor(created.uiId);
+  const store = (body) => rpc(created.uiId, capability, Object.assign({ op: 'store' }, body));
+
+  const served = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}?t=${capability}` });
+  assert.ok(served.text.includes('"store":{"notepad.rows":{"value":null'), 'no row is inlined: only the value layer travels');
+
+  for (const [key, text] of [
+    ['n1', '第一条 会议记录'],
+    ['n2', 'milk and eggs'],
+    ['n3', '插槽容量上限的讨论'],
+  ]) {
+    const written = await store({ store: 'rows', rows: 'set', name: 'notepad.rows', key, value: text, title: text.slice(0, 12) });
+    assert.equal(written.status, 200, written.text);
+    assert.equal(JSON.parse(written.text).ok, true);
+  }
+
+  // The index is metadata only — the list can be drawn without fetching any body.
+  const keys = JSON.parse((await store({ store: 'rows', rows: 'keys', name: 'notepad.rows', limit: 10 })).text);
+  assert.equal(keys.total, 3);
+  assert.deepEqual(keys.rows.map((row) => row.key).sort(), ['n1', 'n2', 'n3']);
+  assert.ok(keys.rows.every((row) => row.value === undefined), 'the index never carries a body');
+
+  const one = JSON.parse((await store({ store: 'rows', rows: 'get', name: 'notepad.rows', key: 'n1' })).text);
+  assert.equal(one.row.value, '第一条 会议记录');
+  assert.equal(JSON.parse((await store({ store: 'rows', rows: 'get', name: 'notepad.rows', key: 'nope' })).text).row, null);
+
+  // Two-character Chinese is exactly what a trigram index cannot answer, and why search is a scan.
+  assert.deepEqual(JSON.parse((await store({ store: 'rows', rows: 'search', name: 'notepad.rows', text: '插槽' })).text).rows.map((row) => row.key), ['n3']);
+  assert.deepEqual(JSON.parse((await store({ store: 'rows', rows: 'search', name: 'notepad.rows', text: 'MILK' })).text).rows.map((row) => row.key), ['n2']);
+  assert.deepEqual(JSON.parse((await store({ store: 'rows', rows: 'search', name: 'notepad.rows', text: '   ' })).text).rows, []);
+
+  const removed = JSON.parse((await store({ store: 'rows', rows: 'remove', name: 'notepad.rows', key: 'n2' })).text);
+  assert.equal(removed.removed, true);
+  assert.equal(JSON.parse((await store({ store: 'rows', rows: 'remove', name: 'notepad.rows', key: 'n2' })).text).removed, false, 'removal is idempotent');
+
+  // The two layers of one name are independent, and the value layer still works beside rows.
+  const value = await store({ store: 'set', name: 'notepad.rows', value: { activeId: 'n1' } });
+  assert.equal(JSON.parse(value.text).ok, true);
+  assert.equal(JSON.parse((await store({ store: 'rows', rows: 'get', name: 'notepad.rows', key: 'n3' })).text).row.value, '插槽容量上限的讨论');
+  const reread = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}?t=${capability}` });
+  assert.ok(reread.text.includes('"activeId":"n1"'), 'the value layer is still inlined');
+
+  // Closing the panel must not touch either layer, and another session finds both.
+  await tool('html_ui').execute({ op: 'close', id: created.uiId }, exec('session-rows'));
+  assert.ok(!existsSync(join(scratch, 'data', 'ui', created.uiId)), 'the interface is gone');
+  assert.ok(existsSync(join(scratch, 'data', 'store', 'notepad.rows.db')), 'its row database is not');
+
+  const reopened = await tool('html_ui').execute({ op: 'render', html: declaration }, exec('session-rows-other'));
+  const rows = JSON.parse((await rpc(reopened.uiId, await capabilityFor(reopened.uiId), { op: 'store', store: 'rows', rows: 'keys', name: 'notepad.rows' })).text);
+  assert.equal(rows.total, 2, 'a slot keeps its rows across panels and sessions');
+});
+
+test('slot rows refuse what an interface did not declare, and a row that is too large', async () => {
+  const created = await tool('html_ui').execute(
+    { op: 'render', html: '<meta name="dsh-htmlui" content="store=notes"><p>x</p>' },
+    exec('session-row-guard'),
+  );
+  const capability = await capabilityFor(created.uiId);
+  const store = (body) => rpc(created.uiId, capability, Object.assign({ op: 'store' }, body));
+
+  // The declaration is the permission for both layers, and a key is a key: no shape of it reaches SQL.
+  assert.equal((await store({ store: 'rows', rows: 'set', name: 'other', key: 'k', value: 1 })).status, 403);
+  const emptyKey = await store({ store: 'rows', rows: 'set', name: 'notes', key: '', value: 1 });
+  assert.equal(emptyKey.status, 400);
+  const longKey = await store({ store: 'rows', rows: 'set', name: 'notes', key: 'k'.repeat(201), value: 1 });
+  assert.equal(longKey.status, 400);
+  const quoted = await store({ store: 'rows', rows: 'set', name: 'notes', key: "k'); drop table rows; --", value: 1 });
+  assert.equal(quoted.status, 200, 'a key is data, never SQL');
+  assert.equal(JSON.parse((await store({ store: 'rows', rows: 'keys', name: 'notes' })).text).total, 1, 'the table is intact');
+
+  const oversized = await store({ store: 'rows', rows: 'set', name: 'notes', key: 'big', value: 'x'.repeat(16 * 1024 * 1024 + 1) });
+  assert.equal(oversized.status, 413);
+  assert.equal(JSON.parse((await store({ store: 'rows', rows: 'keys', name: 'notes' })).text).total, 1, 'the refused row was not written');
+});
+
+test('css and js are merged whatever the source, and a dropped argument is reported', async () => {
+  // The trap this closes: a template render used to ignore `js`/`css` without a word, so a caller
+  // saw status=ok and spent turns wondering why its script never ran. Now the merge is uniform, and
+  // anything this call did *not* use is named in the result.
+  const templates = tool('html_ui_template');
+  const saved = await templates.execute(
+    { op: 'save', name: 'harness-merge', html: '<!doctype html><html><head><title>merge</title></head><body><p>base</p></body></html>' },
+    exec(),
+  );
+  assert.equal(saved.ok, true);
+
+  const rendered = await tool('html_ui').execute(
+    { op: 'render', template: 'harness-merge', js: 'window.__merged = 1;', css: '.merged{color:red}' },
+    exec('session-merge'),
+  );
+  assert.equal(rendered.ok, true);
+  assert.equal(rendered.merged, 'css,js');
+  assert.equal(rendered.ignored, '');
+  assert.equal(rendered.hint, undefined, 'nothing was dropped, so there is nothing to warn about');
+  const stored = readFileSync(join(scratch, 'data', 'ui', rendered.uiId, 'index.html'), 'utf8');
+  assert.ok(stored.includes('window.__merged = 1;'), 'the script is in the stored document');
+  assert.ok(stored.includes('.merged{color:red}'), 'and so is the stylesheet');
+
+  // Two sources at once: one wins, and the loser is named rather than swallowed.
+  const both = await tool('html_ui').execute({ op: 'render', template: 'harness-merge', html: '<p>html loses</p>' }, exec('session-merge'));
+  assert.equal(both.ok, true);
+  assert.equal(both.ignored, 'html');
+  assert.match(both.hint, /template source wins/u);
+  assert.ok(!readFileSync(join(scratch, 'data', 'ui', both.uiId, 'index.html'), 'utf8').includes('html loses'));
+
+  // `variables` only mean something with a template, and saying so costs one line.
+  const stray = await tool('html_ui').execute({ op: 'render', html: '<p>inline</p>', variables: { name: 'x' } }, exec('session-merge'));
+  assert.equal(stray.ok, true);
+  assert.equal(stray.ignored, 'variables');
+  assert.equal(stray.merged, '');
+
+  await templates.execute({ op: 'remove', name: 'harness-merge' }, exec());
 });
 
 test('the SSE stream applies the same origin policy as the rest of the carrier', async () => {

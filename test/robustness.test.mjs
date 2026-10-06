@@ -230,7 +230,14 @@ test('nothing hostile ever lands outside the data root', async () => {
   const root = harness.root;
   assert.ok(existsSync(join(root, 'ui')), 'the store keeps its own layout');
   const entries = readdirSync(root).sort();
-  assert.deepEqual(entries, ['secret', 'settings.json', 'state', 'templates', 'ui'], 'the store holds only what it owns');
+  assert.deepEqual(entries, ['secret', 'settings.json', 'state', 'store', 'templates', 'ui'], 'the store holds only what it owns');
+  // The shared store is one flat directory of slot files, and every name in it is a slot name:
+  // a document cannot steer a write out of it through a name, because the name is validated.
+  // A slot has two layers, so two file shapes live here: `<name>.json` for its value, and the
+  // SQLite file `<name>.db` (with the `-wal`/`-shm` companions a live WAL database keeps) for rows.
+  for (const file of readdirSync(join(root, 'store'))) {
+    assert.match(file, /^[a-z0-9][a-z0-9._-]{0,63}(\.json|\.db(-wal|-shm)?)$/u, `${file} must be a slot file`);
+  }
   // Every recorded document is a directory the plugin created, with the two files
   // it writes and nothing else.
   for (const id of readdirSync(join(root, 'ui'))) {

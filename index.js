@@ -24,6 +24,7 @@
  */
 
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createRequire } from 'node:module';
 import {
   existsSync,
   mkdirSync,
@@ -37,6 +38,22 @@ import {
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * SQLite, for the row layer of a slot.
+ *
+ * `node:sqlite` ships with Node — no dependency, no install script — and the package's engine
+ * floor (`^22.19.0 || >=24.0.0`) is above the 22.13 that made it flag-free, so importing it
+ * outright would be honest. It is loaded through `createRequire` anyway, so a runtime outside
+ * that floor loses the row layer and keeps everything else instead of failing to activate.
+ */
+const nodeRequire = createRequire(import.meta.url);
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = nodeRequire('node:sqlite'));
+} catch {
+  DatabaseSync = undefined;
+}
 
 export const name = 'dsh-htmlui';
 
@@ -67,11 +84,43 @@ const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_UI_PER_SESSION = 24;
 const MAX_TEMPLATES = 200;
 const MAX_STATE_BYTES = 64 * 1024;
+/**
+ * One slot *value* of the shared store, and how much it may hold.
+ *
+ * The value layer is the small, synchronous half of a slot: its content travels inside the
+ * document (so `dshHTML.store.get` needs no round trip), which is exactly why it is capped —
+ * whatever it holds is inlined into every load of that page. Bulk data belongs in the row layer
+ * below, which is fetched on demand and has no such ceiling. This cap also sits under
+ * `MAX_BODY_BYTES` on purpose: a full value has to fit in one request body, JSON escaping and
+ * all, or the largest legal value could never be written.
+ */
+const MAX_SLOT_BYTES = 192 * 1024;
+/**
+ * The row layer of a slot: many rows addressed by key, in one SQLite file per slot.
+ *
+ * A row does not travel inside the document — it is fetched when it is wanted — so it is not
+ * capped by what a page can inline the way a slot *value* is. The only bound left is the request
+ * body that carries one write, and it is deliberately far above a note: 16 MiB for the row,
+ * 20 MiB for the body that carries it.
+ */
+const MAX_ROW_BYTES = 16 * 1024 * 1024;
+const ROWS_BODY_BYTES = 20 * 1024 * 1024;
+/** Rows per page, and per search answer. A page is a list the reader scrolls, not a dump. */
+const ROWS_PAGE_MAX = 500;
+const ROW_SEARCH_MAX = 200;
+const ROW_KEY_MAX = 200;
+const ROW_TITLE_MAX = 200;
+const ROW_TEXT_MAX = 200;
+/** How many slots one interface may declare. */
+const MAX_SLOTS_PER_UI = 8;
+const SLOT_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 // Every carrier route shares this cap. State is the largest legitimate payload
 // (MAX_STATE_BYTES); anything above this is a body nobody asked for.
 const MAX_BODY_BYTES = 256 * 1024;
 const SSE_HEARTBEAT_MS = 15_000;
+/** Writes: a burst, then one every 1.5 s. Reads: far wider, because paging and search are normal. */
 const ACTION_BUCKET = { capacity: 8, refillMs: 1_500 };
+const READ_BUCKET = { capacity: 40, refillMs: 100 };
 
 const UI_ID_RE = /^ui-[0-9a-f]{8,32}$/;
 const TEMPLATE_SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -336,12 +385,33 @@ function readDocumentDeclaration(source) {
     ['placement', 'data-dsh-htmlui-placement'],
     ['size', 'data-dsh-htmlui-size'],
     ['title', 'data-dsh-htmlui-title'],
+    ['store', 'data-dsh-htmlui-store'],
   ]) {
     if (declared[key] !== undefined) continue;
     const match = new RegExp(`\\b${attribute}\\s*=\\s*["']([^"']*)["']`, 'iu').exec(text);
     if (match !== null && match[1].trim().length > 0) declared[key] = match[1].trim();
   }
   return declared;
+}
+
+/**
+ * The slots a document declares, normalized.
+ *
+ * A declaration is a comma-separated list — `store=notes,settings` — and it is the whole
+ * permission model for the shared store: an interface may read and write exactly the slots it
+ * named, so an imported document can neither enumerate the store nor touch somebody else's
+ * data. Unusable names are dropped rather than fatal, like every other declaration.
+ */
+function normalizeSlotNames(value) {
+  const parts = Array.isArray(value) ? value : String(value ?? '').split(',');
+  const out = [];
+  for (const part of parts) {
+    const name = String(part ?? '').trim().toLowerCase();
+    if (!SLOT_NAME_RE.test(name) || out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= MAX_SLOTS_PER_UI) break;
+  }
+  return out;
 }
 
 const THEME_STYLE = [
@@ -385,11 +455,14 @@ function createStore(root) {
   const uiRoot = join(root, 'ui');
   const templateRoot = join(root, 'templates');
   const stateRoot = join(root, 'state');
+  /** The named slots documents share: one file per slot, and no session or interface in the path. */
+  const storeRoot = join(root, 'store');
   /** Templates shipped with the package are readable even before anything is saved. */
   const bundledTemplateRoot = fileURLToPath(new URL('./templates/', import.meta.url));
   ensureDir(uiRoot);
   ensureDir(templateRoot);
   ensureDir(stateRoot);
+  ensureDir(storeRoot);
 
   function secret() {
     const path = join(root, 'secret');
@@ -829,10 +902,221 @@ function createStore(root) {
     return value;
   }
 
+  // ------------------------------------------------------------ the shared store
+  //
+  // `state` belongs to one interface of one session: closing the interface throws its key away,
+  // so anything kept there is scratch. A slot belongs to its *name*, outlives every interface
+  // that writes it, and is the reason a notebook can keep its pages. Nothing here deletes a slot
+  // except an explicit removal or the reader deleting the file.
+
+  function slotPath(name) {
+    if (!SLOT_NAME_RE.test(String(name ?? ''))) throw new Error(`invalid slot name: ${name}`);
+    return join(storeRoot, `${name}.json`);
+  }
+
+  /** One slot, or undefined when it was never written. */
+  function readSlot(name) {
+    const file = readJson(slotPath(name), undefined);
+    if (file === null || file === undefined || typeof file !== 'object') return undefined;
+    return { name: String(name), value: file.value ?? null, bytes: Number.isFinite(file.bytes) ? file.bytes : 0, updatedAt: Number.isFinite(file.updatedAt) ? file.updatedAt : 0 };
+  }
+
+  /** Write one slot, and return what was written. */
+  function writeSlot(name, value) {
+    const encoded = JSON.stringify(value ?? null);
+    const record = { name: String(name), value: value ?? null, bytes: byteLength(encoded), updatedAt: Date.now() };
+    writeJsonAtomic(slotPath(name), record);
+    return record;
+  }
+
+  /** Forget one slot. @returns whether it existed. */
+  function removeSlot(name) {
+    const file = slotPath(name);
+    if (!existsSync(file)) return false;
+    rmSync(file, { force: true });
+    return true;
+  }
+
+  /** Every slot the store holds, newest first, one entry per name across both layers. */
+  function listSlots() {
+    let entries = [];
+    try {
+      entries = readdirSync(storeRoot, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const byName = new Map();
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const name = entry.name.endsWith('.json') ? entry.name.slice(0, -'.json'.length) : entry.name.endsWith('.db') ? entry.name.slice(0, -'.db'.length) : undefined;
+      if (name === undefined || !SLOT_NAME_RE.test(name)) continue;
+      const rows = entry.name.endsWith('.db');
+      const slot = rows ? undefined : readSlot(name);
+      const entryFor = byName.get(name) ?? { name, kind: 'value', bytes: 0, rows: undefined, updatedAt: 0 };
+      if (rows) {
+        entryFor.kind = entryFor.kind === 'value' ? 'both' : 'rows';
+        entryFor.updatedAt = Math.max(entryFor.updatedAt, statSync(join(storeRoot, entry.name)).mtimeMs);
+      } else {
+        entryFor.valueBytes = slot === undefined ? 0 : slot.bytes;
+        entryFor.updatedAt = Math.max(entryFor.updatedAt, slot === undefined ? 0 : slot.updatedAt ?? 0);
+      }
+      byName.set(name, entryFor);
+    }
+    const out = [...byName.values()];
+    for (const entry of out) {
+      entry.bytes = (entry.valueBytes ?? 0) + rowsBytes(entry.name);
+      delete entry.valueBytes;
+      entry.rows = rowsCount(entry.name);
+    }
+    out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    return out;
+  }
+
+  // ------------------------------------------------------------------ rows
+  //
+  // The bulk half of a slot: many rows in one SQLite file, addressed by key. Statements are
+  // written here, never sent by a document — a document passes values and keys as bound
+  // parameters, so no text it controls is ever parsed as SQL, and there is no path to ATTACH a
+  // file outside the slot, which is what a raw-SQL channel would otherwise hand it.
+
+  function rowsPath(name) {
+    if (!SLOT_NAME_RE.test(String(name ?? ''))) throw new Error(`invalid slot name: ${name}`);
+    return join(storeRoot, `${name}.db`);
+  }
+
+  function rowsAvailable() {
+    return DatabaseSync !== undefined;
+  }
+
+  /** Open one slot's row database, creating its schema on first use. */
+  function openRows(name) {
+    if (!rowsAvailable()) throw new Error('this runtime has no node:sqlite, so slot rows are unavailable');
+    const db = new DatabaseSync(rowsPath(name));
+    try {
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA busy_timeout = 4000');
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS rows (key TEXT PRIMARY KEY, value TEXT NOT NULL, title TEXT NOT NULL DEFAULT \'\', text TEXT NOT NULL DEFAULT \'\', bytes INTEGER NOT NULL DEFAULT 0, updatedAt INTEGER NOT NULL)',
+      );
+      db.exec('CREATE INDEX IF NOT EXISTS rows_updated ON rows(updatedAt DESC)');
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+    return db;
+  }
+
+  /** Run one prepared body against a slot's database and close it again. */
+  function withRows(name, body) {
+    const db = openRows(name);
+    try {
+      return body(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  function rowRecord(row) {
+    return {
+      key: String(row.key),
+      title: String(row.title ?? ''),
+      bytes: Number(row.bytes ?? 0),
+      updatedAt: Number(row.updatedAt ?? 0),
+    };
+  }
+
+  /** One page of the index: newest first. The reader's list, without any row bodies. */
+  function rowsKeys(name, offset, limit) {
+    return withRows(name, (db) => {
+      const total = Number(db.prepare('SELECT COUNT(*) AS n FROM rows').get().n ?? 0);
+      const rows = db.prepare('SELECT key, title, bytes, updatedAt FROM rows ORDER BY updatedAt DESC LIMIT ? OFFSET ?').all(limit, offset);
+      return { total, rows: rows.map(rowRecord) };
+    });
+  }
+
+  /** One row, value included. */
+  function rowsGet(name, key) {
+    return withRows(name, (db) => {
+      const row = db.prepare('SELECT key, value, title, bytes, updatedAt FROM rows WHERE key = ?').get(key);
+      if (row === undefined) return undefined;
+      let value;
+      try {
+        value = JSON.parse(String(row.value));
+      } catch {
+        value = null;
+      }
+      return Object.assign(rowRecord(row), { value });
+    });
+  }
+
+  function rowsSet(name, key, value, title) {
+    const encoded = JSON.stringify(value ?? null);
+    const plain = typeof value === 'string' ? value.slice(0, 100_000) : '';
+    const bytes = byteLength(encoded);
+    const updatedAt = Date.now();
+    withRows(name, (db) => {
+      db.prepare(
+        'INSERT INTO rows (key, value, title, text, bytes, updatedAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, title = excluded.title, text = excluded.text, bytes = excluded.bytes, updatedAt = excluded.updatedAt',
+      ).run(String(key), encoded, String(title ?? '').slice(0, ROW_TITLE_MAX), plain, bytes, updatedAt);
+    });
+    return { key: String(key), bytes, updatedAt };
+  }
+
+  function rowsRemove(name, key) {
+    return withRows(name, (db) => Number(db.prepare('DELETE FROM rows WHERE key = ?').run(String(key)).changes ?? 0) > 0);
+  }
+
+  /**
+   * Substring search over keys, titles, and text.
+   *
+   * A `LIKE` scan rather than FTS5: the trigram tokenizer needs three characters, and a two
+   * character Chinese query — the common case for this reader — simply does not match with it,
+   * which was measured before this was written. A scan over one slot's rows is the honest trade:
+   * correct for any script and any query length, at the cost of reading the slot's text.
+   */
+  function rowsSearch(name, text, limit) {
+    return withRows(name, (db) => {
+      const needle = `%${String(text).replace(/[%_\\]/gu, (match) => `\\${match}`)}%`;
+      const rows = db
+        .prepare("SELECT key, title, bytes, updatedAt FROM rows WHERE key LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR text LIKE ? ESCAPE '\\' ORDER BY updatedAt DESC LIMIT ?")
+        .all(needle, needle, needle, limit);
+      return { rows: rows.map(rowRecord) };
+    });
+  }
+
+  /**
+   * How many rows a slot holds, for the health probe.
+   *
+   * A slot that has no row database yet must not grow one just because somebody asked for its
+   * size: only an existing file is read.
+   */
+  function rowsCount(name) {
+    try {
+      if (!existsSync(rowsPath(name))) return 0;
+      return rowsKeys(name, 0, 1).total;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Bytes on disk for one slot's row layer, WAL included. */
+  function rowsBytes(name) {
+    let total = 0;
+    for (const suffix of ['.db', '.db-wal', '.db-shm']) {
+      try {
+        total += statSync(join(storeRoot, `${name}${suffix}`)).size;
+      } catch {
+        /* absent */
+      }
+    }
+    return total;
+  }
+
   return {
     root,
     uiRoot,
     stateRoot,
+    storeRoot,
     secret,
     readUi,
     writeUi,
@@ -847,6 +1131,17 @@ function createStore(root) {
     readSettings,
     setTemplatesDir,
     markTemplatesAsked,
+    readSlot,
+    writeSlot,
+    removeSlot,
+    listSlots,
+    rowsAvailable,
+    rowsKeys,
+    rowsGet,
+    rowsSet,
+    rowsRemove,
+    rowsSearch,
+    rowsBytes,
     readState,
     writeState,
     uiPath,
@@ -886,6 +1181,25 @@ function createHub(logger) {
       for (const client of [...clients]) {
         if (client.sessionId !== sessionId) continue;
         if (!write(client, event, payload)) {
+          clients.delete(client);
+          try {
+            client.res.end();
+          } catch {
+            /* already closed */
+          }
+        }
+      }
+    },
+    /**
+     * Push one event to every stream whose document declared a slot.
+     *
+     * The store is shared by name, so the audience of a slot write is not a session: it is
+     * exactly the open interfaces that named this slot, wherever they are.
+     */
+    pushSlot(name, payload, isDeclared) {
+      for (const client of [...clients]) {
+        if (typeof isDeclared === 'function' && !isDeclared(client.uiId)) continue;
+        if (!write(client, 'store', payload)) {
           clients.delete(client);
           try {
             client.res.end();
@@ -1078,22 +1392,28 @@ export function apply(ctx, config) {
   const hub = createHub(ctx.logger);
   const logger = ctx.logger;
 
-  /** Per-UI token buckets keep a runaway document from flooding the model. */
+  /**
+   * Per-UI token buckets keep a runaway document from flooding the model.
+   *
+   * Writes take from the narrow bucket; reads (a list page, one row, a search) from the wide one,
+   * because paging and search-as-you-type are ordinary behaviour, not abuse.
+   */
   const buckets = new Map();
-  function takeToken(uiId) {
+  function takeToken(uiId, spec = ACTION_BUCKET) {
+    const key = `${uiId}|${spec === READ_BUCKET ? 'read' : 'write'}`;
     const now = Date.now();
-    const bucket = buckets.get(uiId) ?? { tokens: ACTION_BUCKET.capacity, at: now };
-    const refill = Math.floor((now - bucket.at) / ACTION_BUCKET.refillMs);
+    const bucket = buckets.get(key) ?? { tokens: spec.capacity, at: now };
+    const refill = Math.floor((now - bucket.at) / spec.refillMs);
     if (refill > 0) {
-      bucket.tokens = Math.min(ACTION_BUCKET.capacity, bucket.tokens + refill);
+      bucket.tokens = Math.min(spec.capacity, bucket.tokens + refill);
       bucket.at = now;
     }
     if (bucket.tokens <= 0) {
-      buckets.set(uiId, bucket);
+      buckets.set(key, bucket);
       return false;
     }
     bucket.tokens -= 1;
-    buckets.set(uiId, bucket);
+    buckets.set(key, bucket);
     return true;
   }
 
@@ -1204,6 +1524,10 @@ export function apply(ctx, config) {
       // Recorded on the record, not read live from the project: an interface keeps the
       // level it was created with even if the project is edited later.
       security: normalizeSecurity(input.security) ?? 'strict',
+      // The shared-store slots this interface may read and write. Recorded on the record for the
+      // same reason as the level: the declaration belongs to the revision that was served, and an
+      // edit to the document must not silently widen what an already-open page may touch.
+      storeSlots: normalizeSlotNames(input.storeSlots),
       sourcePath: input.sourcePath,
       revision: 1,
       bytes: byteLength(input.source),
@@ -1225,6 +1549,9 @@ export function apply(ctx, config) {
       size: input.size ?? current.meta.size,
       template: input.template ?? current.meta.template,
       sourcePath: input.sourcePath ?? current.meta.sourcePath,
+      // A document that declares slots replaces the list; one that declares none keeps them, so
+      // an update that only changes the markup does not quietly cut the document off its data.
+      storeSlots: input.storeSlots === undefined ? current.meta.storeSlots : normalizeSlotNames(input.storeSlots),
       revision: (current.meta.revision ?? 1) + 1,
       bytes: byteLength(input.source),
       updatedAt: Date.now(),
@@ -1240,6 +1567,17 @@ export function apply(ctx, config) {
     store.removeUi(id);
     hub.push(current.meta.sessionId, 'ui', { action: 'close', ui: publicRecord(current.meta) });
     return current.meta;
+  }
+
+  /**
+   * Whether one interface declared a slot.
+   *
+   * Read from the record rather than remembered per stream, so an interface that gains a slot in
+   * an update starts receiving its changes without waiting for a reload.
+   */
+  function slotIsDeclared(name, uiId) {
+    const current = store.readUi(uiId);
+    return current !== undefined && normalizeSlotNames(current.meta.storeSlots).includes(name);
   }
 
   /**
@@ -1273,6 +1611,42 @@ export function apply(ctx, config) {
     return id === undefined || id === null ? undefined : String(id);
   }
 
+  /**
+   * Which inline parts were actually merged, and which arguments were passed but not used.
+   *
+   * A tool call that quietly drops an argument is a trap: the caller sees `status=ok`, assumes the
+   * script it sent is in the document, and spends turns wondering why nothing happened. The merge
+   * itself is now uniform (css and js apply to every source), so `ignored` is down to the source
+   * keys themselves — `html` beside `template`, `path` beside `html`, `variables` without a
+   * template — and it is reported rather than swallowed.
+   */
+  function inlineParts(args) {
+    return ['css', 'js'].filter((key) => typeof args[key] === 'string' && args[key].trim().length > 0);
+  }
+
+  function unusedParts(args, chosen) {
+    const unused = [];
+    for (const key of ['html', 'path', 'template']) {
+      if (key === chosen) continue;
+      if (typeof args[key] === 'string' && args[key].trim().length > 0) unused.push(key);
+    }
+    if (chosen !== 'template' && args.variables !== null && typeof args.variables === 'object' && Object.keys(args.variables ?? {}).length > 0) unused.push('variables');
+    return unused;
+  }
+
+  /**
+   * Inline css/js passed *beside inline html* are part of an inline document, so they share the
+   * inline budget. A file- or template-backed document is not subject to that: its supplements are
+   * bounded by the composed-document cap instead, which the caller checks after composing.
+   */
+  function assertInlinePartsFit(args) {
+    for (const part of [args.css, args.js]) {
+      if (typeof part === 'string' && byteLength(part) > maxInlineBytes) {
+        throw new Error(`inline css/js exceeds maxInlineBytes (${maxInlineBytes}); write it to a file and pass path`);
+      }
+    }
+  }
+
   function readSourceInput(args, cwd) {
     const templateName = typeof args.template === 'string' ? slugify(args.template) : undefined;
     if (args.template !== undefined && templateName === undefined) throw new Error('invalid template name');
@@ -1287,23 +1661,31 @@ export function apply(ctx, config) {
       for (const [key, value] of Object.entries(variables)) {
         source = source.split(`{{${key}}}`).join(String(value));
       }
-      return { source, origin: 'template', template: templateName, templatePlacement: template.meta?.placement, templateSecurity: template.meta?.security };
+      return {
+        // css/js are merged here too: a template is a document like any other, and "the argument
+        // was ignored because you picked the other source" is not a rule anybody should have to
+        // remember.
+        source: mergeInlineParts(source, args.css, args.js),
+        origin: 'template',
+        template: templateName,
+        templatePlacement: template.meta?.placement,
+        templateSecurity: template.meta?.security,
+        templateSlots: template.meta?.store ?? template.meta?.storeSlots,
+        merged: inlineParts(args),
+        ignored: unusedParts(args, 'template'),
+      };
     }
     if (typeof args.path === 'string' && args.path.trim().length > 0) {
       const path = resolveHtmlInputPath(args.path, cwd);
       const source = readTextCapped(path, MAX_DOCUMENT_BYTES);
-      return { source: mergeInlineParts(source, args.css, args.js), origin: 'file', sourcePath: path };
+      return { source: mergeInlineParts(source, args.css, args.js), origin: 'file', sourcePath: path, merged: inlineParts(args), ignored: unusedParts(args, 'path') };
     }
     if (typeof args.html === 'string' && args.html.trim().length > 0) {
       if (byteLength(args.html) > maxInlineBytes) {
         throw new Error(`inline html exceeds maxInlineBytes (${maxInlineBytes}); write it to a file and pass path`);
       }
-      for (const part of [args.css, args.js]) {
-        if (typeof part === 'string' && byteLength(part) > maxInlineBytes) {
-          throw new Error(`inline css/js exceeds maxInlineBytes (${maxInlineBytes}); write it to a file and pass path`);
-        }
-      }
-      return { source: mergeInlineParts(args.html, args.css, args.js), origin: 'inline' };
+      assertInlinePartsFit(args);
+      return { source: mergeInlineParts(args.html, args.css, args.js), origin: 'inline', merged: inlineParts(args), ignored: unusedParts(args, 'html') };
     }
     return undefined;
   }
@@ -1322,6 +1704,13 @@ export function apply(ctx, config) {
       // level is chosen when the project is imported.
       security: { type: 'string', enum: SECURITY_LEVELS },
       template: { type: 'string' },
+      // The shared slots this interface declared, comma-separated. The model can read them back
+      // so it knows which named data an interface it just rendered is wired to.
+      store: { type: 'string' },
+      // Which inline parts were merged into the document, and which arguments this call did not
+      // use. Reported so a caller can never be surprised by an argument that went nowhere.
+      merged: { type: 'string' },
+      ignored: { type: 'string' },
       size: { type: 'string' },
       sessionId: { type: 'string' },
       url: { type: 'string' },
@@ -1366,6 +1755,10 @@ export function apply(ctx, config) {
     if (value.revision !== undefined) lines.push(`revision=${value.revision}`);
     if (value.count !== undefined) lines.push(`count=${value.count}`);
     if (value.summary !== undefined && value.summary.length > 0) lines.push(`list=${value.summary}`);
+    if (value.store !== undefined && value.store.length > 0) lines.push(`store=${value.store}`);
+    if (value.merged !== undefined && value.merged.length > 0) lines.push(`merged=${value.merged}`);
+    if (value.ignored !== undefined && value.ignored.length > 0) lines.push(`ignored=${value.ignored}`);
+    if (value.hint !== undefined && value.op !== 'close' && value.count === undefined) lines.push(`hint=${value.hint}`);
     if (value.op === 'close') lines.push('next=the interface was removed from the conversation');
     else if (value.op === 'list') lines.push('next=use html_ui op=update with an existing ui_id, or op=render for a new one');
     else lines.push(`next=update it later with html_ui op=update id=${value.uiId ?? '<id>'}`);
@@ -1401,7 +1794,7 @@ export function apply(ctx, config) {
   const htmlUiTool = {
     name: 'html_ui',
     description:
-      'Render, update, or close an HTML interface attached to this conversation. The HTML is authored by you and runs in a sandboxed iframe: it can call DSH through the injected window.dshHTML bridge (actions, state, events). Placement decides where it lives: inline (in the transcript), dock-top/dock-bottom (full-width above/below the composer), dock-right (session side panel), float (draggable window), background (click-through layer), fullscreen (takes the session view, with a built-in switch back to the chat), panel (resident dock that updates in place). Prefer writing large documents to a file and passing path; inline html is capped.',
+      'Render, update, or close an HTML interface attached to this conversation. The HTML is authored by you and runs in a sandboxed iframe: it can call DSH through the injected window.dshHTML bridge (actions, state, events). Placement decides where it lives: inline (in the transcript), dock-top/dock-bottom (full-width above/below the composer), dock-right (session side panel), float (draggable window), background (click-through layer), fullscreen (takes the session view, with a built-in switch back to the chat), panel (resident dock that updates in place). A document that has to keep data beyond its own panel declares named slots in its head — <meta name="dsh-htmlui" content="store=notes"> — and then uses dshHTML.store: the value layer (small, synchronous, inlined) for settings, and dshHTML.store.rows (keys/get/set/remove/search over SQLite, up to 16 MiB a row) for bulk data; both outlive the panel, the session, and a host restart. Prefer writing large documents to a file and passing path; inline html is capped.',
     parameters: {
       type: 'object',
       properties: {
@@ -1414,8 +1807,8 @@ export function apply(ctx, config) {
         title: { type: 'string', description: 'Short human title shown by the host chrome and used by the model loop.' },
         html: { type: 'string', description: 'Inline HTML document or fragment. Keep it small; large documents belong in a file.' },
         path: { type: 'string', description: 'Path to an HTML document (.html, .htm, or .xhtml; workspace relative or absolute). Preferred for real interfaces.' },
-        css: { type: 'string', description: 'Extra CSS merged into the document when html or path is used.' },
-        js: { type: 'string', description: 'Extra script merged into the document when html or path is used.' },
+        css: { type: 'string', description: 'Extra CSS always merged into the document, whatever the source (html, path, or template).' },
+        js: { type: 'string', description: 'Extra script always merged into the document, whatever the source (html, path, or template).' },
         placement: {
           type: 'string',
           enum: PLACEMENTS,
@@ -1423,7 +1816,7 @@ export function apply(ctx, config) {
             'Where the interface lives. Defaults to what the document declares for itself (a dsh-htmlui meta tag or data-dsh-htmlui-placement attribute), otherwise inline.',
         },
         size: { type: 'string', description: 'Optional geometry, e.g. "520x360" or "520x360+80+60" for a float window.' },
-        template: { type: 'string', description: 'Template name to instantiate instead of html/path.' },
+        template: { type: 'string', description: 'Template name to instantiate instead of html/path. When several sources are passed, template wins and the others are reported as ignored.' },
         variables: {
           type: 'object',
           additionalProperties: true,
@@ -1517,6 +1910,9 @@ export function apply(ctx, config) {
             normalizePlacement(args?.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(source.templatePlacement),
           size: normalizeSize(args?.size) ?? normalizeSize(declared.size),
           security: normalizeSecurity(args?.security) ?? normalizeSecurity(declared.security) ?? normalizeSecurity(source.templateSecurity) ?? 'strict',
+          // The slots the document declares, or the project's own list when the document names
+          // none — the same precedence the other declarations follow.
+          storeSlots: declared.store !== undefined ? normalizeSlotNames(declared.store) : normalizeSlotNames(source.templateSlots),
           origin: source.origin,
           template: source.template,
           sourcePath: source.sourcePath,
@@ -1538,6 +1934,19 @@ export function apply(ctx, config) {
           // effective one, projects included, because that is what will be enforced.
           security: effectiveSecurity(meta),
           template: meta.template ?? '',
+          // Named so the model can see which shared slots this interface reads and writes.
+          store: (meta.storeSlots ?? []).join(','),
+          // Named so the model can see what its arguments actually did: which inline parts were
+          // merged, and which arguments this call did not use (a source key loses to the one that
+          // won, `variables` only mean something with a template).
+          merged: (source.merged ?? []).join(','),
+          ignored: (source.ignored ?? []).join(','),
+          // A hint only when there is something to say: an empty member is noise in every result.
+          ...(source.ignored === undefined || source.ignored.length === 0
+            ? {}
+            : {
+                hint: `ignored ${source.ignored.join(', ')}: the ${source.origin === 'inline' ? 'html' : source.origin === 'file' ? 'path' : 'template'} source wins — pass one source per call`,
+              }),
         };
       } catch (error) {
         const message = String(error?.message ?? error);
@@ -1853,6 +2262,9 @@ export function apply(ctx, config) {
           // Request, then the document, then the project's own level — the same ladder
           // the placement takes, so a project can carry its own security level.
           security: normalizeSecurity(body.security) ?? normalizeSecurity(declared.security) ?? normalizeSecurity(template.meta.security) ?? 'strict',
+          // The document's own list wins, then the project's manifest — the same order as the
+          // other declarations, so a project can carry its slots with it.
+          storeSlots: declared.store !== undefined ? normalizeSlotNames(declared.store) : normalizeSlotNames(template.meta.store ?? template.meta.storeSlots),
           origin: 'template',
           template: slug,
           source,
@@ -2024,6 +2436,15 @@ export function apply(ctx, config) {
 
   function serveDocument(req, res, url, current, uiId, token) {
     const state = store.readState(current.meta.sessionId ?? '');
+    // The slots this document declared, read at compose time: a synchronous read on the page is
+    // what lets a notebook paint its pages in the first frame instead of flashing empty. A slot
+    // that was never written is `null`, so "declared but empty" is distinguishable from
+    // "not declared" (which is not in the object at all).
+    const slots = {};
+    for (const name of normalizeSlotNames(current.meta.storeSlots)) {
+      const slot = store.readSlot(name);
+      slots[name] = slot === undefined ? { value: null, bytes: 0, updatedAt: null } : { value: slot.value, bytes: slot.bytes, updatedAt: slot.updatedAt };
+    }
     const config = {
       pluginVersion: PLUGIN_VERSION,
       uiId,
@@ -2035,6 +2456,7 @@ export function apply(ctx, config) {
       routeBase: ROUTE_PREFIX,
       initialTheme: url.searchParams.get('theme') === 'dark' ? 'dark' : 'light',
       state: state[uiId] ?? null,
+      store: slots,
     };
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
@@ -2110,7 +2532,10 @@ export function apply(ctx, config) {
   }
 
   function handleRpc(req, res) {
-    readJsonBody(req, MAX_BODY_BYTES)
+    // The widest body any rpc op may carry: a slot row of MAX_ROW_BYTES plus its JSON envelope.
+    // Every other route keeps MAX_BODY_BYTES; per-op checks below still hold the narrow limits
+    // (a slot value, the per-interface state) for the ops that have them.
+    readJsonBody(req, ROWS_BODY_BYTES)
       .then(async (body) => {
         const uiId = String(body.uiId ?? '');
         const token = typeof body.t === 'string' ? body.t : '';
@@ -2125,6 +2550,124 @@ export function apply(ctx, config) {
         }
         const sessionId = current.meta.sessionId ?? '';
         const op = String(body.op ?? '');
+        if (op === 'store') {
+          // The shared store. A document may only touch the slots it declared — that is the whole
+          // permission model — so a name that is not in this record's list is refused rather than
+          // silently created. A slot has two layers: one small value that travels with the
+          // document, and rows that are fetched when they are wanted.
+          const name = String(body.name ?? '').trim().toLowerCase();
+          const action = String(body.store ?? 'set');
+          const declared = normalizeSlotNames(current.meta.storeSlots);
+          const declares = (owner) => slotIsDeclared(name, owner);
+          if (!SLOT_NAME_RE.test(name) || !declared.includes(name)) {
+            sendJson(res, 403, {
+              ok: false,
+              error: `this interface did not declare the slot ${name.length > 0 ? name : '(unnamed)'}`,
+              hint: 'declare it in the document: <meta name="dsh-htmlui" content="store=notes">',
+            });
+            return;
+          }
+          if (action === 'rows') {
+            const sub = String(body.rows ?? '');
+            if (!store.rowsAvailable()) {
+              sendJson(res, 501, { ok: false, error: 'this runtime has no node:sqlite, so slot rows are unavailable', hint: 'use the slot value layer instead: dshHTML.store.set(name, value)' });
+              return;
+            }
+            const key = typeof body.key === 'string' ? body.key : '';
+            // Reads first: listing, searching, and fetching a row are ordinary work.
+            if (sub === 'keys' || sub === 'search' || sub === 'get') {
+              if (!takeToken(uiId, READ_BUCKET)) {
+                sendJson(res, 429, { ok: false, error: 'rate limited', hint: 'this document is reading too quickly' });
+                return;
+              }
+              if (sub === 'keys') {
+                const offset = clampInt(body.offset, 0, 1_000_000, 0);
+                const limit = clampInt(body.limit, 1, ROWS_PAGE_MAX, 200);
+                sendJson(res, 200, Object.assign({ ok: true, op, store: 'rows', rows: 'keys', name }, store.rowsKeys(name, offset, limit)));
+                return;
+              }
+              if (sub === 'search') {
+                const text = typeof body.text === 'string' ? body.text.trim().slice(0, ROW_TEXT_MAX) : '';
+                const limit = clampInt(body.limit, 1, ROW_SEARCH_MAX, 50);
+                if (text.length === 0) {
+                  sendJson(res, 200, { ok: true, op, store: 'rows', rows: 'search', name, rows: [] });
+                  return;
+                }
+                sendJson(res, 200, Object.assign({ ok: true, op, store: 'rows', rows: 'search', name }, store.rowsSearch(name, text, limit)));
+                return;
+              }
+              if (key.length === 0 || key.length > ROW_KEY_MAX) {
+                sendJson(res, 400, { ok: false, error: `a row key must be 1..${ROW_KEY_MAX} characters` });
+                return;
+              }
+              sendJson(res, 200, { ok: true, op, store: 'rows', rows: 'get', name, key, row: store.rowsGet(name, key) ?? null });
+              return;
+            }
+            if (sub === 'set' || sub === 'remove') {
+              if (key.length === 0 || key.length > ROW_KEY_MAX) {
+                sendJson(res, 400, { ok: false, error: `a row key must be 1..${ROW_KEY_MAX} characters` });
+                return;
+              }
+              if (!takeToken(uiId)) {
+                sendJson(res, 429, { ok: false, error: 'rate limited', hint: 'this document is writing too quickly' });
+                return;
+              }
+              if (sub === 'remove') {
+                const removed = store.rowsRemove(name, key);
+                hub.pushSlot(name, { slot: name, layer: 'rows', uiId, key, removed: true }, declares);
+                sendJson(res, 200, { ok: true, op, store: 'rows', rows: 'remove', name, key, removed });
+                return;
+              }
+              const value = body.value ?? null;
+              const bytes = Buffer.byteLength(JSON.stringify(value ?? null), 'utf8');
+              if (bytes > MAX_ROW_BYTES) {
+                sendJson(res, 413, { ok: false, error: `row larger than ${MAX_ROW_BYTES} bytes`, hint: 'one row is one note, one record, one message' });
+                return;
+              }
+              const title = typeof body.title === 'string' ? body.title.slice(0, ROW_TITLE_MAX) : '';
+              const written = store.rowsSet(name, key, value, title);
+              // Metadata only: a row's body can be megabytes, so the event carries the key and the
+              // reader fetches what it wants. (The value layer is the opposite, and pushes its
+              // value, because a value is small and has no other way to be read.)
+              hub.pushSlot(name, { slot: name, layer: 'rows', uiId, key, bytes: written.bytes, updatedAt: written.updatedAt, removed: false }, declares);
+              sendJson(res, 200, { ok: true, op, store: 'rows', rows: 'set', name, key, bytes: written.bytes, updatedAt: written.updatedAt });
+              return;
+            }
+            sendJson(res, 400, { ok: false, error: `unsupported rows action: ${sub}`, hint: 'use keys, get, set, remove, or search' });
+            return;
+          }
+          if (action === 'remove') {
+            const existed = store.removeSlot(name);
+            hub.pushSlot(name, { slot: name, layer: 'value', uiId, removed: true }, declares);
+            sendJson(res, 200, { ok: true, op, store: action, name, removed: existed });
+            return;
+          }
+          if (action !== 'set') {
+            sendJson(res, 400, { ok: false, error: `unsupported store action: ${action}`, hint: 'use set, remove, or rows' });
+            return;
+          }
+          const value = body.value ?? null;
+          if (Buffer.byteLength(JSON.stringify(value ?? null), 'utf8') > MAX_SLOT_BYTES) {
+            sendJson(res, 413, {
+              ok: false,
+              error: `slot value larger than ${MAX_SLOT_BYTES} bytes`,
+              hint: 'a value travels inside the document, so it stays small: keep bulk data in slot rows (dshHTML.store.rows)',
+            });
+            return;
+          }
+          if (!takeToken(uiId)) {
+            sendJson(res, 429, { ok: false, error: 'rate limited', hint: 'this document is writing too quickly' });
+            return;
+          }
+          const written = store.writeSlot(name, value);
+          // Every live document that declared the slot hears about it, in every session: two
+          // panels showing the same notebook stay in step without either of them polling. The
+          // value travels with the event, because a read only happens when a document is
+          // composed — there is no second request that could fetch it.
+          hub.pushSlot(name, { slot: name, layer: 'value', uiId, value: written.value, bytes: written.bytes, updatedAt: written.updatedAt, removed: false }, declares);
+          sendJson(res, 200, { ok: true, op, store: action, name, bytes: written.bytes, updatedAt: written.updatedAt });
+          return;
+        }
         if (op === 'state') {
           const value = body.value ?? null;
           const encoded = JSON.stringify(value ?? null);
@@ -2275,7 +2818,9 @@ export function apply(ctx, config) {
       }
       if (path === `${ROUTE_PREFIX}/health`) {
         if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
-        // The one route an operator can curl to confirm which generation is live.
+        // The one route an operator can curl to confirm which generation is live, and what the
+        // shared store currently holds: a slot is invisible otherwise, since there is no manager.
+        const slots = store.listSlots();
         sendJson(res, 200, {
           ok: true,
           plugin: PKG,
@@ -2283,7 +2828,15 @@ export function apply(ctx, config) {
           placements: PLACEMENTS,
           storage: { configured: typeof settings.root === 'string' && settings.root.trim().length > 0 },
           trust: { allowedOrigins: allowedOrigins.size, loopbackOnly: allowedOrigins.size === 0 },
-          counts: { uis: store.listUis().length, templates: store.listTemplates().length, sseClients: hub.size() },
+          rows: store.rowsAvailable(),
+          counts: {
+            uis: store.listUis().length,
+            templates: store.listTemplates().length,
+            slots: slots.length,
+            slotBytes: slots.reduce((total, slot) => total + (slot.bytes ?? 0), 0),
+            sseClients: hub.size(),
+          },
+          slots: slots.map((slot) => ({ name: slot.name, kind: slot.kind, rows: slot.rows ?? 0, bytes: slot.bytes ?? 0 })),
         });
         return;
       }

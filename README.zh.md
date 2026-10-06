@@ -82,7 +82,8 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 - **宿主半部**（`index.js`，纯 ESM，零依赖）：`html_ui` / `html_ui_template` 两个工具、`$DSH_HOME/htmlui` 下的存储、以及挂在 `/plugins/@mostkia/dsh-htmlui` 的 HTTP 载体（文档票据、拼装后的文档、按会话列取、模板目录与套用、POST 动作通道、SSE 事件流、健康探针）。每条路由都受[「安全」](#安全)一节所述策略管辖。
 - **浏览器半部**（`client.js`，手写模块，无需构建）：注册工具卡片、输入框停靠区、整帧浮层，并把每份文档放进 iframe。
-- **桥**（`assets/bridge.js`，服务时注入）：暴露 `window.dshHTML`，提供 `send`、`state`、`resize`、`close`、`on(...)` 与 `ready(...)`。界面上的可见文案走客户端 locale 服务（en/zh 字典随包提供），没有该服务时回退到英文常量。
+- **桥**（`assets/bridge.js`，服务时注入）：暴露 `window.dshHTML`，提供 `send`、`state`、`store`、`store.rows`、`resize`、`close`、`on(...)` 与 `ready(...)`。界面上的可见文案走客户端 locale 服务（en/zh 字典随包提供），没有该服务时回退到英文常量。
+- **插槽**（`$DSH_HOME/htmlui/store/`）：唯一不绑定会话与面板的存储。文档先声明自己用哪些名字（`<meta name="dsh-htmlui" content="store=notes">`），之后统一走 `dshHTML.store`。一个插槽分两层：**值层**小而随文档内联（读同步，上限 192 KiB，适合设置与"当前选中项"）；**行层**存在每槽一个 SQLite 文件里（`<name>.db`，用内置 `node:sqlite`，依然零依赖），按需取用，是放批量数据的地方——单行可到 16 MiB，一次写入只碰一行，行数与插槽数都不设上限。数据在关面板、关会话、冷启动之后都还在；其它声明了同名插槽的文档会通过 SSE 收到变更（值层事件带新值，行层事件只带 key，正文由读方按需取）。除了文档显式 `store.remove(name)` / `store.rows.remove(name, key)`（或你手动删文件），插槽不会被自动清理。目前没有管理界面：`GET /health` 会列出每个插槽的类型、行数与体积。
 
 **模型永远拿不到文档正文**：它读到的是工具结果的紧凑摘要（`ui_id`/`placement`/`bytes`/revision），文档本身由浏览器从载体的票据路由加载。大文档写进文件、用 `path` 引用，所以不会常驻模型上下文。
 
@@ -121,7 +122,7 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
         allowedOrigins: []    # 额外信任的浏览器来源（见「安全」）
 ```
 
-运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`state/<session>.json`，以及用于能力令牌的 `secret`；模板则在你自己指定的**模板目录**里：`<模板目录>/<name>/`（带清单的项目）或 `<模板目录>/<name>.html`（手写单文件）。随时手动删除某个 `ui/<id>/` 目录都是安全的：记录没了，该界面就会从会话里消失。（会话已不存在的记录会被保留而不会被自动回收，免得界面因为会话被归档而莫名消失。）
+运行期数据都在 `$DSH_HOME/htmlui`：`ui/<id>/index.html`（作者写的文档，磁盘上保持干净可移植，不做任何注入）、`state/<session>.json`（面板级草稿）、`store/<name>.json`（共享插槽），以及用于能力令牌的 `secret`；模板则在你自己指定的**模板目录**里：`<模板目录>/<name>/`（带清单的项目）或 `<模板目录>/<name>.html`（手写单文件）。随时手动删除某个 `ui/<id>/` 目录都是安全的：记录没了，该界面就会从会话里消失。（会话已不存在的记录会被保留而不会被自动回收，免得界面因为会话被归档而莫名消失。）
 
 ## 模板
 
@@ -139,7 +140,7 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 ## 开发
 
 ```sh
-npm test        # 158 项断言：包完整性 13 + 文档契约 10 + 宿主 40 + 浏览器 38 + 桥 11 + 浅渲染 29 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm test        # 165 项断言：包完整性 13 + 文档契约 10 + 宿主 45 + 浏览器 38 + 桥 13 + 浅渲染 29 + 对抗输入 10 + 打包产物 2 + harness schema 5
 npm run check   # 先语法检查三个出厂脚本，再跑测试
 ```
 
