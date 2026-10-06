@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
      * constant is the only place the client states its version, and `package.test.mjs` holds it
      * to the packaged one.
      */
-    const CLIENT_VERSION = '0.1.0';
+    const CLIENT_VERSION = '0.1.1';
     const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (${CLIENT_VERSION})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its

@@ -56,6 +56,10 @@ one plus one, more than two.
   reached through a per-document capability token, which keeps DSH's own content
   safe. (A sandbox cannot stop you from granting unrestricted permissions — do that
   only with care.)
+- **Data that outlives the panel** *(0.1.1)*. A document declares the slot names it uses
+  and keeps data there: small values are read synchronously (inlined with the page),
+  bulk records live in SQLite (16 MiB a row, no limits), every panel that declared the
+  same name shares one copy, and closing the panel — or restarting dsh — loses nothing.
 
 ## Five placements
 
@@ -91,13 +95,13 @@ dsh plugin --profile web add github:mostkia/dsh-htmlui
 
 Requires DSH `>=0.1.7-0` (the pre-release line is included on purpose, so
 `0.1.7-rc.*` installs too). Hard-refresh the page after installing; when the
-browser half activates it logs `[dsh-htmlui] client active (0.1.0)` to the console.
+browser half activates it logs `[dsh-htmlui] client active (0.1.1)` to the console.
 
 The easiest way to confirm which generation a running host actually has:
 
 ```sh
 curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
-# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.0",...}
+# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.1",...}
 ```
 
 Changing the host half (`index.js`) does **not** take effect in a running host: the
@@ -142,6 +146,57 @@ shows up in the conversation, and what to inspect for a given symptom.
 tool result (`ui_id` / `placement` / `bytes` / revision), while the browser loads the
 document itself from the carrier's ticket route. Large documents go to a file and are
 referenced with `path`, so they never sit in the model's context.
+
+## Persistence: slots
+
+A document can keep data past its own panel. It declares the names it uses in its head,
+and only those names are readable and writable:
+
+```html
+<meta name="dsh-htmlui" content="placement=dock-right; store=notes">
+```
+
+A slot has two layers, and choosing between them is the whole design decision:
+
+- **Value layer.** `dshHTML.store.get(name)` is *synchronous* — the value is inlined with
+  the document, so the first frame can already paint it — and `store.set(name, value)`
+  returns a promise. Small by construction: **192 KiB**, because whatever it holds travels
+  inside every load of that page. Settings, the active tab, the last choice made.
+- **Row layer.** `dshHTML.store.rows` holds many records addressed by a key, in one SQLite
+  file per slot (`<name>.db`, through Node's built-in `node:sqlite`, so still no
+  dependency). `keys(name, { offset, limit })` answers with metadata only (key, title,
+  size, time), so a list is drawn without fetching a single body; `get` / `set` / `remove`
+  move one record at a time, so a large collection never rewrites itself; `search(name,
+  text)` scans keys, titles, and text — a `LIKE` scan rather than FTS5, because the
+  trigram tokenizer cannot answer a two-character Chinese query, which is the common case.
+
+| | Value layer | Row layer |
+|---|---|---|
+| Read | synchronous, inlined | promise, one fetch |
+| One entry | 192 KiB | 16 MiB |
+| Entries per slot | 1 | unlimited |
+| Slots per document | 8 declared names | — |
+| Slots in total | unlimited | — |
+| On disk | `$DSH_HOME/htmlui/store/<name>.json` | `…/store/<name>.db` |
+
+A `value` is any JSON value, so one row can be a whole configuration object — or one row
+per variable, with `title` as the human-readable label a list shows and search matches.
+
+Nothing is removed except by `store.remove(name)` / `store.rows.remove(name, key),` or by
+deleting the file: closing the panel, closing the session, restarting dsh, and switching
+browsers all leave it in place — the data is on the host's disk, not in the panel and not
+in browser storage. Two panels that declared the same name hear about each other's writes
+over SSE: a value event carries the new value, a row event carries the key (the reader
+fetches the body it wants).
+
+Rows are safe by construction, not by filtering: **no SQL text crosses the bridge**. Keys
+and values are bound parameters against statements the host wrote, so a document can only
+ever touch its own slot, and `ATTACH` — which would reach any file the process can read —
+has no way in.
+
+`GET /plugins/@mostkia/dsh-htmlui/health` reports what the store holds (`counts.slots`,
+`counts.slotBytes`, and per slot `kind` / `rows` / `bytes`), and whether this runtime has
+the row layer at all (`rows`).
 
 ## Security
 

@@ -34,6 +34,7 @@
 - **按项目分级的权限** 支持分级运行，保证安全性和强大兼容性得以找到平衡点。
 - **会话管理页，而不是藏在别处的记录。** `HTML管理` 列出本会话每个界面及其形态与来源项目，可隐藏、恢复、关闭；记录由宿主保存并绑定到会话。
 - **沙箱结构** 文档跑在不透明源的 iframe 里，并用**逐文档的能力票据**访问，保证DSH内容安全（沙箱无法阻止完全权限放开情况，权限放开务必谨慎）。
+- **数据能活过面板**（*0.1.1*）。文档声明自己用哪些插槽名，数据就放在那里：小值**同步**读（随页面内联），批量记录进 SQLite（单行 16 MiB、条数不限），声明了同名插槽的面板共享同一份，关掉面板、甚至重启 dsh，都不会丢。
 
 ## 五种形态
 
@@ -65,13 +66,13 @@ dsh plugin --profile web add @mostkia/dsh-htmlui
 dsh plugin --profile web add github:mostkia/dsh-htmlui
 ```
 
-要求 DSH `>=0.1.7-0`（故意包含预发布线，`0.1.7-rc.*` 也能装）。装完硬刷新页面；客户端半部生效时浏览器控制台会打印 `[dsh-htmlui] client active (0.1.0)`。
+要求 DSH `>=0.1.7-0`（故意包含预发布线，`0.1.7-rc.*` 也能装）。装完硬刷新页面；客户端半部生效时浏览器控制台会打印 `[dsh-htmlui] client active (0.1.1)`。
 
 两条最省事的"确认运行中的宿主装的是哪一代"：
 
 ```sh
 curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
-# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.0",...}
+# {"ok":true,"plugin":"@mostkia/dsh-htmlui","version":"0.1.1",...}
 ```
 
 改宿主半部（`index.js`）**不会**在运行中的宿主里热生效：加载器仍用它已激活的模块代际。改完宿主半部要冷启动 `dsh`；浏览器半部只需刷新页面。
@@ -86,6 +87,47 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 - **插槽**（`$DSH_HOME/htmlui/store/`）：唯一不绑定会话与面板的存储。文档先声明自己用哪些名字（`<meta name="dsh-htmlui" content="store=notes">`），之后统一走 `dshHTML.store`。一个插槽分两层：**值层**小而随文档内联（读同步，上限 192 KiB，适合设置与"当前选中项"）；**行层**存在每槽一个 SQLite 文件里（`<name>.db`，用内置 `node:sqlite`，依然零依赖），按需取用，是放批量数据的地方——单行可到 16 MiB，一次写入只碰一行，行数与插槽数都不设上限。数据在关面板、关会话、冷启动之后都还在；其它声明了同名插槽的文档会通过 SSE 收到变更（值层事件带新值，行层事件只带 key，正文由读方按需取）。除了文档显式 `store.remove(name)` / `store.rows.remove(name, key)`（或你手动删文件），插槽不会被自动清理。目前没有管理界面：`GET /health` 会列出每个插槽的类型、行数与体积。
 
 **模型永远拿不到文档正文**：它读到的是工具结果的紧凑摘要（`ui_id`/`placement`/`bytes`/revision），文档本身由浏览器从载体的票据路由加载。大文档写进文件、用 `path` 引用，所以不会常驻模型上下文。
+
+## 持久化：插槽
+
+文档可以把数据留到面板之外。它在头部声明自己要用的名字，而**只有这些名字**可读可写：
+
+```html
+<meta name="dsh-htmlui" content="placement=dock-right; store=notes">
+```
+
+一个插槽分两层，选哪层就是全部设计决策：
+
+- **值层。** `dshHTML.store.get(name)` 是**同步**的 —— 值随文档内联，首帧就能画出来 ——
+  而 `store.set(name, value)` 返回 Promise。它天生就小：**192 KiB**，因为它的内容会随该页面的
+  每次加载一起送进去。放设置、当前标签、上次的选择。
+- **行层。** `dshHTML.store.rows` 把大量记录按 key 存进"每槽一个"的 SQLite 文件
+  （`<name>.db`，用 Node 内置的 `node:sqlite`，因此仍然零依赖）。`keys(name, { offset, limit })`
+  只回索引（key、标题、大小、时间），所以画列表不用取任何正文；`get` / `set` / `remove`
+  一次只动一条，所以集合再大也不会整份重写；`search(name, text)` 扫描 key、标题与正文 ——
+  这是子串扫描而非 FTS5：后者的 trigram 分词器对两字中文查询无能为力，而两字正是最常用的长度。
+
+| | 值层 | 行层 |
+|---|---|---|
+| 读 | 同步、内联 | Promise、一次取用 |
+| 单条上限 | 192 KiB | 16 MiB |
+| 每槽条数 | 1 | 不限 |
+| 每文档槽数 | 8 个声明名 | — |
+| 槽总数 | 不限 | — |
+| 落盘 | `$DSH_HOME/htmlui/store/<name>.json` | `…/store/<name>.db` |
+
+`value` 可以是任意 JSON 值，所以一行可以是一整个配置对象 —— 也可以一行一个变量，用 `title`
+作为列表显示、搜索命中的文字面。
+
+除了 `store.remove(name)` / `store.rows.remove(name, key)`，或你手动删文件，插槽不会被清理：
+关面板、关会话、重启 dsh、换浏览器都不会动它 —— 数据在宿主磁盘上，既不在面板里，也不在浏览器存储里。
+声明了同名插槽的两个面板会通过 SSE 互相收到写入：值层事件带新值，行层事件只带 key（正文由读方按需取）。
+
+行层的安全靠构造而非过滤：**文档不能发 SQL**。key 与 value 都是绑定参数，SQL 文本全在宿主侧写死，
+所以文档只能碰到自己那个插槽；而 `ATTACH`（能读到进程可及的任意文件）根本没有入口。
+
+`GET /plugins/@mostkia/dsh-htmlui/health` 会报出存储现状（`counts.slots`、`counts.slotBytes`，
+以及每槽的 `kind` / `rows` / `bytes`），和当前运行时有没有行层（`rows`）。
 
 ## 安全
 

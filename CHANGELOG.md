@@ -2,7 +2,7 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.1.0
+## 0.1.1
 
 ### Added
 
@@ -32,6 +32,24 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   declaration is also the permission model: an interface may touch exactly the slots it named.
   A slot value lives in `$DSH_HOME/htmlui/store/<name>.json`, eight names per document, and
   nothing but an explicit `store.remove(name)` — or deleting the file by hand — ever removes it.
+
+### Fixed
+
+- `/health` reports a slot's kind from the files that exist. The layers were merged into one entry
+  in directory-read order, so a slot whose value layer had been deleted still called itself `both`
+  instead of `rows`; the probe now decides from presence, not order.
+- `css` and `js` are merged whatever the source, and a dropped argument is reported. Both were
+  only merged for `html` and `path`, so a `template` render silently ignored them: the caller saw
+  `status=ok`, assumed its script was in the document, and spent turns on why nothing ran. The
+  merge is uniform now, and the result names what happened — `merged=css,js`, and `ignored=…` plus
+  a hint when a call passed more than one source (`template` > `path` > `html`) or `variables`
+  without a template. A file- or template-backed document keeps its old latitude for inline
+  supplements: only the composed-document cap applies, not the inline-fragment cap.
+
+## 0.1.0
+
+### Added
+
 - A template drawer in the composer (`⟨/⟩ 模板`): it lists the catalogue, applies
   a template straight into the session with no model round trip, and offers to
   hand the instruction to the model instead. Two page-facing routes back it
@@ -107,16 +125,6 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
-- `/health` reports a slot's kind from the files that exist. The layers were merged into one entry
-  in directory-read order, so a slot whose value layer had been deleted still called itself `both`
-  instead of `rows`; the probe now decides from presence, not order.
-- `css` and `js` are merged whatever the source, and a dropped argument is reported. Both were
-  only merged for `html` and `path`, so a `template` render silently ignored them: the caller saw
-  `status=ok`, assumed its script was in the document, and spent turns on why nothing ran. The
-  merge is uniform now, and the result names what happened — `merged=css,js`, and `ignored=…` plus
-  a hint when a call passed more than one source (`template` > `path` > `html`) or `variables`
-  without a template. A file- or template-backed document keeps its old latitude for inline
-  supplements: only the composed-document cap applies, not the inline-fragment cap.
 - Reasoning no longer arrives as assistant text. `StreamChunk` is a tagged union
   in which `text-delta` and `reasoning-delta` both carry `text`, so the previous
   mapping leaked the model's thinking into the answer an interface displayed; the

@@ -61,7 +61,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.0';
+const PLUGIN_VERSION = '0.1.1';
 
 /**
  * Placements this plugin offers.
