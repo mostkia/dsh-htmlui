@@ -4,17 +4,18 @@ English | [中文](README.zh.md)
 
 **An HTML UI layer for DeepSeek Harness 🎉**
 
-HTML can be inserted into the conversation stream, run as a window, docked in the
-right column, taken fullscreen, or mounted behind everything (experimental). It is
-deeply integrated with the agent: the model authors HTML templates directly, and
-the layer between model and DSH turns them into interactive panels that automate
-long, repetitive, fixed workflows — with none of the inefficiency or imprecision of
-describing the same thing in words again.
+dsh-htmlui inserts HTML into the conversation stream, runs it as a window, docks it in
+the right column, takes it fullscreen, or mounts it behind everything (experimental).
+It is deeply integrated with the agent: the model authors interactive HTML UIs
+directly, and dsh-htmlui acts as the middle layer inside DSH, so long, repetitive, fixed
+workflows can be automated through those panels — with none of the inefficiency or
+imprecision of describing the same thing in words again.
 
-It also hosts practical HTML tools, and those tools can be handed to the agent to
-improve. Custom templates can be uploaded and kept, permissions are managed per
-project, and the whole thing is meant to make your DSH workspace nicer and faster —
-one plus one, more than two.
+It also uploads and keeps custom HTML templates, so any practical HTML tool can be
+integrated and then handed to the agent to be improved: ordinary HTML pages become
+AI-enhanced tools. Permission levels, persistence that spans sessions, and the rest of
+the feature set are here to make your DSH workspace nicer and faster — one plus one,
+more than two.
 
 ## What it looks like
 
@@ -56,23 +57,26 @@ one plus one, more than two.
   reached through a per-document capability token, which keeps DSH's own content
   safe. (A sandbox cannot stop you from granting unrestricted permissions — do that
   only with care.)
-- **Data that outlives the panel** *(0.1.1)*. A document declares the slot names it uses
-  and keeps data there: small values are read synchronously (inlined with the page),
-  bulk records live in SQLite (16 MiB a row, no limits), every panel that declared the
-  same name shares one copy, and closing the panel — or restarting dsh — loses nothing.
+- **Display slots keep their session state.** Every display slot dsh-htmlui mounts
+  holds its state: switching sessions, minimizing, or collapsing a window while the
+  page stays open never loses what a session's HTML template was holding. (To survive
+  closing the page and a DSH cold start, use a **persistence slot**.)
+- **It costs no context.** What the model reads is a compact tool-result summary
+  (`ui_id` / `placement` / `bytes` / revision); the template itself is loaded by the
+  browser from the carrier's ticket route. Large documents go to a file and are
+  referenced with `path`, so the model does not pull templates into its context.
 
 ## Five placements
 
 | `placement` | Where it lives |
 |---|---|
-| `inline` | In the transcript, at the end of the turn that attached it: seamless — no chrome, no border, no background, height taken from the document itself |
-| `dock-right` | The session's right column: a real left/right split (the widest surface), as a tab hosting this session's right-placed interfaces. Falls back to the wide dock above the composer while the column cannot open a tab |
-| `float` | A draggable, resizable window (`size: "520x360+80+60"`). **Minimizing keeps the document alive**, so showing it again loses nothing that was typed into it |
-| `background` | A full-frame, click-through layer at a fixed 25% opacity, so the interface underneath stays readable. It belongs to no view — close it from the session page when you are done |
+| `inline` | Created inside the main conversation: seamless — no chrome, no border, no background, height taken from the document itself |
+| `dock-right` | Created in the session's right-hand collapsible column: the most common form, working side by side with the conversation in a left/right split |
+| `float` | A draggable, resizable, minimizable window (`size: "520x360+80+60"`); show it again from the HTML manager |
 | `fullscreen` | Covers the session, with a built-in switch back to chat. Surfaces stay mounted while you are elsewhere, so returning does not reload them |
+| `background` | A full-frame, click-through layer at a fixed 25% opacity, so the interface underneath stays readable. It belongs to no view — close it from the session page when you are done |
 
-A document can declare its own placement instead of the caller naming it — useful
-for a template, which then carries its home with it:
+An HTML template can declare its own placement instead of the caller naming it:
 
 ```html
 <meta name="dsh-htmlui" content="placement=dock-right; size=520x360; title=Orders">
@@ -83,7 +87,7 @@ The tool argument wins over the declaration, the declaration wins over the
 
 ## Install
 
-Straight from the repository (the package is not on the npm registry yet):
+Straight from the repository (not published to npm yet):
 
 ```sh
 dsh plugin --profile web add github:mostkia/dsh-htmlui
@@ -123,8 +127,8 @@ shows up in the conversation, and what to inspect for a given symptom.
   with `send`, `state`, `store`, `store.rows`, `resize`, `close`, `on(...)` and `ready(...)`. Visible text
   in the interfaces goes through the client locale service (en/zh dictionaries
   ship with the package), falling back to English constants when it is absent.
-- **Slots** (`$DSH_HOME/htmlui/store/`): the one storage that is not tied to a
-  session or a panel. A document declares the names it uses
+- **Persistence slots** (`$DSH_HOME/htmlui/store/`): the one storage that is not tied
+  to a session or a panel. A document declares the names it uses
   (`<meta name="dsh-htmlui" content="store=notes">`) and then reaches them through
   `dshHTML.store`. A slot has two layers: its *value* is small and travels with the
   document (synchronous reads, 192 KiB cap — settings, the active tab), while its *rows*
@@ -138,15 +142,18 @@ shows up in the conversation, and what to inspect for a given symptom.
   `store.rows.remove(name, key)`, or by deleting the file. There is no manager yet:
   `GET /health` reports each slot's kind, row count, and bytes.
 
-**The model never receives the document body**: it reads a compact summary of the
-tool result (`ui_id` / `placement` / `bytes` / revision), while the browser loads the
-document itself from the carrier's ticket route. Large documents go to a file and are
-referenced with `path`, so they never sit in the model's context.
+## About persistence slots
 
-## Persistence: slots
+dsh-htmlui offers real persistent storage: an HTML template can call on a storage slot
+whenever it needs to keep something. A slot is large and spans sessions — and because it
+lives **server-side** rather than in browser cookies, it can be read from anywhere, not
+just from the client. That is what makes it genuinely useful for building web apps such
+as a notebook inside a panel.
 
-A document can keep data past its own panel. It declares the names it uses in its head,
-and only those names are readable and writable:
+## How to use it
+
+**Declaration** — name the slots you want in the document head, and only those names
+become readable and writable:
 
 ```html
 <meta name="dsh-htmlui" content="placement=dock-right; store=notes">
@@ -185,10 +192,10 @@ in browser storage. Two panels that declared the same name hear about each other
 over SSE: a value event carries the new value, a row event carries the key (the reader
 fetches the body it wants).
 
-Rows are safe by construction, not by filtering: **no SQL text crosses the bridge**. Keys
-and values are bound parameters against statements the host wrote, so a document can only
-ever touch its own slot, and `ATTACH` — which would reach any file the process can read —
-has no way in.
+The row layer is secured by construction: **no SQL text crosses the bridge**. Keys and
+values are bound parameters, the SQL itself is fixed on the host, so an HTML template
+can only reach its own slot; `ATTACH` — which would reach any file the process can read —
+is not offered at all.
 
 `GET /plugins/@mostkia/dsh-htmlui/health` reports what the store holds (`counts.slots`,
 `counts.slotBytes`, and per slot `kind` / `rows` / `bytes`), and whether this runtime has
