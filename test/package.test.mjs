@@ -153,9 +153,15 @@ test('the marketplace entry is ready to copy', () => {
   const description = english[1].trim();
   assert.ok(description.endsWith('.'), 'description.en must end with a period');
   assert.ok(!description.includes(': '), 'a description containing ": " must be quoted in YAML');
-  // The install command the marketplace prints must be the one the README shows.
-  assert.ok(read('README.md').includes(`dsh plugin --profile web add ${pkg.name}`));
-  assert.ok(read('README.zh.md').includes(`dsh plugin --profile web add ${pkg.name}`));
+  // The install command the marketplace prints must be the one the README shows, and that must be
+  // a command that works today: the package is not on the npm registry yet, so it is the repository
+  // spec, not the bare package name.
+  const install = `dsh plugin --profile web add github:mostkia/dsh-htmlui`;
+  assert.ok(read('README.md').includes(install));
+  assert.ok(read('README.zh.md').includes(install));
+  assert.ok(read('docs/marketplace-pr.md').includes(install), 'the marketplace body must print the same install');
+  assert.ok(!read('README.md').includes(`--profile web add ${pkg.name}`), 'the unpublished npm name must not be advertised');
+  assert.ok(!read('README.zh.md').includes(`--profile web add ${pkg.name}`));
 });
 
 test('no tracked text file carries a machine-specific path or an address', () => {

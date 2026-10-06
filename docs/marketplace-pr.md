@@ -16,8 +16,8 @@ model's output streamed back into the document over SSE.
 the real thing — any HTML, any CSS, any script — placed where the conversation
 needs it, with reusable templates.
 
-**Category:** `ui`. **Install:** `dsh plugin --profile web add @mostkia/dsh-htmlui`
-(exactly as the README states), or `github:mostkia/dsh-htmlui` without npm.
+**Category:** `ui`. **Install:** `dsh plugin --profile web add github:mostkia/dsh-htmlui`
+(the package is not on the npm registry yet, so this is the install the README states).
 
 ### What it adds
 

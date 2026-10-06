@@ -83,11 +83,7 @@ The tool argument wins over the declaration, the declaration wins over the
 
 ## Install
 
-```sh
-dsh plugin --profile web add @mostkia/dsh-htmlui
-```
-
-No npm needed either — straight from the repository:
+Straight from the repository (the package is not on the npm registry yet):
 
 ```sh
 dsh plugin --profile web add github:mostkia/dsh-htmlui

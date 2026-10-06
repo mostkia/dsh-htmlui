@@ -56,11 +56,7 @@
 
 ## 安装
 
-```sh
-dsh plugin --profile web add @mostkia/dsh-htmlui
-```
-
-没有 npm 也能装，直接从仓库：
+直接从仓库装（这个包目前还没发布到 npm）：
 
 ```sh
 dsh plugin --profile web add github:mostkia/dsh-htmlui

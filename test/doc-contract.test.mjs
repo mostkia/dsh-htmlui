@@ -90,8 +90,10 @@ test('both READMEs promise the same install command and the same placements', ()
   const english = read('README.md');
   const chinese = read('README.zh.md');
   for (const source of [english, chinese]) {
-    assert.ok(source.includes('dsh plugin --profile web add @mostkia/dsh-htmlui'), 'the documented install command');
-    assert.ok(source.includes('github:mostkia/dsh-htmlui'), 'and the GitHub fallback');
+    // One install command, and one that works: the package is not on the npm registry yet, so the
+    // repository spec is the documented path (a bare package name would 404 for the reader).
+    assert.ok(source.includes('dsh plugin --profile web add github:mostkia/dsh-htmlui'), 'the documented install command');
+    assert.ok(!source.includes('dsh plugin --profile web add @mostkia/dsh-htmlui'), 'and not the unpublished npm one');
     for (const placement of list) {
       assert.ok(source.includes(placement), `${placement} must appear`);
     }
