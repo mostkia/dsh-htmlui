@@ -12,12 +12,46 @@ conversation needs it.
 
 ## What it looks like
 
-| You ask for | You get |
+| Rendering in the conversation | Docked in the right column |
 |---|---|
-| "a dashboard for this month's orders" | A real HTML dashboard, live in the transcript, with its own tables and charts |
-| "a form that files the report for me" | A form whose submit crosses to the model, with everything else validated locally |
-| "keep this beside the chat while we work" | The same document docked above the composer, or floating as a draggable window |
-| "just make it the app" | Fullscreen mode: the document takes the session and offers a switch back to chat |
+| ![inline](docs/images/01-inline.png) | ![right column](docs/images/02-dock-right.png) |
+
+| Floating window | Fullscreen |
+|---|---|
+| ![float](docs/images/03-float.png) | ![fullscreen](docs/images/04-fullscreen.png) |
+
+| Session manager | Import a project, and set its permissions |
+|---|---|
+| ![session manager](docs/images/05-session-manager.png) | ![import and permissions](docs/images/06-import-and-permissions.png) |
+
+| One click from the composer | A project can carry anything — here, Live2D |
+|---|---|
+| ![one click](docs/images/07-one-click-deploy.png) | ![live2d](docs/images/08-live2d.png) |
+
+## Why it is different
+
+- **Real documents, not a component vocabulary.** Any HTML, CSS and JavaScript —
+  canvas, WebGL, video, a third-party library, a whole app.
+- **Five places to live.** `inline` in the transcript, `dock-right` in the session's
+  own column, a draggable `float`, a fullscreen surface, and a click-through
+  `background` layer.
+- **Two-way, without polling.** A document calls `dshHTML.send(...)`; the action
+  reaches the model as a message. The model streams values back over SSE, and the
+  page updates in place — live counters keep counting while the model is quiet.
+- **Your own folder is the catalogue.** Point the plugin at a directory; every
+  project inside appears in the picker. Import one with a pencil, edit its manifest
+  in a form (name, process id, description, default placement), and create from it
+  **with no model round trip at all**.
+- **Per-project permissions.** Each imported project declares how much its
+  documents may do — one self-contained document, its own files beside it (so
+  `css/style.css`, `app.js` and images just work), the wider web as well, or
+  unrestricted. The strict default is what the plugin has always done.
+- **A session page, not a hidden store.** `HTML管理` lists every interface in this
+  session with its placement and source project, hides and restores it, and removes
+  it — records live host-side, keyed to the session.
+- **Sandboxed by construction.** Documents run in an opaque-origin iframe and are
+  reached through a per-document capability token; a page cannot touch the host UI
+  unless the reader grants the unrestricted level to that one project.
 
 ## Placements
 
@@ -25,15 +59,15 @@ conversation needs it.
 |---|---|
 | `inline` | In the transcript, at the end of the turn that attached it: seamless — no chrome, no border, no background, height taken from the document itself |
 | `dock-right` | The session's right column: a real left/right split (the widest surface), as a tab hosting this session's right-placed interfaces. Falls back to the wide dock above the composer while the column cannot open a tab |
-| `float` | A draggable, resizable window (`size: "520x360+80+60"`) |
-| `background` | A click-through layer over the frame |
-| `fullscreen` | Covers the session, with a built-in switch back to chat |
+| `float` | A draggable, resizable window (`size: "520x360+80+60"`). Hiding one keeps its document alive, so nothing typed into it is lost |
+| `background` | A full-frame, click-through layer at a fixed 25% opacity, so the interface underneath stays readable. It belongs to no view: close it from the session page |
+| `fullscreen` | Covers the session, with a built-in switch back to chat. Surfaces stay mounted while you are elsewhere, so returning does not reload them |
 
 A document can declare its own placement instead of the caller naming it — useful
 for a template, which then carries its home with it:
 
 ```html
-<meta name="dsh-htmlui" content="placement=dock-top; size=520x360; title=Orders">
+<meta name="dsh-htmlui" content="placement=dock-right; size=520x360; title=Orders">
 ```
 
 The tool argument wins over the declaration, the declaration wins over the
