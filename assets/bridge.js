@@ -205,6 +205,107 @@
       },
       { passive: true },
     );
+
+    /**
+     * The same decision for a finger, with two differences from the wheel.
+     *
+     * A touch the document cannot use does not chain to the page — the gesture ends at the frame,
+     * which is the report that dragging over a panel "gets stuck" — so the movement has to be
+     * forwarded. And it must be sampled in *screen* coordinates: the hosted frame follows its seat,
+     * so while the host is scrolling, one stationary finger reports a different `clientY` inside
+     * the frame on every event. That fed the page's own scroll back into the delta and the scroll
+     * oscillated; `screenY` is anchored to the screen and does not move. Vertical only, one finger
+     * only (a pinch is a zoom), one scroll per animation frame.
+     */
+    var touchAt = null;
+    var touchAxis = null;
+    var pendingY = 0;
+    var pendingFrame = false;
+
+    function flushTouch() {
+      pendingFrame = false;
+      var dy = pendingY;
+      pendingY = 0;
+      if (dy !== 0) notifyHost('touch', { deltaX: 0, deltaY: dy });
+    }
+
+    function scheduleTouchFlush() {
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(flushTouch);
+      else setTimeout(flushTouch, 16);
+    }
+
+    function forgetTouch() {
+      touchAt = null;
+      touchAxis = null;
+    }
+
+    document.addEventListener(
+      'touchstart',
+      function (event) {
+        var touches = event.touches;
+        touchAt = touches !== undefined && touches !== null && touches.length === 1 ? { x: touches[0].screenX, y: touches[0].screenY } : null;
+        touchAxis = null;
+      },
+      { passive: true },
+    );
+
+    document.addEventListener(
+      'touchmove',
+      function (event) {
+        if (touchAt === null) return;
+        var touches = event.touches;
+        if (touches === undefined || touches === null || touches.length !== 1) {
+          forgetTouch();
+          return;
+        }
+        var point = touches[0];
+        var dx = touchAt.x - point.screenX;
+        var dy = touchAt.y - point.screenY;
+        touchAt = { x: point.screenX, y: point.screenY };
+        // A jump this large is a scroll artifact, not a finger.
+        if (dy === 0 || Math.abs(dy) > 80) return;
+        // Decide the axis once per gesture: a finger is never perfectly straight, and re-deciding
+        // forwarded the sideways part of the wobble as a sideways scroll.
+        if (touchAxis === null) {
+          if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+          touchAxis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
+        }
+        if (touchAxis !== 'y') return;
+        // Option 1 — one owner per gesture, decided once and never revisited.
+        //
+        // Re-deciding on every event meant a gesture inside a scrollable document changed hands the
+        // moment that document reached its end, so one direction looked fine while the other was
+        // taken over by the conversation immediately. The gesture now belongs to the document if the
+        // document can scroll vertically at all, and to the conversation otherwise. A locked
+        // document stops at its own boundary instead of dragging the chat along with it.
+        //
+        // Option 2 (handing the remainder at that boundary to the conversation) was tried and
+        // dropped: it caused more problems than it solved, and keeping the page usable matters more
+        // than the smoothness of a case — a scrolling inner document — that is rare in practice.
+        if (touchAt.owner === undefined) {
+          var probe = event.target;
+          var ownsGesture = false;
+          while (probe !== null && probe !== undefined) {
+            if (typeof probe.scrollHeight === 'number' && probe.scrollHeight > probe.clientHeight + 1) {
+              ownsGesture = true;
+              break;
+            }
+            probe = probe.parentElement;
+          }
+          touchAt.owner = ownsGesture ? 'document' : 'page';
+        }
+        if (touchAt.owner === 'document') return;
+        pendingY += dy;
+        if (!pendingFrame) {
+          pendingFrame = true;
+          scheduleTouchFlush();
+        }
+      },
+      { passive: true },
+    );
+
+    document.addEventListener('touchend', forgetTouch, { passive: true });
+    document.addEventListener('touchcancel', forgetTouch, { passive: true });
   }
 
   /** Subscribe to one event type; the single path both `on` and `ready` take. */  function subscribe(type, handler) {

@@ -57,8 +57,95 @@ window.__ModuleLoader__.load({
     function sandboxFor(security) {
       return security === 'unsafe' ? `${FRAME_SANDBOX} allow-same-origin` : FRAME_SANDBOX;
     }
-    const INLINE_MAX_HEIGHT = 560;
+    // The tallest an inline document is drawn before it starts scrolling inside itself. Taller than
+    // a phone screen would waste the conversation, and this is the point where a document is asked
+    // to scroll rather than grow.
+    const INLINE_MAX_HEIGHT = 640;
     const DOCK_MIN_HEIGHT = 140;
+
+    /**
+     * Everything that makes a phone behave differently — the map, then the values.
+     *
+     * The map matters more than the numbers. A later change to a mobile surface has to be *complete*,
+     * so this is the list of places it can touch (all of them in this file):
+     *
+     *   1. `narrowViewport()` — the only layout breakpoint; every other branch below keys off it.
+     *   2. `HtmlUiTemplateButton` — the composer entry, which collapses to its mark on a phone.
+     *   3. `HtmlUiCreateDialog` — the dialog becomes a bottom sheet: scrim, radius, padding, the
+     *      header row and its close control, the hint, the directory row, and the footer button pair.
+     *   4. the shared small-button style — `Object.assign({}, buttonStyle, { flex: '0 0 auto' }, ...)`
+     *      — used by the directory and template rows: three occurrences, one shape. Change all three.
+     *   5. the injected `dsh-htmlui-chrome-lift` stylesheet inside `apply()`. It is deliberately
+     *      scoped to the *shell's* mobile gate (`max-width: 1023px` **and** `pointer: coarse`), not
+     *      to the breakpoint above: it mirrors how the shell decides to show its mobile navigation.
+     *   6. the injected `dsh-htmlui-sheet-fields` stylesheet, also in `apply()`. Another installed
+     *      plugin holds *every* text field on the page at 16px with `!important`, so iOS Safari
+     *      cannot focus-zoom the viewport, and its comment says it means to reach third-party panels
+     *      — ours included. Our fields are ours to size, so the sheet's two sizes are stated again
+     *      there, with `SHEET_ID` supplying the specificity that decides between two `!important`
+     *      rules.
+     *
+     * Touch forwarding is behaviour, not styling, and lives in `assets/bridge.js`.
+     *
+     * Every phone value those places use is in `MOBILE` below, and none of them is written as a
+     * literal at its call site: one edit here reaches all of them, which is the point. A new
+     * mobile-only number belongs in this object first — a literal inside a `narrow ?` branch is
+     * exactly the value that gets half-changed.
+     *
+     * These are the phone values; every desktop branch keeps exactly the value it had before.
+     */
+    const MOBILE = {
+      /** The one layout breakpoint, in pixels. */
+      maxWidthPx: 640,
+      /** The composer entry, once it collapses to its mark. */
+      entryHeight: '24px',
+      entryPadding: '0 7px',
+      /** Tap targets inside the sheet. */
+      buttonHeight: '34px',
+      buttonPadding: '0 12px',
+      buttonFont: '12.5px',
+      /** The sticky footer pair: it splits the row, so it is wider than a row button. */
+      footerButtonPadding: '0 14px',
+      footerGap: '8px',
+      /** The sheet itself. */
+      sheetRadius: '14px 14px 0 0',
+      sheetPadding: '14px 14px calc(14px + env(safe-area-inset-bottom, 0px))',
+      sheetMaxHeight: '88vh',
+      scrim: 'rgba(0,0,0,0.45)',
+      /** Its header: the title, the line under it, and the square close control. */
+      titleFont: '15px',
+      titleWeight: 650,
+      hintFont: '12px',
+      closeRadius: '9px',
+      closeFont: '15px',
+      /** Its sections, packed tighter than the desktop dialog packs them. */
+      sectionMargin: '4px 0',
+      dirRowGap: '4px',
+      /** The directory field: compact, and its text shrinks with it. */
+      inputHeight: '30px',
+      inputPadding: '0 9px',
+      inputRadius: '8px',
+      inputFont: '11.5px',
+    };
+
+    /**
+     * The id the create sheet carries, so the injected field-size rule can name it.
+     *
+     * It is an id rather than a class on purpose. The rule it has to out-rank is another plugin's
+     * page-wide `!important` field floor, and between two `!important` declarations the higher
+     * *specificity* wins — not the later one, and not the inline style.
+     */
+    const SHEET_ID = 'dsh-htmlui-sheet';
+
+    /**
+     * The size of a text control inside that sheet, on both branches: the form's fields are the same
+     * fields whether it is drawn as a dialog or as a bottom sheet. The one exception is the directory
+     * row, which is compact on a phone (`MOBILE.inputFont`).
+     *
+     * It is named because the injected rule has to state the same number to the browser, and a second
+     * copy of a number is how two copies drift apart.
+     */
+    const SHEET_FIELD_FONT = '12px';
 
     /**
      * The dock's height limits, in the current window.
@@ -1223,6 +1310,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Whether this is a narrow viewport — a phone, or a window squeezed that far.
+     *
+     * The surfaces this plugin adds beside the composer are sized for a desktop row; below this
+     * width the entry collapses to its mark and a dialog becomes a sheet from the bottom, which is
+     * the only shape that fits a 390px screen without a magnifying glass.
+     */
+    function narrowViewport() {
+      return (
+        typeof window === 'object' &&
+        window !== null &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia(`(max-width: ${MOBILE.maxWidthPx}px)`).matches
+      );
+    }
+
+    /**
      * The hosted boxes, by interface.
      *
      * Each entry is the fixed wrapper the sync loop places; its first child is the frame itself,
@@ -1466,6 +1569,12 @@ window.__ModuleLoader__.load({
           // scrolls the conversation with it. Other forms are overlays, where a wheel over them
           // has never moved the chat behind them.
           if (data.__dshHtmlUi === 'wheel' && variant === 'inline') {
+            scrollTranscriptBy(record.uiId, Number(data.deltaX), Number(data.deltaY));
+          }
+          // A finger cannot chain the way a wheel can: a touch the document cannot use stops at the
+          // frame, so the bridge forwards it — sampled in screen coordinates, because the hosted
+          // frame follows its seat while the host scrolls — and this scrolls the conversation.
+          if (data.__dshHtmlUi === 'touch' && variant === 'inline') {
             scrollTranscriptBy(record.uiId, Number(data.deltaX), Number(data.deltaY));
           }
           if (data.__dshHtmlUi === 'resize') {
@@ -3219,6 +3328,7 @@ window.__ModuleLoader__.load({
       // The manifest form is shared by adopting and editing, so the container that holds
       // it has to open for either — an edit has no candidates to show.
       const adoptOpen = state.adopt !== undefined && state.adopt.open === true;
+      const narrow = narrowViewport();
       return h(
         'div',
         {
@@ -3227,15 +3337,22 @@ window.__ModuleLoader__.load({
             inset: '0',
             zIndex: 6,
             display: 'flex',
-            alignItems: 'center',
+            // On a phone this is a sheet from the bottom: within thumb reach, full width, and it
+            // cannot be mistaken for a card floating in the middle of a 390px screen.
+            alignItems: narrow ? 'flex-end' : 'center',
             justifyContent: 'center',
             pointerEvents: 'auto',
-            background: 'rgba(0,0,0,0.28)',
+            padding: narrow ? '0' : '16px',
+            // The dim is the original one on desktop; the flat variant exists only on a phone.
+            background: narrow ? MOBILE.scrim : 'rgba(0,0,0,0.28)',
           },
           onClick: (event) => {
             if (event.target === event.currentTarget) close();
           },
           role: 'dialog',
+          // The marker the injected field-size rule in `apply()` scopes itself to: everything inside
+          // this dialog is ours, including the manifest form one level further in.
+          id: SHEET_ID,
           'aria-modal': 'true',
           'aria-label': tr('createTitle', 'New HTML interface'),
         },
@@ -3243,31 +3360,73 @@ window.__ModuleLoader__.load({
           'div',
           {
             style: {
-              width: 'min(520px, 92vw)',
-              maxHeight: '80vh',
+              // Without this a `width: 100%` sheet plus its own padding is wider than the screen,
+              // which is what pushed the left edge off it.
+              boxSizing: 'border-box',
+              width: narrow ? '100%' : 'min(520px, 92vw)',
+              maxHeight: narrow ? MOBILE.sheetMaxHeight : '80vh',
               overflow: 'auto',
+              // The opaque surface token: `bg-base` is the page behind it and read straight through.
               background: 'var(--dsw-alias-bg-overlay, #fff)',
               color: 'var(--dsw-alias-text-primary, #111)',
               border: '1px solid var(--dsw-alias-border-l1, #ddd)',
-              borderRadius: '12px',
-              boxShadow: '0 18px 48px rgba(0,0,0,0.28)',
-              padding: '14px 16px',
+              borderRadius: narrow ? MOBILE.sheetRadius : '12px',
+              boxShadow: narrow ? 'none' : '0 18px 48px rgba(0,0,0,0.28)',
+              padding: narrow ? MOBILE.sheetPadding : '14px 16px',
             },
           },
-          h('div', { style: Object.assign({}, titleStyle, { fontSize: '14px', marginBottom: '4px' }) }, tr('createTitle', 'New HTML interface')),
           h(
             'div',
-            { style: { fontSize: '11.5px', opacity: 0.65, marginBottom: '10px' } },
+            { style: { display: 'flex', alignItems: narrow ? 'center' : 'baseline', gap: '8px', marginBottom: '4px' } },
+            h(
+              'div',
+              { style: Object.assign({}, titleStyle, narrow ? { fontSize: MOBILE.titleFont, fontWeight: MOBILE.titleWeight } : { fontSize: '14px' }) },
+              tr('createTitle', 'New HTML interface'),
+            ),
+            h('span', { style: { flex: '1 1 auto' } }),
+            // The close control is part of the mobile sheet; the desktop dialog closes the way it
+            // always did (backdrop click), so it is not added there.
+            narrow
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    style: Object.assign({}, buttonStyle, {
+                      // A thumb, not a mouse: every control on the sheet is a little bigger. The close
+                      // control squares off the same tap size the other sheet buttons stand at.
+                      height: MOBILE.buttonHeight,
+                      width: MOBILE.buttonHeight,
+                      padding: '0',
+                      borderRadius: MOBILE.closeRadius,
+                      fontSize: MOBILE.closeFont,
+                    }),
+                    title: tr('cancel', 'Cancel'),
+                    onClick: close,
+                  },
+                  '✕',
+                )
+              : null,
+          ),
+          h(
+            'div',
+            {
+              style: narrow
+                ? { fontSize: MOBILE.hintFont, lineHeight: '1.5', opacity: 0.6, marginBottom: '8px' }
+                : { fontSize: '11.5px', opacity: 0.65, marginBottom: '10px' },
+            },
             tr('createHint', 'Nothing here goes through the model; the interface is created in this session right away.'),
           ),
-          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createSource', 'New HTML project')),
+          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: narrow ? MOBILE.sectionMargin : '6px 0 4px' } }, tr('createSource', 'New HTML project')),
           // Where the list comes from, read from the host on every open. The reader can
           // point it at their own directory; an empty value restores the defaults.
           h(
             'div',
-            { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' } },
+            { style: { display: 'flex', alignItems: 'center', gap: narrow ? MOBILE.dirRowGap : '6px', marginBottom: '6px' } },
             h('input', {
               type: 'text',
+              // The one control the sheet draws smaller on a phone, so the injected rule needs to be
+              // able to tell it apart from the rest of the fields.
+              'data-dsh-htmlui-dir': '',
               value: state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '',
               placeholder: tr('createDirPlaceholder', 'No directory chosen yet'),
               onChange: (event) => {
@@ -3275,12 +3434,15 @@ window.__ModuleLoader__.load({
                 bump();
               },
               style: {
+                boxSizing: 'border-box',
                 flex: '1 1 auto',
                 minWidth: '0',
                 font: 'inherit',
-                fontSize: '12px',
-                padding: '4px 8px',
-                borderRadius: '7px',
+                fontSize: narrow ? MOBILE.inputFont : SHEET_FIELD_FONT,
+                // Compact on a phone, exactly as it always was on a desktop.
+                height: narrow ? MOBILE.inputHeight : 'auto',
+                padding: narrow ? MOBILE.inputPadding : '4px 8px',
+                borderRadius: narrow ? MOBILE.inputRadius : '7px',
                 border: '1px solid var(--dsw-alias-border-l2, #ccc)',
                 background: 'var(--dsw-alias-bg-base, #fff)',
                 color: 'inherit',
@@ -3290,7 +3452,15 @@ window.__ModuleLoader__.load({
               'button',
               {
                 type: 'button',
-                style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+                // `Object.assign` writes `undefined` just as happily as a value, which would erase
+                // the height/padding/fontSize this inherits from `buttonStyle` on desktop. The mobile
+                // branch is therefore a whole object, and the desktop branch adds nothing.
+                style: Object.assign(
+                  {},
+                  buttonStyle,
+                  { flex: '0 0 auto' },
+                  narrow ? { flexShrink: 0, height: MOBILE.buttonHeight, padding: MOBILE.buttonPadding, fontSize: MOBILE.buttonFont } : {},
+                ),
                 title: tr('createDirBrowseHint', 'Choose the folder with the system file browser'),
                 onClick: () => {
                   // The shell exposes a directory picker; typing a path by hand is the
@@ -3318,7 +3488,15 @@ window.__ModuleLoader__.load({
               'button',
               {
                 type: 'button',
-                style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+                // `Object.assign` writes `undefined` just as happily as a value, which would erase
+                // the height/padding/fontSize this inherits from `buttonStyle` on desktop. The mobile
+                // branch is therefore a whole object, and the desktop branch adds nothing.
+                style: Object.assign(
+                  {},
+                  buttonStyle,
+                  { flex: '0 0 auto' },
+                  narrow ? { flexShrink: 0, height: MOBILE.buttonHeight, padding: MOBILE.buttonPadding, fontSize: MOBILE.buttonFont } : {},
+                ),
                 disabled: state.templates.savingDir === true,
                 onClick: () => {
                   const value = state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '';
@@ -3475,7 +3653,15 @@ window.__ModuleLoader__.load({
                       'button',
                       {
                         type: 'button',
-                        style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
+                        // `Object.assign` writes `undefined` just as happily as a value, which would erase
+                // the height/padding/fontSize this inherits from `buttonStyle` on desktop. The mobile
+                // branch is therefore a whole object, and the desktop branch adds nothing.
+                style: Object.assign(
+                  {},
+                  buttonStyle,
+                  { flex: '0 0 auto' },
+                  narrow ? { flexShrink: 0, height: MOBILE.buttonHeight, padding: MOBILE.buttonPadding, fontSize: MOBILE.buttonFont } : {},
+                ),
                         onClick: () => {
                           const stem = candidate.name.replace(/\.html?$/iu, '');
                           state.adopt = {
@@ -3549,7 +3735,7 @@ window.__ModuleLoader__.load({
                               flex: '1 1 auto',
                               minWidth: '0',
                               font: 'inherit',
-                              fontSize: '12px',
+                              fontSize: SHEET_FIELD_FONT,
                               padding: '3px 7px',
                               borderRadius: '7px',
                               border: '1px solid var(--dsw-alias-border-l2, #ccc)',
@@ -3575,7 +3761,7 @@ window.__ModuleLoader__.load({
                               flex: '1 1 auto',
                               minWidth: '0',
                               font: 'inherit',
-                              fontSize: '12px',
+                              fontSize: SHEET_FIELD_FONT,
                               padding: '3px 7px',
                               borderRadius: '7px',
                               border: '1px solid var(--dsw-alias-border-l2, #ccc)',
@@ -3606,7 +3792,7 @@ window.__ModuleLoader__.load({
                               flex: '1 1 auto',
                               minWidth: '0',
                               font: 'inherit',
-                              fontSize: '12px',
+                              fontSize: SHEET_FIELD_FONT,
                               padding: '3px 7px',
                               borderRadius: '7px',
                               border: '1px solid var(--dsw-alias-border-l2, #ccc)',
@@ -3636,12 +3822,15 @@ window.__ModuleLoader__.load({
                       ),
                       h(
                         'div',
-                        { style: { display: 'flex', justifyContent: 'flex-end', gap: '6px' } },
+                        { style: { display: 'flex', justifyContent: 'flex-end', gap: narrow ? MOBILE.footerGap : '6px' } },
                         h(
                           'button',
                           {
                             type: 'button',
-                            style: buttonStyle,
+                            // The same phone shape as the create dialog's footer pair: on a sheet the two
+                            // actions in a row are one control, not two sizes of it. Cancel used to keep
+                            // the desktop button next to a thumb-sized confirm.
+                            style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}),
                             onClick: () => {
                               state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false };
                               bump();
@@ -3653,7 +3842,7 @@ window.__ModuleLoader__.load({
                           'button',
                           {
                             type: 'button',
-                            style: Object.assign({}, buttonStyle, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
+                            style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
                             disabled: state.adopt.busy === true,
                             onClick: () => {
                               adoptTemplate(state.adopt.source, {
@@ -3719,13 +3908,23 @@ window.__ModuleLoader__.load({
             ),
             h(
               'div',
-              { style: { display: 'flex', gap: '6px' } },
-              h('button', { type: 'button', style: buttonStyle, onClick: close }, tr('cancel', 'Cancel')),
+              // On a phone the two actions split the row evenly and stand a thumb tall; the desktop
+              // keeps the compact pair it always had.
+              { style: { display: 'flex', gap: narrow ? MOBILE.footerGap : '6px' } },
               h(
                 'button',
                 {
                   type: 'button',
-                  style: Object.assign({}, buttonStyle, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
+                  style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}),
+                  onClick: close,
+                },
+                tr('cancel', 'Cancel'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
                   disabled: state.create.busy === true || sessionId === undefined,
                   onClick: () => {
                     if (sessionId === undefined || state.create.busy === true) return;
@@ -3907,12 +4106,16 @@ window.__ModuleLoader__.load({
           live = false;
         };
       }, []);
+      // A phone's composer row has no width to spare, so the entry collapses to its mark there. The
+      // action is the same one; only the label is shorter, and the accessible name stays complete.
+      const narrow = narrowViewport();
       return h(
         'button',
         {
           type: 'button',
-          style: Object.assign({}, buttonStyle, { height: '26px' }),
+          style: Object.assign({}, buttonStyle, { height: narrow ? MOBILE.entryHeight : '26px', padding: narrow ? MOBILE.entryPadding : '0 8px' }),
           title: tr('templatesTooltip', 'New HTML interface, or reuse a saved template'),
+          'aria-label': tr('templatesTooltip', 'New HTML interface, or reuse a saved template'),
           onClick: () => {
             state.create.open = true;
             state.create.busy = false;
@@ -3922,7 +4125,7 @@ window.__ModuleLoader__.load({
             loadTemplates();
           },
         },
-        tr('templatesButton', '⟨+⟩ New HTML'),
+        narrow ? '⟨+⟩' : tr('templatesButton', '⟨+⟩ New HTML'),
       );
     }
 
@@ -3952,6 +4155,68 @@ window.__ModuleLoader__.load({
         }
       } catch (error) {
         logWarn(ctx, 'dsh-htmlui: the locale service refused this dictionary', error);
+      }
+
+      // The shell's own chrome has no stacking level to speak of, and our surfaces are drawn from
+      // `shell.overlay` — a layer that is, by contract, above every column. So the scroll-to-bottom
+      // button and the sidebar end up *under* an inline document. Lowering our own layer is not
+      // available (its container is already in front of the columns, whatever z-index our children
+      // carry); lifting the chrome is. One stylesheet, and a surface that needs it is one line here
+      // instead of a special case somewhere else.
+      try {
+        const lift = document.createElement('style');
+        lift.id = 'dsh-htmlui-chrome-lift';
+        lift.textContent = [
+          '/* Chrome the frame-wide htmlui layer would otherwise cover — on mobile only, matching the',
+          '   gate the shell itself uses for its mobile navigation, so a desktop layout is untouched. */',
+          '/* The `html` prefix is deliberate: the shell declares some of these with `!important` at the',
+          '   same specificity (the sidebar is z-index 1300 in that same media query), and between two',
+          '   `!important` declarations the higher specificity wins, not the later one. */',
+          '@media (max-width: 1023px) and (pointer: coarse) {',
+          '  html [class*="toBottom"] { z-index: 24 !important; }',
+          '  html [data-mobile-nav="frame"] > :first-child { z-index: 1480 !important; }',
+          '  html [class*="rightbarCol"], html [data-mobile-nav="backdrop"] { z-index: 1440 !important; }',
+          '}',
+        ].join('\n');
+        document.head.appendChild(lift);
+        disposers.push(() => {
+          if (lift.parentNode !== null) lift.parentNode.removeChild(lift);
+        });
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: chrome lift skipped', error);
+      }
+
+      // The field sizes inside our own sheet, pinned.
+      //
+      // An installed plugin (`dsh-web-mobile`) holds every text field on the page at 16px with
+      // `!important` whenever it detects iOS WebKit, so Safari cannot enlarge the viewport when a
+      // field takes focus; its comment says it means to reach third-party panels, and it leaves
+      // `select` out on purpose. The result inside our sheet was a form whose inputs were 16px and
+      // whose selects were 12px. An inline style cannot win against `!important`, so the two sizes
+      // the sheet was designed with are stated here instead — on the same mobile gate as above,
+      // scoped to the sheet's own id, so nothing outside it and no chrome of the shell is touched.
+      // `select` is included: inside this dialog every control should be one size.
+      try {
+        const fields = document.createElement('style');
+        fields.id = 'dsh-htmlui-sheet-fields';
+        fields.textContent = [
+          '@media (max-width: 1023px) and (pointer: coarse) {',
+          `  #${SHEET_ID} input,`,
+          `  #${SHEET_ID} select,`,
+          `  #${SHEET_ID} textarea { font-size: ${SHEET_FIELD_FONT} !important; }`,
+          '}',
+          // The directory row is the one field the layout breakpoint itself shrinks, so its rule
+          // carries the same number the branch above uses rather than the sheet-wide one.
+          `@media (max-width: ${MOBILE.maxWidthPx}px) and (pointer: coarse) {`,
+          `  #${SHEET_ID} [data-dsh-htmlui-dir] { font-size: ${MOBILE.inputFont} !important; }`,
+          '}',
+        ].join('\n');
+        document.head.appendChild(fields);
+        disposers.push(() => {
+          if (fields.parentNode !== null) fields.parentNode.removeChild(fields);
+        });
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: the sheet field sizes were not pinned', error);
       }
 
       disposers.push(

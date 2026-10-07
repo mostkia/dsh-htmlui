@@ -196,11 +196,11 @@ test('an inline frame is seamless: no chrome, no border, content-sized', () => {
   const boxHeight = (initialSize) =>
     render(__internals.HtmlUiFrame, { record: recordFor('inline', { sizeText: '' }), theme: 'light', variant: 'inline', initialSize }).elements[0]
       .props.style.height;
-  assert.equal(boxHeight({ h: 4000 }), '560px', 'a very long document is capped, so it scrolls itself');
+  assert.equal(boxHeight({ h: 4000 }), '640px', 'a very long document is capped, so it scrolls itself');
   assert.equal(boxHeight({ h: 12 }), '60px', 'a very short one keeps a floor');
   assert.equal(boxHeight(undefined), '220px', 'a document that reports nothing gets the default box');
   assert.equal(boxHeight({ h: 300 }), '300px', 'and an ordinary one is taken as it measures');
-  assert.equal(__internals.inlineHeightOf(4000), 560, 'the seat reserves exactly what the frame draws');
+  assert.equal(__internals.inlineHeightOf(4000), 640, 'the seat reserves exactly what the frame draws');
 });
 
 test('a failing surface reports itself instead of rendering nothing', () => {
@@ -540,7 +540,7 @@ test('an inline document is hosted by the overlay, and its seat holds the space'
   assert.equal(render(__internals.InlineSeat, { record }).elements[0].props.style.height, '321px', 'the seat holds the document height');
   assert.equal(__internals.inlineHeightOf(undefined), 220, 'an unmeasured document gets the fallback');
   assert.equal(__internals.inlineHeightOf(10), 60, 'a tiny one keeps a floor');
-  assert.equal(__internals.inlineHeightOf(4000), 560, 'and a very long one is capped');
+  assert.equal(__internals.inlineHeightOf(4000), 640, 'and a very long one is capped');
 
   // Switching Session hides the group; it does not unmount the document.
   const away = render(__internals.HtmlUiOverlay, { ctx: ctxFor('other') });
