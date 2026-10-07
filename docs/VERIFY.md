@@ -95,12 +95,29 @@ Two constraints of the host layout, worth knowing before judging a failure:
   transcript, so the band a hosted document is clipped to ends where the composer begins:
   scroll a session with an inline document to its very bottom — the document is cut off at the
   input box and the input box stays fully usable.
-- **The height convention still holds.** A document taller than the cap (560 px) is drawn at the
-  cap and scrolls *inside its own frame*; an ordinary one is drawn at whatever it measured; a
-  very short one keeps a 60 px floor; and a document that reports nothing — everything in it is
-  `position: absolute`/`fixed`, so it has no measurable height — gets the 220 px default box.
-  The seat in the transcript reserves exactly the height the frame draws, because one function
+- **The height convention still holds.** A document taller than the cap (640 px, `INLINE_MAX_HEIGHT`)
+  is drawn at the cap and scrolls *inside its own frame*; an ordinary one is drawn at whatever it
+  measured; a very short one keeps a 60 px floor; and a document that reports nothing — everything
+  in it is `position: absolute`/`fixed`, so it has no measurable height — gets the 220 px default
+  box. The seat in the transcript reserves exactly the height the frame draws, because one function
   answers for both, so the conversation around it never shifts when the document loads.
+- **The phone has two gates, and they are deliberately different.** The layout breakpoint is
+  `max-width: 640px` (`MOBILE.maxWidthPx`): below it the composer entry collapses and the create
+  dialog is a bottom sheet, with every one of its phone values read from the single `MOBILE` object
+  in `client.js`. The z-index lift our injected stylesheet gives the shell's chrome uses the
+  *shell's* own gate instead — `max-width: 1023px` **and** `pointer: coarse` — because that
+  stylesheet exists only to out-rank the shell's mobile navigation, which appears under exactly
+  those two conditions. So a narrow window with a mouse has the sheet and no lift, while a wide
+  touch screen has the lift and no sheet. Judge a mobile defect inside the gate that owns it, and
+  expect the desktop values at every width above 640 px.
+- **The sheet's fields keep the size this plugin gave them.** Another installed plugin holds every
+  text field on the page at 16px with `!important` on iOS — so Safari cannot focus-zoom — and it
+  leaves `select` out on purpose. Inside the create sheet that used to mean 16px text inputs beside
+  12px selects. The sheet's own sizes (12px, and 11.5px for the directory row below the layout
+  breakpoint) are therefore restated by a second injected stylesheet, scoped to the dialog's id and
+  gated on the same mobile query. Expect one size inside the sheet on every engine: the `select`
+  controls read 12px like the text fields, the directory field stays smaller, and nothing outside
+  the dialog is touched.
 
 ## 3. The template drawer
 
