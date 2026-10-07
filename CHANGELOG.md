@@ -2,6 +2,43 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.2
+
+### Added
+
+- The plugin's own surfaces have a phone layout. Below `max-width: 640px` the create dialog becomes a
+  bottom sheet — scrim, top-only radius, a close control in its header, a footer whose two buttons
+  stand a thumb tall — and the composer entry collapses to its mark. Every value that makes a phone
+  behave differently now lives in one `MOBILE` object at the top of `client.js`, under a map of the
+  places a mobile change can reach (the breakpoint, the entry, the sheet, the three shared row
+  buttons, and the two injected stylesheets), so "change the phone layout" is one edit rather than a
+  search for literals. Desktop branches keep the value they always had, item by item.
+- A phone can scroll a document that does not scroll itself. When a one-finger vertical drag starts
+  inside a hosted document, the bridge decides **once** who owns the gesture: the document keeps it if
+  it can scroll, and the gesture stops at the document's edge instead of handing the remainder to the
+  conversation — one owner for the whole drag, which is what removed the press-instant jitter that
+  deciding per event caused. Y only, one dispatch per animation frame, and sampled from screen
+  coordinates so a seat that moves under the finger cannot pollute the measurement.
+- The frame-wide layer lifts the shell's chrome above an inline document on a phone: the
+  scroll-to-bottom button, the sidebar, the right column and the drawer backdrop get a stacking level
+  of their own, scoped to the shell's own mobile gate (`max-width: 1023px` **and** a coarse pointer)
+  so a desktop layout is untouched.
+
+### Fixed
+
+- The inline height cap is **640px**. It was 560, which made a document taller than a phone screen
+  start scrolling inside itself earlier than it needed to; the seat in the transcript and the frame
+  that draws the document still ask one function for the number, so they cannot disagree.
+- The create sheet's controls keep the size this plugin gives them. A mobile-polish plugin installed
+  alongside (`dsh-web-mobile`) holds every text field on the page at 16px with `!important` on iOS so
+  Safari cannot focus-zoom, and leaves `select` out on purpose — which left this dialog with 16px
+  text inputs beside 12px selects. An inline style cannot win against `!important`, so the sheet's two
+  sizes are restated from a second injected stylesheet, scoped to the dialog's own id: between two
+  `!important` declarations specificity decides, and an id beats any number of attribute selectors.
+  Nothing outside the dialog is touched.
+- The manifest form's Cancel is a phone control too. It kept the 22px desktop button beside a 34px
+  confirm in the same footer row; both now come from `MOBILE`, as does the gap between them.
+
 ## 0.1.1
 
 ### Added
