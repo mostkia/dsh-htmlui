@@ -3358,9 +3358,14 @@ window.__ModuleLoader__.load({
                 // 手机: the narrow shell has no persistent sidebar to protect, and the seat we
                 // measure from is a column inside it rather than the screen — so measuring still
                 // covered a column and the surface came up short of the edges. On a narrow viewport
-                // the screen *is* the column, so it is covered whole. Desktop keeps the measurement.
+                // the screen *is* the column, so it is covered whole.
+                //
+                // Width in viewport units, not percent: a percentage resolves against the containing
+                // block, and a shell that wraps this layer in a transformed element makes that
+                // element the containing block — which is how a "100%" layer still left a band down
+                // the right edge. `vw` always means the viewport. Desktop keeps the measurement.
                 left: narrowViewport() !== true && state.column.width > 0 ? `${state.column.left}px` : '0',
-                width: narrowViewport() !== true && state.column.width > 0 ? `${state.column.width}px` : '100%',
+                width: narrowViewport() !== true && state.column.width > 0 ? `${state.column.width}px` : '100vw',
                 height: '100%',
                 zIndex: 5,
                 display: active ? 'flex' : 'none',
