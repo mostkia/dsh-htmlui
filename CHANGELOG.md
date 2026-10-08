@@ -62,6 +62,13 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- **Editing a project no longer deletes the parts of its manifest the form does not manage.** The
+  form is a partial view of `meta.json` — it knows the name, the placement and whether the project's
+  backend may run — and saving it rewrote the file from those fields alone. An ordinary edit
+  therefore deleted a project's `backend` declaration (leaving a folder whose `server.js` nothing
+  ran, with no switch anywhere to turn it back on) and any `store` declaration it had. A save now
+  merges onto what is on disk: keys the form never showed survive, and a declaration is only
+  rewritten when the reader actually answered about it.
 - A floating window no longer opens larger than the screen it is drawn in. The 520×360 default — or
   a `size` the model chose while looking at a desktop — opened wider than a phone's viewport, which
   put the window's own resize handle off the edge: the one control that could have made it smaller

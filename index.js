@@ -943,18 +943,41 @@ function createStore(root) {
       // The switch in the form is offered for a folder that ships a `server.js`, and the file has
       // to still be there when the manifest is written — a declaration with nothing behind it
       // would only produce a 404 later.
-      const declaration = wanted.backend === true && existsSync(join(dir, APP_DEFAULT_FILE)) ? { backend: APP_DEFAULT_FILE } : {};
+      // The form is a partial view of a manifest, so a save **merges onto what is on disk**. Keys the
+      // form does not manage — `store`, or a declaration it was never shown — survive; rewriting the
+      // file from the form's own fields is how an edit quietly deleted a project's backend, leaving
+      // nothing able to turn it back on.
+      const existing = readJson(join(dir, 'meta.json'), undefined);
+      const kept = existing !== null && typeof existing === 'object' && Array.isArray(existing) !== true ? existing : {};
+      // A declaration is only rewritten when the reader actually answered about it: ticking the
+      // switch on says "this one has a backend", turning it off says "no", and saying nothing leaves
+      // the file's own answer alone.
+      const declaration =
+        wanted.backend === true
+          ? existsSync(join(dir, APP_DEFAULT_FILE))
+            ? { backend: APP_DEFAULT_FILE }
+            : kept.backend === undefined
+              ? {}
+              : { backend: kept.backend }
+          : wanted.backend === false
+            ? { backend: false }
+            : kept.backend === undefined
+              ? {}
+              : { backend: kept.backend };
       const source = readFileSync(join(dir, 'index.html'), 'utf8');
-      writeJsonAtomic(join(dir, 'meta.json'), {
-        slug,
-        name: displayName,
-        description,
-        placement,
-        security,
-        ...declaration,
-        bytes: byteLength(source),
-        updatedAt: Date.now(),
-      });
+      writeJsonAtomic(
+        join(dir, 'meta.json'),
+        Object.assign({}, kept, {
+          slug,
+          name: displayName,
+          description,
+          placement,
+          security,
+          ...declaration,
+          bytes: byteLength(source),
+          updatedAt: Date.now(),
+        }),
+      );
       return { ok: true, name, slug, kind: 'dir' };
     }
     const dir = ensureDir(join(root, slug));
