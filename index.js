@@ -1323,7 +1323,6 @@ function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS }) {
 
   async function load(target, stamp) {
     purge(target.dir);
-    // eslint-disable-next-line import/no-dynamic-require
     const module = require(target.file);
     const handle = typeof module === 'function' ? module : typeof module?.handle === 'function' ? module.handle : undefined;
     if (handle === undefined) {

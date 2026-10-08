@@ -743,6 +743,20 @@ test('the create dialog asks what to start from and where to put it', () => {
   }
   const slugBox = adopting.elements.find((element) => element.props?.type === 'text' && element.props.value === 'my-folder');
   assert.ok(slugBox !== undefined, 'the id is prefilled from the folder name');
+
+  // A project that ships a backend is offered the switch; one that does not is told what would
+  // offer it, and never given a switch that would do nothing.
+  const withBackend = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  __internals.state.adopt = Object.assign({}, __internals.state.adopt, { backendDeclared: true });
+  const offered = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  assert.ok(!withBackend.elements.some((element) => element.props?.type === 'checkbox'), 'no switch without a declaration');
+  assert.ok(withBackend.text.includes('No backend here'), 'and the line that says what would offer one');
+  const switch_ = offered.elements.find((element) => element.props?.type === 'checkbox');
+  assert.ok(switch_ !== undefined, 'a declared backend is offered as a switch');
+  assert.equal(switch_.props.checked, false, 'and it starts off: the declaration is not permission');
+  assert.ok(offered.text.includes('Run this project'), 'the switch says what it does');
+  assert.ok(offered.text.includes('as trusted as the plugin itself'), 'and what granting it means');
+
   __internals.state.adopt = { open: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
   __internals.state.templates.candidates = [];
   // The chosen place is the one the placement has to name.
