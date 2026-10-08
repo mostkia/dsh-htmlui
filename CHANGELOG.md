@@ -2,33 +2,6 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.1.4
-
-### Added
-
-- A project's backend may now declare that it wants to stay loaded: `resident: true` on the module
-  export. Without it nothing changes — an idle backend is still dropped after ten minutes — but a
-  resident one is never dropped for being idle, which is the difference between "runs while you look
-  at it" and "keeps running": a watcher keeps watching, and sending its alert, with the panel closed.
-  Because such a backend is by definition one that nothing calls, wanting to stop it can no longer be
-  expressed as "the next call will notice", so stopping becomes its own act: `POST
-  /templates/backend/stop { slug }` unloads the module (calling its `stop()` hook) **without**
-  touching the reader's allowance, and opening the project again loads it again. Turning the
-  allowance off, or turning residency off, unloads immediately for the same reason.
-- The reader keeps the last word about lifetime, separately from trust: `POST /templates/backend`
-  takes a `resident` flag beside `allowed`, stored per project in the plugin's settings
-  (`backendResident`), so a declaration is a request and not a decision — the same shape as the
-  allowance itself, and for the same reason. Both answers, and whether the module is loaded right
-  now, are reported in the catalogue (`backend: { declared, allowed, resident, loaded }`) and in
-  `/health` (`resident`, `declaredResident`), because "was it called recently" no longer describes
-  the lifetime of a resident backend.
-
-### Changed
-
-- The idle-unload delay is now the `backendIdleMs` setting (default ten minutes, clamped to between
-  one second and one hour). It is the same rule as before, made visible: how long an idle backend is
-  worth holding is a property of the machine, not of the plugin.
-
 ## 0.1.3
 
 ### Added
@@ -59,6 +32,33 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   handler that throws or never answers becomes a `500`/`504` answer carrying the reason rather than
   a stalled request. `/health` reports every loaded backend with its call and failure counts, since
   a loaded backend is otherwise invisible.
+- A project's backend may declare that it wants to stay loaded: `resident: true` on the module
+  export. Without it nothing changes — an idle backend is still dropped after ten minutes — but a
+  resident one is never dropped for being idle, which is the difference between "runs while you look
+  at it" and "keeps running": a watcher keeps watching, and sending its alert, with the panel closed.
+  Because such a backend is by definition one that nothing calls, wanting to stop it can no longer be
+  expressed as "the next call will notice", so stopping becomes its own act: `POST
+  /templates/backend/stop { slug }` unloads the module (calling its `stop()` hook) **without**
+  touching the reader's allowance, and opening the project again loads it again. Turning the
+  allowance off, or turning residency off, unloads immediately for the same reason.
+- The reader keeps the last word about lifetime, separately from trust: `POST /templates/backend`
+  takes a `resident` flag beside `allowed`, stored per project in the plugin's settings
+  (`backendResident`), so a declaration is a request and not a decision — the same shape as the
+  allowance itself, and for the same reason. Both answers, and whether the module is loaded right
+  now, are reported in the catalogue (`backend: { declared, allowed, resident, loaded }`) and in
+  `/health` (`resident`, `declaredResident`), because "was it called recently" no longer describes
+  the lifetime of a resident backend.
+
+### Changed
+
+- The idle-unload delay is the `backendIdleMs` setting (default ten minutes, clamped to between one
+  second and one hour). It is the same rule as before, made visible: how long an idle backend is
+  worth holding is a property of the machine, not of the plugin.
+- The manager rows and the drawer's project rows are laid out for a narrow screen: the manager row is
+  three lines (what it is; the process — placement, revision, id — with its backend's marks pushed to
+  the right; then the controls), and a drawer row is two (the choice and its pencil, then
+  `Stop backend` on the left with the marks on the right). What residency means lives in a tooltip
+  rather than in a line of small print, which is what had been wrapping rows onto a second line.
 
 ### Fixed
 
@@ -75,6 +75,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   than the one on screen. Picking a project now moves an open edit form with it; a half-filled
   *adopt* form is deliberately left alone, since that one is about a folder rather than a catalogue
   entry.
+- A fullscreen surface covers the whole screen on a phone. It is positioned over the conversation
+  column, which is right on a desktop — the sidebar belongs to the reader — but on a narrow viewport
+  that measurement pointed at a column inside the shell, and the surface came up 32px short. Narrow
+  viewports now cover the viewport itself, in viewport units and with `flexShrink: 0` and a matching
+  `minWidth`, because a width alone is only a request while the layer is a flex item in the host's
+  layout. The desktop measurement is untouched.
 
 ## 0.1.2
 

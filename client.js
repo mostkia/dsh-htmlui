@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
      * constant is the only place the client states its version, and `package.test.mjs` holds it
      * to the packaged one.
      */
-    const CLIENT_VERSION = '0.1.4';
+    const CLIENT_VERSION = '0.1.3';
     const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (${CLIENT_VERSION})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its
@@ -3366,6 +3366,12 @@ window.__ModuleLoader__.load({
                 // the right edge. `vw` always means the viewport. Desktop keeps the measurement.
                 left: narrowViewport() !== true && state.column.width > 0 ? `${state.column.left}px` : '0',
                 width: narrowViewport() !== true && state.column.width > 0 ? `${state.column.width}px` : '100vw',
+                // The width above is only a *request* while this layer is a flex item in the host's
+                // layout: flex items shrink, and a shrink back to the container's width is exactly
+                // what a measured 361-in-a-393px-viewport was. `flexShrink: 0` refuses to shrink, and
+                // the matching min-width is the second lock (a box never shrinks below its min-width).
+                flexShrink: 0,
+                minWidth: narrowViewport() === true ? '100vw' : undefined,
                 height: '100%',
                 zIndex: 5,
                 display: active ? 'flex' : 'none',
