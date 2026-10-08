@@ -824,12 +824,16 @@ window.__ModuleLoader__.load({
         collapse: 'Hide',
         managerView: 'HTML manager',
         managerTitle: 'HTML interfaces in this session',
-        managerClose: 'Remove',
+        managerClose: 'Close interface',
+      managerRestoreUi: 'Restore interface',
+      managerRestoreUiHint: 'Open this project again in this session',
+      managerRestoreUiDone: 'Interface restored.',
+      managerRestoreUiFailed: 'Could not restore that interface.',
         closeFailed: 'The host refused to remove it; it is still attached.',
         managerRestore: 'Show',
         managerHidden: 'hidden',
         minimize: 'Hide the window',
-        managerCloseAll: 'Remove all',
+        managerCloseAll: 'Close all interfaces',
         managerEmpty: 'This session has no HTML interface.',
         managerNew: 'New HTML project',
         create: 'Create',
@@ -942,12 +946,16 @@ window.__ModuleLoader__.load({
         collapse: '收起',
         managerView: 'HTML管理',
         managerTitle: '本会话的 HTML 界面',
-        managerClose: '关闭',
+        managerClose: '关闭 UI 界面',
+        managerRestoreUi: '恢复 UI 界面',
+        managerRestoreUiHint: '在本会话里重新打开这个项目',
+        managerRestoreUiDone: '界面已恢复。',
+        managerRestoreUiFailed: '界面恢复失败。',
         closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
         managerRestore: '恢复显示',
         managerHidden: '已隐藏',
         minimize: '隐藏窗口',
-        managerCloseAll: '全部关闭',
+        managerCloseAll: '关闭全部 UI 界面',
         managerEmpty: '本会话没有 HTML 界面。',
         managerNew: '新建 HTML 项目',
         create: '创建',
@@ -2742,6 +2750,24 @@ window.__ModuleLoader__.load({
                       'div',
                       { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
                       stopBackendButton(template.slug, info, (result) => setStatus(result.message)),
+                      // The other half of "closing an interface does not stop its backend": the process
+                      // is still there, so its interface can be brought back from here instead of being
+                      // hunted down in the drawer. The project's own declared placement is used, which
+                      // is what the reader chose when they imported it.
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          style: buttonStyle,
+                          title: tr('managerRestoreUiHint', 'Open this project again in this session'),
+                          onClick: () => {
+                            applyTemplate(template.slug, sessionId, undefined).then((ok) => {
+                              setStatus(ok ? tr('managerRestoreUiDone', 'Interface restored.') : tr('managerRestoreUiFailed', 'Could not restore that interface.'));
+                            });
+                          },
+                        },
+                        tr('managerRestoreUi', 'Restore interface'),
+                      ),
                     ),
                   );
                 }),

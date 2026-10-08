@@ -786,7 +786,7 @@ test('the session manager lists what is attached and can remove it', () => {
   ]);
   const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
   assert.match(listed.text, /\(2\)/u, 'the count is the session count');
-  for (const text of ['看板', '表单', 'background', 'inline', 'ui-99000001', 'ui-99000002', 'Remove']) {
+  for (const text of ['看板', '表单', 'background', 'inline', 'ui-99000001', 'ui-99000002', 'Close interface']) {
     assert.ok(listed.text.includes(text), `the manager shows ${text}`);
   }
   // A different session is not this session's business.
@@ -891,7 +891,7 @@ test('the session page restores every form that can be hidden', () => {
   // Three of the five: a background layer is always on screen and an inline surface lives in
   // the conversation, so neither can be hidden and neither has anything to restore.
   assert.equal(restores, 3, 'three of the five forms can be shown again');
-  assert.ok(listed.text.includes('Remove'), 'and every one of them can be removed');
+  assert.ok(listed.text.includes('Close interface'), 'and every one of them can be closed, which is what the label now says');
   resetStore();
 });
 
