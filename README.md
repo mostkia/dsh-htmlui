@@ -35,6 +35,10 @@ more than two.
 |---|---|
 | ![one click](docs/images/07-one-click-deploy.png) | ![live2d](docs/images/08-live2d.png) |
 
+| A notepad app built from one sentence with an Agent — with this plugin installed, so can you 😋 |
+|---|
+| ![notepad app](docs/images/09-notepad-app.png) |
+
 ## Highlights
 
 - **HTML, rendered globally.** In principle any HTML/CSS/JS — canvas, WebGL, video,

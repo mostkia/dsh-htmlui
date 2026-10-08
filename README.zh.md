@@ -31,7 +31,7 @@ dsh-htmlui支持将HTML插入到会话流中、窗口化运行、右侧窗口分
 
 | 一句话使用Agent制作的记事本程序，安装此插件后，你也能行😋 |
 |---|
-| ![one click](docs/images/07-one-click-deploy.png) |
+| ![notepad app](docs/images/09-notepad-app.png) |
 
 ## 特点
 
