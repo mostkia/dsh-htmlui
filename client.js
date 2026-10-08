@@ -2641,7 +2641,12 @@ window.__ModuleLoader__.load({
         // asks the column to expand — the call is idempotent, so a column that is already open stays
         // as it is and a collapsed one comes back together with its child.
         if (hidden) {
+          // Two things, and both are needed: clearing the child's flag expands the content, and
+          // `openRightPane` is the call that actually brings the column up — it is the one
+          // `rightPaneReady()` just checked for. `setColumnExpanded` rides along as a best-effort
+          // nudge for a collapsed column; where the shell does not expose it, nothing is lost.
           state.collapsed.delete(record.uiId);
+          openRightPane(record.uiId);
           setColumnExpanded(record.sessionId, true);
           bump();
           return;
