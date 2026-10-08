@@ -871,7 +871,8 @@ window.__ModuleLoader__.load({
       residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
       managerBackends: 'Backend processes',
-      managerBackendsHint: 'still running, with no interface of theirs left in this session',
+      managerBackendsHint: 'alive right now — a resident one stays, one that follows its panel unloads after the idle delay',
+      backendWillIdle: 'Unloads on its own',
       backendResident: 'Resident',
       backendFollow: 'Follows the panel',
       backendResidentHint: 'Stays up after the panel closes',
@@ -990,7 +991,8 @@ window.__ModuleLoader__.load({
         residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想停它：用管理器行或项目行里的「停止后台」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
         managerBackends: '后台进程',
-        managerBackendsHint: '仍在运行，本会话里已经没有它的界面了',
+        managerBackendsHint: '此刻还活着——常驻的会一直留着，跟随面板的会在空闲后自己卸载',
+        backendWillIdle: '空闲后自动卸载',
         backendResident: '常驻',
         backendFollow: '跟随面板',
         backendResidentHint: '关掉面板也不会停',
@@ -1443,14 +1445,16 @@ window.__ModuleLoader__.load({
     const disabledStyle = { opacity: 0.5, cursor: 'default' };
 
     /**
-     * The backend status of one project, as chips and nothing else.
-     */
-    /**
      * The backend state of one project, as chips and nothing else.
      *
      * The sentence that used to sit beside them now lives in the residency chip's tooltip: on a
      * phone the small print wrapped onto a second line, which made every row taller than the
      * control it was explaining, and the chips read on their own anyway.
+     *
+     * A process that is loaded without residency gets a third mark, because "it is running and I
+     * never asked it to stay" is the one state that reads as a bug: a panel that called its backend
+     * a minute ago leaves the module loaded until the idle delay expires, and saying so is the
+     * difference between "this will tidy itself up" and "something restarted it".
      */
     function backendChips(backend, withPermission) {
       const marks = [];
@@ -1472,6 +1476,9 @@ window.__ModuleLoader__.load({
           backend.resident ? tr('backendResident', 'Resident') : tr('backendFollow', 'Follows the panel'),
         ),
         chip(backend.loaded ? tr('backendLoaded', 'Loaded') : tr('backendIdle', 'Not loaded'), 'loaded'),
+        backend.loaded === true && backend.resident !== true
+          ? chip(tr('backendWillIdle', 'Unloads on its own'), 'idle')
+          : null,
       );
       return marks;
     }
