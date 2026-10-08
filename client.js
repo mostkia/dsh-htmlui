@@ -2613,12 +2613,52 @@ window.__ModuleLoader__.load({
      * uses to bring each form back, and the hide branch below mirrors `HtmlUiFrame`'s minimize —
      * so pressing the manager's button leaves both sides in the same place, in both directions.
      */
+    /** How many dock-right interfaces this session has: the column holds one program or several. */
+    function dockRightCount(record) {
+      return recordsIn(record.sessionId, ['dock-right']).length;
+    }
+
+    /**
+     * Expand or collapse the whole right column, when the shell offers it.
+     *
+     * The column belongs to the shell, not to this plugin: `setExpanded(sessionId, …)` is its own
+     * control, so this probes for it rather than assuming. A shell that does not expose it still
+     * gets the child-level behaviour, which is all a guest can do on its own.
+     */
+    function setColumnExpanded(sessionId, expanded) {
+      const controller = state.rightPane.controller;
+      if (controller === undefined || sessionId === undefined || typeof controller.setExpanded !== 'function') return false;
+      try {
+        controller.setExpanded(sessionId, expanded === true);
+        return true;
+      } catch (error) {
+        logWarn(undefined, '[dsh-htmlui] right pane refused to change its expansion', error);
+        return false;
+      }
+    }
+
     function toggleRecord(record, props) {
       const hidden = recordHidden(record);
       if (record.placement === 'dock-right') {
         if (!rightPaneReady()) return;
-        if (hidden) openRightPane(record.uiId);
-        else toggleCollapsed(record.uiId);
+        // Two levels, because the column holds two things: the column, and each program's content
+        // inside it. Several programs: the button belongs to one of them, so it toggles that
+        // content — in both directions, which is what a collapse that could not be undone got
+        // wrong. A single program: there is nothing to tell apart, so the button stands for the
+        // column — hiding collapses the child with it, showing brings the column and the child back.
+        if (dockRightCount(record) > 1) {
+          toggleCollapsed(record.uiId);
+          return;
+        }
+        if (hidden) {
+          state.collapsed.delete(record.uiId);
+          setColumnExpanded(record.sessionId, true);
+          openRightPane(record.uiId);
+        } else {
+          state.collapsed.set(record.uiId, true);
+          setColumnExpanded(record.sessionId, false);
+        }
+        bump();
         return;
       }
       if (record.placement === 'float') {
@@ -2797,8 +2837,12 @@ window.__ModuleLoader__.load({
       };
       /** End the process *and* its interfaces: a window onto nothing is a window nobody can reach. */
       const closeBackend = () => {
+        // The records go first, and deliberately **not** through `closeUi`: that one remembers the
+        // slug so the row survives a closed interface — which is exactly what must not happen here.
+        // A process that is gone has no row, and the row is how the reader knows it is gone. (The
+        // bug this replaced deleted the memory and then called `closeUi`, which put it straight back.)
+        for (const record of records) dismissRecord(record.uiId);
         if (row.slug.length > 0) state.dismissedTemplates.delete(row.slug);
-        closeUi();
         onStatus(null);
         stopBackend(row.slug).then((result) => {
           if (result !== null && result.message.length > 0) onStatus(result.message);
