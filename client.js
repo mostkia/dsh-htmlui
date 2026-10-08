@@ -2613,11 +2613,6 @@ window.__ModuleLoader__.load({
      * uses to bring each form back, and the hide branch below mirrors `HtmlUiFrame`'s minimize —
      * so pressing the manager's button leaves both sides in the same place, in both directions.
      */
-    /** How many dock-right interfaces this session has: the column holds one program or several. */
-    function dockRightCount(record) {
-      return recordsIn(record.sessionId, ['dock-right']).length;
-    }
-
     /**
      * Expand or collapse the whole right column, when the shell offers it.
      *
@@ -2641,24 +2636,17 @@ window.__ModuleLoader__.load({
       const hidden = recordHidden(record);
       if (record.placement === 'dock-right') {
         if (!rightPaneReady()) return;
-        // Two levels, because the column holds two things: the column, and each program's content
-        // inside it. Several programs: the button belongs to one of them, so it toggles that
-        // content — in both directions, which is what a collapse that could not be undone got
-        // wrong. A single program: there is nothing to tell apart, so the button stands for the
-        // column — hiding collapses the child with it, showing brings the column and the child back.
-        if (dockRightCount(record) > 1) {
-          toggleCollapsed(record.uiId);
-          return;
-        }
+        // One rule, no special cases: this button belongs to the programme's own content in the
+        // column, so minimising collapses that content and maximising expands it. Expanding also
+        // asks the column to expand — the call is idempotent, so a column that is already open stays
+        // as it is and a collapsed one comes back together with its child.
         if (hidden) {
           state.collapsed.delete(record.uiId);
           setColumnExpanded(record.sessionId, true);
-          openRightPane(record.uiId);
-        } else {
-          state.collapsed.set(record.uiId, true);
-          setColumnExpanded(record.sessionId, false);
+          bump();
+          return;
         }
-        bump();
+        toggleCollapsed(record.uiId);
         return;
       }
       if (record.placement === 'float') {
