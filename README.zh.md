@@ -8,6 +8,9 @@ dsh-htmlui支持将HTML插入到会话流中、窗口化运行、右侧窗口分
 
 同时支持上传和保存自定义HTML模板，用于集成各种实用HTML工具，并支持将普通HTML页面工具接入AI增强，支持权限分级管控、跨会话级别的持久化存储等实用功能，大幅增强美化你的DSH工作环境，让其发挥出1+1大于2的性能。
 
+**0.1.3现在已支持挂载HTML项目调用Node后台的能力 🎉**
+0.1.3现已支持挂载的html模块执行node后台调用，一句话即可让你的Agent创建真正的webApp，轻松调用SQLite数据库、挂载后台进程，调用系统工具等，让生成工具实用性脱离简单工具范畴，直接成为能提升扩充DSH能力的军火库（⚠注意的是：启用后台后会放开所有安全限制（可在控制面板中自行调整），建议只使用自己Agent开发的工具，不要将未知的第三方工具直接挂载使用）。强化了HTML管理界面，现已升级为HTML任务管理器，它能更好的跟上目前webApp的管理需要，提供webapp的后台进程关闭、UI关闭重启任务。
+
 ## 效果
 
 | 流式直出（直接上下文插入HTML） | 停靠在右侧栏（可折叠呼出，支持多开） |
@@ -25,6 +28,10 @@ dsh-htmlui支持将HTML插入到会话流中、窗口化运行、右侧窗口分
 | 输入框一键创建 | 支持承载复杂项目，这里是展示流式输出 Live2D |
 |---|---|
 | ![one click](docs/images/07-one-click-deploy.png) | ![live2d](docs/images/08-live2d.png) |
+
+| 一句话使用Agent制作的记事本程序，安装此插件后，你也能行😋 |
+|---|
+| ![one click](docs/images/07-one-click-deploy.png) |
 
 ## 特点
 
@@ -77,6 +84,17 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 [docs/VERIFY.md](docs/VERIFY.md) 是真机验收清单：当前跑的是哪一代、每种形态该长什么样、回传模型时在对话里怎么体现、以及看到某个症状该查什么。
 
+## 如何开发
+
+**想要具体WEBAPP程序，直接向Agent提出自己的需求，Agent会自动调用相关组件进行接口接驳，如需要人工编写相关接口，可直接让Agent打印相关API用法，下列是一些简单的讲解：**
+
+```sh
+npm test        # 165 项断言：包完整性 13 + 文档契约 10 + 宿主 45 + 浏览器 38 + 桥 13 + 浅渲染 29 + 对抗输入 10 + 打包产物 2 + harness schema 5
+npm run check   # 先语法检查三个出厂脚本，再跑测试
+```
+
+两边都没有构建步骤：宿主半部是纯 ESM，浏览器半部就是加载器直接物化的那个模块。两者都是纯 JavaScript，运行时不依赖 harness 的模块图，插件本身零依赖。CI 在 Ubuntu 与 Windows 上、Node 22 与 24 四个组合跑同一套测试（`.github/workflows/ci.yml`）。发布步骤与已备好的 awesome-dsh-plugin 条目见 [docs/PUBLISHING.md](docs/PUBLISHING.md)。
+
 ## 工作原理
 
 - **宿主半部**（`index.js`，纯 ESM，零依赖）：`html_ui` / `html_ui_template` 两个工具、`$DSH_HOME/htmlui` 下的存储、以及挂在 `/plugins/@mostkia/dsh-htmlui` 的 HTTP 载体（文档票据、拼装后的文档、按会话列取、模板目录与套用、POST 动作通道、SSE 事件流、健康探针）。每条路由都受[「安全」](#安全)一节所述策略管辖。
@@ -86,9 +104,9 @@ curl -s http://127.0.0.1:3080/plugins/@mostkia/dsh-htmlui/health
 
 ## 关于持久化插槽
 
-dsh-htmlui提供强大的持久化储存能力，HTML模板可以在需要持久化存储时随时调用储存插槽来进行储存，插槽支持大容量、跨会话的储存能力（且储存在服务端，并非浏览器Cookie那样只能在客户端读取，使其拥有跨平台储存能力），这在例如开发记事本这类webAPP功能时极为有用。
+dsh-htmlui提供强大的持久化储存能力，HTML模板可以在需要持久化存储时随时调用储存插槽来进行储存，插槽支持大容量、跨会话的储存能力（且储存在服务端，并非浏览器Cookie那样只能在客户端读取，使其拥有跨平台储存能力），这在例如开发记事本这类webAPP功能时极为有用(**目前最新版0.1.3已支持Node后台，可直接调用SQLite进行会话存储，更简单稳定**)。
 
-## 如何使用
+**如何使用插槽**
 
 **初始化**在头部声明中使用store来声明自己要用的名字，而**只有这些名字**可读可写
 
@@ -178,15 +196,6 @@ html_ui { "op": "render", "template": "orders-dashboard", "variables": { "title"
 **手写的文档也是模板**：把 `my-panel.html` 直接丢进**模板目录**，就能用 `template: "my-panel"` 调用，不用写任何清单文件。同名托管模板存在时优先，删掉它又会露出那个手写文件。
 
 输入框旁还挂着一个**模板抽屉**（`⟨+⟩ 新建 HTML` 按钮）：列出模板目录、**一键套用**到当前会话（完全不经过模型），也可以选「交给模型」。这样产生的界面就是普通记录——模型能在 `html_ui op=list` 里看到它，也能更新或关闭它。
-
-## 开发
-
-```sh
-npm test        # 165 项断言：包完整性 13 + 文档契约 10 + 宿主 45 + 浏览器 38 + 桥 13 + 浅渲染 29 + 对抗输入 10 + 打包产物 2 + harness schema 5
-npm run check   # 先语法检查三个出厂脚本，再跑测试
-```
-
-两边都没有构建步骤：宿主半部是纯 ESM，浏览器半部就是加载器直接物化的那个模块。两者都是纯 JavaScript，运行时不依赖 harness 的模块图，插件本身零依赖。CI 在 Ubuntu 与 Windows 上、Node 22 与 24 四个组合跑同一套测试（`.github/workflows/ci.yml`）。发布步骤与已备好的 awesome-dsh-plugin 条目见 [docs/PUBLISHING.md](docs/PUBLISHING.md)。
 
 ## 许可
 
