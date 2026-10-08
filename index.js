@@ -524,6 +524,13 @@ function createStore(root) {
             Object.entries(value.backendResident).filter(([slug, on]) => TEMPLATE_SLUG_RE.test(slug) && typeof on === 'boolean'),
           )
         : {},
+      // Where each project was last opened, so closing an interface does not lose the way it was
+      // opened: the record is the only other place that fact lives, and it is exactly what is gone.
+      placementMemory: value.placementMemory !== null && typeof value.placementMemory === 'object' && Array.isArray(value.placementMemory) !== true
+        ? Object.fromEntries(
+            Object.entries(value.placementMemory).filter(([slug, placement]) => TEMPLATE_SLUG_RE.test(slug) && normalizePlacement(placement) !== undefined),
+          )
+        : {},
     };
   }
 
@@ -601,6 +608,18 @@ function createStore(root) {
     else delete next[slug];
     writeSettings(Object.assign({}, settings, { backendResident: next }));
     return { ok: true, slug, resident: next[slug] };
+  }
+
+  /** The placement a project was last opened with, if it has been opened at all. */
+  function setTemplatePlacement(input, placement) {
+    const slug = typeof input === 'string' ? input.trim() : '';
+    const wanted = normalizePlacement(placement);
+    if (!TEMPLATE_SLUG_RE.test(slug) || wanted === undefined) return { ok: false, error: 'a valid project id and placement are required' };
+    const settings = readSettings();
+    const next = Object.assign({}, settings.placementMemory);
+    next[slug] = wanted;
+    writeSettings(Object.assign({}, settings, { placementMemory: next }));
+    return { ok: true, slug, placement: wanted };
   }
 
   /** The residency that is actually in force: the reader's answer if given, else the declaration. */
@@ -1250,6 +1269,7 @@ function createStore(root) {
     markTemplatesAsked,
     setBackendAllowed,
     setBackendResident,
+    setTemplatePlacement,
     residentFor,
     readSlot,
     writeSlot,
@@ -2557,6 +2577,7 @@ export function apply(ctx, config) {
         const all = store.listTemplates();
         const settings = store.readSettings();
         const allowedBackends = new Set(settings.backendProjects);
+        const placementMemory = settings.placementMemory;
         sendJson(res, 200, {
           ok: true,
           // The catalogue is read from disk on every open, and the directory it reads is
@@ -2575,6 +2596,9 @@ export function apply(ctx, config) {
             description: String(template.description ?? ''),
             // The edit form opens with these filled in, so the page needs them too.
             placement: normalizePlacement(template.placement),
+            // The way this project was last opened, so a restore can use it: a record's placement is
+            // the reader's choice at that moment, and the manifest's is only the default.
+            placementLast: placementMemory[String(template.slug ?? '')],
             security: securityOf(template),
             bundled: template.bundled === true,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
@@ -2656,6 +2680,13 @@ export function apply(ctx, config) {
           source = source.split(`{{${key}}}`).join(String(value));
         }
         const declared = readDocumentDeclaration(source);
+        // The request wins, then what the document declares, then the project's own manifest —
+        // which is where the reader's answer in the adopt form lands.
+        const placement =
+          normalizePlacement(body.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(template.meta.placement);
+        // Remember where it was opened: the record knows this too, but the record is exactly what a
+        // reader can close, and reopening "the way it was" then has nothing left to ask.
+        if (placement !== undefined) store.setTemplatePlacement(slug, placement);
         const meta = createUi({
           sessionId,
           title:
@@ -2666,8 +2697,7 @@ export function apply(ctx, config) {
                 : String(template.meta.name ?? slug),
           // The request wins, then what the document declares, then the project's own
           // manifest — which is where the reader's answer in the adopt form lands.
-          placement:
-            normalizePlacement(body.placement) ?? normalizePlacement(declared.placement) ?? normalizePlacement(template.meta.placement),
+          placement,
           size: normalizeSize(body.size) ?? normalizeSize(declared.size),
           // Request, then the document, then the project's own level — the same ladder
           // the placement takes, so a project can carry its own security level.

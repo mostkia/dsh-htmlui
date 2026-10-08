@@ -2770,7 +2770,10 @@ window.__ModuleLoader__.load({
                           style: buttonStyle,
                           title: tr('managerRestoreUiHint', 'Open this project again in this session'),
                           onClick: () => {
-                            applyTemplate(template.slug, sessionId, undefined).then((ok) => {
+                            // Reopened the way it was: the catalogue carries the placement this
+                            // project was last opened with, and the manager is where a reader
+                            // restores an interface whose record is already gone.
+                            applyTemplate(template.slug, sessionId, template.placementLast).then((ok) => {
                               setStatus(ok ? tr('managerRestoreUiDone', 'Interface restored.') : tr('managerRestoreUiFailed', 'Could not restore that interface.'));
                             });
                           },
