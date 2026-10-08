@@ -2,7 +2,7 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.2.0
+## 0.1.3
 
 ### Added
 
