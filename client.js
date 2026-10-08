@@ -600,6 +600,41 @@ window.__ModuleLoader__.load({
       return Object.keys(out).length === 0 ? undefined : out;
     }
 
+    /**
+     * Keep a floating window inside what the reader can actually see and reach.
+     *
+     * A window that opens wider or taller than the viewport — the 520×360 default on a phone, or a
+     * `size` the model picked while looking at a desktop — puts its own resize handle past the
+     * edge of the screen, and then the one control that could bring it back is the one that cannot
+     * be touched. So the geometry is fitted wherever it is set, not only where it is drawn: the
+     * window can still be moved and resized afterwards, it just cannot end up bigger than the view
+     * it is drawn in.
+     *
+     * A geometry that already fits comes back untouched, which is every desktop case: this only
+     * ever shrinks something that would not have fitted anyway.
+     */
+    const FLOAT_MARGIN = 8;
+    /** The smallest a window may be: below this it holds no readable interface. */
+    const FLOAT_MIN_W = 240;
+    const FLOAT_MIN_H = 160;
+
+    function fitFloat(rect) {
+      const viewW = typeof window === 'object' && Number.isFinite(window?.innerWidth) && window.innerWidth > 0 ? Math.round(window.innerWidth) : undefined;
+      const viewH = typeof window === 'object' && Number.isFinite(window?.innerHeight) && window.innerHeight > 0 ? Math.round(window.innerHeight) : undefined;
+      if (viewW === undefined || viewH === undefined) return rect;
+      const maxW = Math.max(FLOAT_MIN_W, viewW - FLOAT_MARGIN * 2);
+      const maxH = Math.max(FLOAT_MIN_H, viewH - FLOAT_MARGIN * 2);
+      const w = Math.min(maxW, Math.max(FLOAT_MIN_W, Number.isFinite(rect?.w) && rect.w > 0 ? Math.round(rect.w) : maxW));
+      const h = Math.min(maxH, Math.max(FLOAT_MIN_H, Number.isFinite(rect?.h) && rect.h > 0 ? Math.round(rect.h) : maxH));
+      // The window may be placed anywhere from the margin to the last position at which its far
+      // edge — and with it the resize handle — is still on screen.
+      const spanX = Math.max(FLOAT_MARGIN, viewW - w - FLOAT_MARGIN);
+      const spanY = Math.max(FLOAT_MARGIN, viewH - h - FLOAT_MARGIN);
+      const x = Math.min(spanX, Math.max(FLOAT_MARGIN, Number.isFinite(rect?.x) ? Math.round(rect.x) : FLOAT_MARGIN));
+      const y = Math.min(spanY, Math.max(FLOAT_MARGIN, Number.isFinite(rect?.y) ? Math.round(rect.y) : FLOAT_MARGIN));
+      return Object.assign({}, rect, { w, h, x, y });
+    }
+
     function newNonce() {
       try {
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -1493,12 +1528,12 @@ window.__ModuleLoader__.load({
           // window that forgot. The remembered geometry is used first, the declared size
           // second, and the default last.
           const remembered = state.geometry.get(record.uiId);
-          return {
+          return fitFloat({
             w: remembered?.w ?? initial.w ?? DEFAULT_FLOAT.w,
             h: remembered?.h ?? initial.h ?? DEFAULT_FLOAT.h,
             x: remembered?.x ?? initial.x ?? DEFAULT_FLOAT.x,
             y: remembered?.y ?? initial.y ?? DEFAULT_FLOAT.y,
-          };
+          });
         }
         return { w: initial.w, h: initial.h };
       });
@@ -1591,7 +1626,7 @@ window.__ModuleLoader__.load({
           }
           if (data.__dshHtmlUi === 'resize') {
             const next = parseSizeText(data.size);
-            if (next !== undefined) setSize((current) => Object.assign({}, current, next));
+            if (next !== undefined) setSize((current) => fitFloat(Object.assign({}, current, next)));
           }
           if (data.__dshHtmlUi === 'content') {
             // The document measured itself. An iframe never grows to its content, and a
@@ -1643,7 +1678,7 @@ window.__ModuleLoader__.load({
           if (drag === null || drag === undefined) return;
           const x = Math.max(0, event.clientX - drag.dx);
           const y = Math.max(0, event.clientY - drag.dy);
-          setSize((current) => Object.assign({}, current, { x, y }));
+          setSize((current) => fitFloat(Object.assign({}, current, { x, y })));
         },
         [],
       );
@@ -1675,7 +1710,7 @@ window.__ModuleLoader__.load({
         if (start === null || start === undefined) return;
         const w = Math.max(240, start.w + (event.clientX - start.x));
         const h = Math.max(160, start.h + (event.clientY - start.y));
-        setSize((current) => Object.assign({}, current, { w, h }));
+        setSize((current) => fitFloat(Object.assign({}, current, { w, h })));
       }, []);
 
       const onResizeUp = useCallback(() => {
@@ -1821,12 +1856,14 @@ window.__ModuleLoader__.load({
               const dy = event.key === 'ArrowUp' ? -24 : event.key === 'ArrowDown' ? 24 : 0;
               if (dx === 0 && dy === 0) return;
               event.preventDefault();
-              setSize((current) => ({
-                w: Math.max(240, (current.w ?? DEFAULT_FLOAT.w) + dx),
-                h: Math.max(160, (current.h ?? DEFAULT_FLOAT.h) + dy),
-                x: current.x,
-                y: current.y,
-              }));
+              setSize((current) =>
+                fitFloat({
+                  w: Math.max(240, (current.w ?? DEFAULT_FLOAT.w) + dx),
+                  h: Math.max(160, (current.h ?? DEFAULT_FLOAT.h) + dy),
+                  x: current.x,
+                  y: current.y,
+                }),
+              );
             },
             onPointerCancel: onResizeUp,
           }),
@@ -3314,6 +3351,35 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Open the manifest form on one existing project.
+     *
+     * Two actions ask for this — the pencil beside a project, and picking a different project while
+     * an edit is already open — and both have to prefill the form the same way. It is written once
+     * because the second caller exists only to keep the form on the project the reader just chose:
+     * leaving it on the previous one is how a save lands on a project nobody was looking at.
+     */
+    function openProjectEditor(template) {
+      state.adopt = {
+        open: true,
+        // Editing, not adopting: the project exists, so the form says so and its button saves
+        // instead of creating.
+        existing: true,
+        source: template.slug,
+        slug: template.slug,
+        name: typeof template.name === 'string' && template.name.length > 0 ? template.name : template.slug,
+        description: typeof template.description === 'string' ? template.description : '',
+        placement: typeof template.placement === 'string' && template.placement.length > 0 ? template.placement : 'dock-right',
+        security: typeof template.security === 'string' && template.security.length > 0 ? template.security : 'strict',
+        // What the project ships and what the reader has already allowed; the form shows the
+        // checkbox only for the first, and starts from the second.
+        backend: template.backend !== undefined && template.backend.allowed === true,
+        backendDeclared: template.backend !== undefined && template.backend.declared === true,
+        busy: false,
+      };
+      bump();
+    }
+
+    /**
      * The user's own way to start an interface: what to start from, and where to put it.
      *
      * Everything here happens without the model — the source is either the blank canvas
@@ -3563,6 +3629,15 @@ window.__ModuleLoader__.load({
                     state.create.source === template.slug,
                     () => {
                       state.create.source = template.slug;
+                      // Picking a different project is also a statement about which project the
+                      // open form is about: leaving the form on the previous one is exactly how a
+                      // save lands on a project the reader was not looking at. A half-filled
+                      // *adopt* form is not moved — that one is about a folder, not a catalogue
+                      // entry.
+                      if (state.adopt.open === true && state.adopt.existing === true && state.adopt.slug !== template.slug) {
+                        openProjectEditor(template);
+                        return;
+                      }
                       bump();
                     },
                   ),
@@ -3577,24 +3652,7 @@ window.__ModuleLoader__.load({
                     title: tr('editProject', 'Edit this project’s details'),
                     'aria-label': `${tr('editProject', 'Edit this project’s details')}: ${templateListItem(template)}`,
                     onClick: () => {
-                      state.adopt = {
-                        open: true,
-                        // Editing, not adopting: the project exists, so the form says so
-                        // and its button saves instead of creating.
-                        existing: true,
-                        source: template.slug,
-                        slug: template.slug,
-                        name: typeof template.name === 'string' && template.name.length > 0 ? template.name : template.slug,
-                        description: typeof template.description === 'string' ? template.description : '',
-                        placement: typeof template.placement === 'string' && template.placement.length > 0 ? template.placement : 'dock-right',
-                        security: typeof template.security === 'string' && template.security.length > 0 ? template.security : 'strict',
-                        // What the project ships and what the reader has already allowed; the form
-                        // shows the checkbox only for the first, and starts from the second.
-                        backend: template.backend !== undefined && template.backend.allowed === true,
-                        backendDeclared: template.backend !== undefined && template.backend.declared === true,
-                        busy: false,
-                      };
-                      bump();
+                      openProjectEditor(template);
                     },
                   },
                   '✎',
@@ -4412,6 +4470,7 @@ window.__ModuleLoader__.load({
         TAB_KIND,
         state,
         parseSizeText,
+        fitFloat,
         recordFromMeta,
         recordsFor,
         recordsIn,

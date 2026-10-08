@@ -33,6 +33,22 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   a stalled request. `/health` reports every loaded backend with its call and failure counts, since
   a loaded backend is otherwise invisible.
 
+### Fixed
+
+- A floating window no longer opens larger than the screen it is drawn in. The 520×360 default — or
+  a `size` the model chose while looking at a desktop — opened wider than a phone's viewport, which
+  put the window's own resize handle off the edge: the one control that could have made it smaller
+  was the one that could not be touched, and the surface stayed stuck. Geometry is now fitted
+  wherever it is set (at creation, on a `resize` message, while dragging, and while resizing), so a
+  window can still be moved and resized freely but can never end up bigger than the view it lives
+  in. A geometry that already fits comes back untouched, which is every desktop case.
+- The manifest form follows the project the reader picks. Opening one project's details with its
+  pencil and then choosing a different project left the form on the first one — the selection said
+  one thing and the form said another, and the save went to the project the form still held rather
+  than the one on screen. Picking a project now moves an open edit form with it; a half-filled
+  *adopt* form is deliberately left alone, since that one is about a folder rather than a catalogue
+  entry.
+
 ## 0.1.2
 
 ### Added

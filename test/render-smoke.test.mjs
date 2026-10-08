@@ -723,6 +723,15 @@ test('the create dialog asks what to start from and where to put it', () => {
   assert.ok(editing.text.includes('Edit project details'), 'the form reads as an edit');
   assert.ok(editing.text.includes('Save changes'), 'and its button saves rather than creates');
   assert.ok(!editing.text.includes('Nothing is written yet'), 'without claiming nothing exists');
+  // Picking a different project is also a statement about which project the open form is about:
+  // it follows, because a save that lands on the previously opened project is exactly the failure
+  // this guards against.
+  const sourceChoices = editing.elements.filter((element) => element.props?.type === 'radio' && element.props?.name === 'dsh-create-source');
+  const other = sourceChoices.find((element) => element.props?.value === 'red');
+  assert.ok(other !== undefined, 'every project has a source choice');
+  other.props.onChange();
+  assert.equal(__internals.state.create.source, 'red', 'the choice moves');
+  assert.equal(__internals.state.adopt.slug, 'red', 'and so does the open edit form');
   __internals.state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
   __internals.state.templates.candidates = [
     { kind: 'dir', name: 'my-folder', html: 2 },
@@ -981,4 +990,46 @@ test('a bare frame draws no chrome of its own', () => {
   const bare = render(__internals.HtmlUiFrame, { record: recordFor('dock-top'), theme: 'light', variant: 'dock', bare: true, onDismiss: () => {} });
   assert.ok(!bare.text.includes('✕'), 'no close control of its own');
   assert.match(bare.text, /Preparing interface/u, 'but the document is still rendered');
+});
+
+test('a floating window is fitted to the viewport it is drawn in', () => {
+  const fit = __internals.fitFloat;
+  const viewport = (w, h) => {
+    window.innerWidth = w;
+    window.innerHeight = h;
+  };
+
+  // A desktop keeps exactly what it asked for: 520×360 at 96,96 fits, so nothing moves.
+  viewport(1280, 800);
+  assert.deepEqual(fit({ w: 520, h: 360, x: 96, y: 96 }), { w: 520, h: 360, x: 96, y: 96 });
+
+  // A phone: the same default would hang its resize handle off the right edge, and the window
+  // could then never be made smaller. It is fitted instead, and stays fully on screen.
+  viewport(390, 844);
+  const phone = fit({ w: 520, h: 360, x: 96, y: 96 });
+  assert.ok(phone.w <= 390 - 8 * 2, `width fits the phone (${phone.w})`);
+  assert.ok(phone.h <= 844 - 8 * 2, `height fits the phone (${phone.h})`);
+  assert.ok(phone.x >= 8 && phone.x + phone.w <= 390 - 8, 'and its far edge, where the handle is, stays reachable');
+  assert.ok(phone.y >= 8 && phone.y + phone.h <= 844 - 8);
+
+  // A size the model picked for a desktop, opened on a phone, is fitted the same way.
+  const big = fit({ w: 1200, h: 2000, x: -50, y: 9999 });
+  assert.equal(big.w, 390 - 16);
+  assert.equal(big.h, 844 - 16);
+  assert.equal(big.x, 8);
+  assert.equal(big.y, 8);
+
+  // Growing past the viewport is capped, so the handle cannot leave the screen again; shrinking
+  // is not: the reader keeps every size that fits.
+  const grown = fit({ w: 5000, h: 5000, x: 20, y: 20 });
+  assert.equal(grown.w, 390 - 16);
+  const small = fit({ w: 300, h: 200, x: 20, y: 20 });
+  assert.deepEqual(small, { w: 300, h: 200, x: 20, y: 20 });
+
+  // A window already at the far corner is pulled back rather than left hanging over the edge.
+  const corner = fit({ w: 300, h: 200, x: 9999, y: 9999 });
+  assert.equal(corner.x + corner.w, 390 - 8);
+  assert.equal(corner.y + corner.h, 844 - 8);
+
+  viewport(1280, 800);
 });
