@@ -2566,57 +2566,70 @@ window.__ModuleLoader__.load({
             key: record.uiId,
             style: {
               display: 'flex',
-              alignItems: 'center',
-              // 手机优先: the title takes a line of its own (below), and the marks and controls wrap
-              // under it rather than being squeezed onto a second ragged line beside it.
-              flexWrap: 'wrap',
-              gap: '6px',
-              padding: '7px 10px',
-              borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
+              flexDirection: 'column',
+              gap: '4px',
+              // 手机优先 / 三行一条: a little more air than before, and a light line under each
+              // process, so rows that now take three lines do not read as one block.
+              padding: '10px 12px',
+              borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
             },
           },
+          // 1 · What it is.
           h(
-            'span',
-            // A full-width title forces the break, which is what keeps a long name from pushing the
-            // chips and the controls into columns of one word each on a phone.
-            { style: Object.assign({}, titleStyle, { flex: '1 1 100%', minWidth: '0' }) },
-            // 计算器(jsq): the title a reader recognises, then the project it came from, so
-            // two interfaces built from the same project are told apart at a glance.
-            `${record.title.length > 0 ? record.title : record.uiId}${record.template !== undefined ? `(${record.template})` : ''}`,
+            'div',
+            { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+            h(
+              'span',
+              { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) },
+              // 计算器(jsq): the title a reader recognises, then the project it came from, so
+              // two interfaces built from the same project are told apart at a glance.
+              `${record.title.length > 0 ? record.title : record.uiId}${record.template !== undefined ? `(${record.template})` : ''}`,
+            ),
+            state.hidden.has(record.uiId)
+              ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
+              : null,
           ),
-          h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
-          h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}${record.sizeText !== undefined && record.sizeText.length > 0 ? ` · ${record.sizeText}` : ''}`),
-          h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),
-          state.hidden.has(record.uiId)
-            ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
-            : null,
-          // The project's backend, where its interface is listed: the state a reader cannot see
-          // unless it is said, and the one control that can end it. 常驻 is the whole reason the
-          // control is here — that state outlives the panel, so removing the interface does not end it.
-          backend === undefined
-            ? null
-            : h(
-                'span',
-                { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
-                chip(tr('backendBadge', 'Backend'), 'badge'),
-                ...backendChips(backend, false),
-              ),
-          backend === undefined
-            ? null
-            : stopBackendButton(record.template, backend, (result) => setStatus(result.message)),
-          // Every form that can be out of sight gets the same control, with the same words.
-          // Two forms have none: a background layer is always on screen, and an inline
-          // surface lives in the conversation and is never hidden — offering "Show" for it
-          // was a button that could not do anything. Both are removed with the control
-          // beside this one.
-          record.placement === 'background' || record.placement === 'inline'
-            ? null
-            : h(
-                'button',
-                { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
-                tr('managerRestore', 'Show'),
-              ),
-          h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
+          // 2 · The process itself — where it sits, which revision, which interface — and then its
+          // state pushed to the right edge, where the three marks read as one answer.
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+            h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
+            h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}`),
+            h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),
+            h('span', { style: { flex: '1 1 auto' } }),
+            // The project's backend: the state a reader cannot see unless it is said. 常驻 is the
+            // whole reason the control below exists — that state outlives the panel.
+            backend === undefined
+              ? null
+              : h(
+                  'span',
+                  { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
+                  chip(tr('backendBadge', 'Backend'), 'badge'),
+                  ...backendChips(backend, false),
+                ),
+          ),
+          // 3 · The controls.
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
+            backend === undefined
+              ? null
+              : stopBackendButton(record.template, backend, (result) => setStatus(result.message)),
+            // Every form that can be out of sight gets the same control, with the same words.
+            // Two forms have none: a background layer is always on screen, and an inline
+            // surface lives in the conversation and is never hidden — offering "Show" for it
+            // was a button that could not do anything. Both are removed with the control
+            // beside this one.
+            record.placement === 'background' || record.placement === 'inline'
+              ? null
+              : h(
+                  'button',
+                  { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
+                  tr('managerRestore', 'Show'),
+                ),
+            h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
+          ),
         );
       });
       return h(
@@ -3870,61 +3883,70 @@ window.__ModuleLoader__.load({
                 'div',
                 {
                   key: template.slug,
-                  // 手机优先: a declared backend adds three marks and a control to this row, so it
-                  // wraps; the radio stays on its own line rather than being squeezed to nothing.
-                  style: { display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' },
+                  // 手机优先, and laid out as two lines on purpose: the project and its pencil, then
+                  // the control on the left with the three marks pushed to the right edge, where they
+                  // read as one answer to "what is this project doing right now".
+                  style: { display: 'flex', flexDirection: 'column', gap: '6px', padding: '6px 0' },
                 },
                 h(
                   'div',
-                  { style: { flex: '1 1 auto', minWidth: '0' } },
-                  radio(
-                    'dsh-create-source',
-                    template.slug,
-                    // The reader's own name first: the slug is an id, and an id is not what
-                    // a person looks for in a list. It stays visible beside it, in
-                    // parentheses, because it is what `template=` takes.
-                    templateListItem(template),
-                    state.create.source === template.slug,
-                    () => {
-                      state.create.source = template.slug;
-                      // Picking a different project is also a statement about which project the
-                      // open form is about: leaving the form on the previous one is exactly how a
-                      // save lands on a project the reader was not looking at. A half-filled
-                      // *adopt* form is not moved — that one is about a folder, not a catalogue
-                      // entry.
-                      if (state.adopt.open === true && state.adopt.existing === true && state.adopt.slug !== template.slug) {
+                  { style: { display: 'flex', alignItems: 'center', gap: '4px', minWidth: '0' } },
+                  h(
+                    'div',
+                    { style: { flex: '1 1 auto', minWidth: '0' } },
+                    radio(
+                      'dsh-create-source',
+                      template.slug,
+                      // The reader's own name first: the slug is an id, and an id is not what
+                      // a person looks for in a list. It stays visible beside it, in
+                      // parentheses, because it is what `template=` takes.
+                      templateListItem(template),
+                      state.create.source === template.slug,
+                      () => {
+                        state.create.source = template.slug;
+                        // Picking a different project is also a statement about which project the
+                        // open form is about: leaving the form on the previous one is exactly how a
+                        // save lands on a project the reader was not looking at. A half-filled
+                        // *adopt* form is not moved — that one is about a folder, not a catalogue
+                        // entry.
+                        if (state.adopt.open === true && state.adopt.existing === true && state.adopt.slug !== template.slug) {
+                          openProjectEditor(template);
+                          return;
+                        }
+                        bump();
+                      },
+                    ),
+                  ),
+                  // A pencil on every project: the manifest stays editable, with the same
+                  // form that created it, prefilled with what is on disk.
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      style: Object.assign({}, buttonStyle, { flex: '0 0 auto', padding: '2px 7px', lineHeight: 1.1 }),
+                      title: tr('editProject', 'Edit this project’s details'),
+                      'aria-label': `${tr('editProject', 'Edit this project’s details')}: ${templateListItem(template)}`,
+                      onClick: () => {
                         openProjectEditor(template);
-                        return;
-                      }
-                      bump();
+                      },
                     },
+                    '✎',
                   ),
                 ),
-                // The project's backend, stated where the reader picks the project. The permission
-                // leads because it is the decision they made; the two marks after it are what the
-                // host is doing with that decision right now.
-                declared ? backendChips(backend, true) : null,
-                // This list is the authoritative way to stop a backend: it lists the projects
-                // themselves, so it is still here after the panel — and the manager row — are gone.
-                declared ? stopBackendButton(template.slug, backend, (result) => {
-                  state.templates.notice = result.message;
-                  bump();
-                }) : null,
-                // A pencil on every project: the manifest stays editable, with the same
-                // form that created it, prefilled with what is on disk.
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    style: Object.assign({}, buttonStyle, { flex: '0 0 auto', padding: '2px 7px', lineHeight: 1.1 }),
-                    title: tr('editProject', 'Edit this project’s details'),
-                    'aria-label': `${tr('editProject', 'Edit this project’s details')}: ${templateListItem(template)}`,
-                    onClick: () => {
-                      openProjectEditor(template);
-                    },
-                  },
-                  '✎',
-                ),
+                declared
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
+                      // This list is the authoritative way to stop a backend: it lists the projects
+                      // themselves, so it is still here after the panel — and the manager row — are gone.
+                      stopBackendButton(template.slug, backend, (result) => {
+                        state.templates.notice = result.message;
+                        bump();
+                      }),
+                      h('span', { style: { flex: '1 1 auto' } }),
+                      ...backendChips(backend, true),
+                    )
+                  : null,
               );
             }),
           ),
