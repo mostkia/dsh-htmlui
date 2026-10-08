@@ -106,6 +106,7 @@ declares nothing keeps the placement the record already has.
 | `dshHTML.state.get()` / `.set(value)` | Server-side state for this document; survives reloads (this sandbox has no `localStorage`). It belongs to *this panel of this session*: closing the interface throws the key away. |
 | `dshHTML.store.get(name)` / `.set(name, value)` | The **value layer** of a named slot: small, synchronous, shared by every panel that declared it, kept on disk. `get` is synchronous, `set` returns `{ ok, bytes }`, and the data outlives this panel, this session, and a host restart. `remove(name)` forgets one, `list()` reports what this document declared, `on(handler)` hears about writes from any other panel. |
 | `dshHTML.store.rows.*` | The **row layer** of the same slot: many records addressed by a key, in SQLite, fetched when wanted — this is where bulk data goes. `keys(name, {offset, limit})`, `get(name, key)`, `set(name, key, value, {title})`, `remove(name, key)`, `search(name, text, {limit})`, `on(handler)`. All of them return promises. |
+| `dshHTML.app(path, init)` | Call **this project's own backend** — the `server.js` beside its `index.html` — with no model round trip and no tokens spent. `init` takes `{ method, body, query, headers }`; a body makes it a POST. Answers `{ ok, status, body, text(), json() }`, where `body` is the text exactly as it arrived. `dshHTML.appUrl(path, query)` is the same address for something the page loads itself, like an `<img src>`. |
 | `dshHTML.resize('520x420')` | Ask the host to resize the surface. |
 | `dshHTML.close()` | Ask the host to remove the surface. |
 | `dshHTML.on(type, handler)` | `assistant` (streamed model text, and `{ type: 'tool', name }` while a tool call streams), `reasoning` (the model's thinking, kept apart from its answer), `session`, `action`, `store`, `ui`, `theme`, `ready`. |
@@ -162,6 +163,65 @@ dshHTML.store.rows.on((change) => { reload(change.key); });            // carrie
 - Eight declared names per document. Use slots for the user's data, never for secrets:
   everything a document writes is readable by every other document that declares the
   same name.
+
+## The project's own backend
+
+A project — a folder holding `index.html` and `meta.json` — may ship a `server.js` beside them. The
+host runs that file in the plugin's own process, and the project's documents call it directly: no
+model turn, no tokens, no waiting for the assistant. This is what makes a panel that polls an API,
+reads a file, or keeps a cache in memory possible at all.
+
+```json
+// meta.json — the declaration
+{ "slug": "weather", "name": "Weather", "backend": true }
+```
+
+`"backend": true` means `server.js`; a string names a different file inside the project
+(`"backend": "lib/server.js"`).
+
+```js
+// server.js — CommonJS, beside index.html
+module.exports = {
+  // Optional. `start(info)` runs when the module is first loaded, `stop(reason)` when it is
+  // dropped; either may be async. Both are where a polling timer belongs.
+  handle: async (request) => {
+    // request: { method, path, query, headers, body, json(), uiId, sessionId, slug, pluginVersion }
+    return { ok: true, at: Date.now() };     // any JSON value becomes the answer
+    // return { status: 201, body: { … } };  // or a status of your own
+    // return 'plain text';                  // or text, sent as text/plain
+  },
+};
+```
+
+Inside the document:
+
+```js
+const answer = await dshHTML.app('now', { query: { unit: 'c' } });
+const data = answer.json();                              // parsed, or null
+await dshHTML.app('save', { body: { note: 'hi' } });      // a body makes it a POST
+document.querySelector('img').src = dshHTML.appUrl('chart.png', { day: 'today' });
+```
+
+What to know before relying on it:
+
+- **The reader has to allow it.** Declaring a backend is not running one: until the reader ticks
+  “Run this project’s backend” where the project is imported or edited, every call answers `403`.
+  That switch is the only thing in this plugin that hands a project the plugin's own reach.
+- **It is not sandboxed.** Backend code runs in the DSH process with the plugin's privileges — it
+  can read files, open sockets, and reach whatever the plugin can. A document is sandboxed; its
+  backend is not, and nothing here pretends otherwise.
+- **It is reachable only from its own documents.** The host takes the project from the calling
+  document's record, so a document reaches the backend of the project it came from and no other.
+- **One module per project, kept warm.** It stays loaded between calls, so a cache or a counter in
+  it survives — that is what makes polling cheap. It is dropped after ten idle minutes, and editing
+  `server.js` or anything it requires reloads it on the next call: no cold start, no refresh. That
+  reload is why the entry is CommonJS — an ES module graph cannot be invalidated, so an `.mjs`
+  backend would only ever reload its entry file.
+- **It cannot hang the page silently.** One call gets ten seconds (`appTimeoutMs` in the plugin
+  config changes it), bodies and answers are capped at 1 MiB, calls are rate-limited like the rest
+  of the carrier, and a throw or a timeout comes back as a `500`/`504` answer carrying the error.
+- **Say what you need in the answer, not in the transcript.** The point of a backend is that no
+  model turn happens: fetch, compute, answer. Ask the model only for what a backend cannot do.
 
 ## Design rules
 

@@ -2,6 +2,37 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.2.0
+
+### Added
+
+- A project can ship its own backend: a `server.js` beside the project's `index.html`, run by this
+  plugin in the DSH process and called from that project's own documents with `dshHTML.app(path,
+  init)` — no model turn, no tokens, no waiting for the assistant. A panel that polls an API, reads
+  a file, or keeps a cache in memory no longer has to ask the model for it, and the answer comes
+  back as data the page can render directly (`{ ok, status, body, text(), json() }`;
+  `dshHTML.appUrl(path, query)` is the same address for a resource the page loads itself). The
+  declaration lives in the project's `meta.json` (`"backend": true`, or a path inside the project),
+  and the module is kept between calls so a cache or a counter survives; it is dropped after ten
+  idle minutes, and editing the file — or anything it requires from the project folder — reloads it
+  on the next call, with no cold start and no page refresh. `server.js` is CommonJS for that reason:
+  an ES module graph cannot be invalidated, so an `.mjs` backend would only ever reload its entry.
+- The reader decides, and only the reader. A declaration is not permission: until **Run this
+  project's backend** is ticked where the project is imported or edited, every call answers `403`.
+  The allowance is kept in the plugin's settings rather than in the project, so a folder copied from
+  anywhere cannot grant itself the right to run code on this machine, and un-ticking the switch
+  unloads the backend on the next call instead of on the next restart. Backend code runs in this
+  process with this plugin's privileges — it is not a sandbox, and the skills, the manifest form and
+  the docs say so where the choice is made.
+- The call is bounded in the ways the rest of the carrier is: the route is keyed by the calling
+  document's own UI id and checked with its capability token, so a document reaches the backend of
+  the project it came from and no other; one call gets `appTimeoutMs` (ten seconds by default, now a
+  config value because "too slow" is a property of the panel and not of the plugin); request bodies
+  and answers are capped; calls take from the same rate-limit bucket as everything else; and a
+  handler that throws or never answers becomes a `500`/`504` answer carrying the reason rather than
+  a stalled request. `/health` reports every loaded backend with its call and failure counts, since
+  a loaded backend is otherwise invisible.
+
 ## 0.1.2
 
 ### Added

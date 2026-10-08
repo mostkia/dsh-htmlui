@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
      * constant is the only place the client states its version, and `package.test.mjs` holds it
      * to the packaged one.
      */
-    const CLIENT_VERSION = '0.1.2';
+    const CLIENT_VERSION = '0.2.0';
     const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (${CLIENT_VERSION})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its
@@ -244,7 +244,7 @@ window.__ModuleLoader__.load({
        * The manifest form, shared by adopting a copied-in folder and editing an existing
        * project: `existing` decides whether it creates or saves over one.
        */
-      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false },
+      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, busy: false },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -822,6 +822,9 @@ window.__ModuleLoader__.load({
         adoptDescription: 'Details',
         adoptPlacement: 'Where it opens',
         adoptSecurity: 'Security level',
+      adoptBackend: 'Run this project’s backend',
+      adoptBackendHint: 'Its server.js runs inside the DSH process with this plugin’s privileges — as trusted as the plugin itself.',
+      adoptBackendNone: 'No backend here: a server.js in the project folder, named by “backend” in meta.json, is what offers one.',
         securityStrict: 'Strict (default)',
         securityLocal: 'Own files only',
         securityOpen: 'Own files + network',
@@ -915,6 +918,9 @@ window.__ModuleLoader__.load({
         adoptDescription: '详细描述',
         adoptPlacement: '默认生成位置',
         adoptSecurity: '安全等级',
+        adoptBackend: '允许该项目的后台代码运行',
+        adoptBackendHint: '项目目录里的 server.js 会在 DSH 进程内运行，权限与本插件相同——等于完全信任它。',
+        adoptBackendNone: '该项目没有后台：在项目目录放一个 server.js，并在 meta.json 里用 backend 字段指认它。',
         securityStrict: '严格（默认）',
         securityLocal: '允许自身文件',
         securityOpen: '自身文件 + 允许联网',
@@ -1101,7 +1107,7 @@ window.__ModuleLoader__.load({
      * the reader filled in: this function is the only place it is sent, so a dropped
      * argument here means the form was written for nothing.
      */
-    function adoptTemplate(name, manifest) {
+    function adoptTemplate(name, manifest, allowBackend) {
       state.adopt.busy = true;
       state.templates.adopting = typeof name === 'string' ? name : '';
       bump();
@@ -1118,8 +1124,14 @@ window.__ModuleLoader__.load({
           // An edit says so: "it is a project now" would be false for one that already was.
           state.templates.notice =
             state.adopt.existing === true ? tr('edited', 'Saved.') : tr('adopted', 'It is a project now.');
-          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false };
-          return loadTemplates().then(() => true);
+          // The allowance is stored against the project id — which for something just adopted is
+          // the id the form wrote, not the folder name it was adopted from. Only sent when the form
+          // actually offered the choice, so a project without a backend is never approved by
+          // accident. A refusal here is not fatal to the manifest that was just written.
+          const slug = typeof value.slug === 'string' && value.slug.length > 0 ? value.slug : state.adopt.slug;
+          const asked = allowBackend === undefined ? Promise.resolve(true) : postJson('/templates/backend', { slug, allowed: allowBackend === true }).then(() => true, () => false);
+          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, busy: false };
+          return asked.then(() => loadTemplates()).then(() => true);
         })
         .catch(() => {
           state.adopt.busy = false;
@@ -3576,6 +3588,10 @@ window.__ModuleLoader__.load({
                         description: typeof template.description === 'string' ? template.description : '',
                         placement: typeof template.placement === 'string' && template.placement.length > 0 ? template.placement : 'dock-right',
                         security: typeof template.security === 'string' && template.security.length > 0 ? template.security : 'strict',
+                        // What the project ships and what the reader has already allowed; the form
+                        // shows the checkbox only for the first, and starts from the second.
+                        backend: template.backend !== undefined && template.backend.allowed === true,
+                        backendDeclared: template.backend !== undefined && template.backend.declared === true,
                         busy: false,
                       };
                       bump();
@@ -3673,6 +3689,10 @@ window.__ModuleLoader__.load({
                             description: '',
                             placement: 'dock-right',
                             security: 'strict',
+                            // Off until the reader says otherwise, and only offered when the
+                            // folder that was copied in actually ships a backend.
+                            backend: false,
+                            backendDeclared: candidate.server === true,
                             busy: false,
                           };
                           bump();
@@ -3820,6 +3840,49 @@ window.__ModuleLoader__.load({
                           return tr(chosen.hintKey, chosen.hint);
                         })(),
                       ),
+                      // The reader's own decision about code that runs in this process. It appears
+                      // only for a project that ships a backend, and the line under it says plainly
+                      // what granting means: this is the one switch in the plugin that hands a
+                      // project the same reach the plugin has.
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' } },
+                        state.adopt.backendDeclared === true
+                          ? h('input', {
+                              type: 'checkbox',
+                              checked: state.adopt.backend === true,
+                              onChange: (event) => {
+                                state.adopt.backend = event.target.checked;
+                                bump();
+                              },
+                              style: { marginTop: '2px', flex: '0 0 auto' },
+                            })
+                          : null,
+                        h(
+                          'div',
+                          { style: { minWidth: '0' } },
+                          h(
+                            'div',
+                            { style: { fontSize: '12px', fontWeight: state.adopt.backend === true ? 600 : 400 } },
+                            tr('adoptBackend', 'Run this project’s backend'),
+                          ),
+                          h(
+                            'div',
+                            {
+                              style: {
+                                fontSize: '11px',
+                                color:
+                                  state.adopt.backend === true
+                                    ? 'var(--dsw-alias-state-error-primary, #c33)'
+                                    : 'var(--dsw-alias-label-secondary, #888)',
+                              },
+                            },
+                            state.adopt.backendDeclared === true
+                              ? tr('adoptBackendHint', 'Its server.js runs inside the DSH process with this plugin’s privileges — as trusted as the plugin itself.')
+                              : tr('adoptBackendNone', 'No backend here: a server.js in the project folder, named by “backend” in meta.json, is what offers one.'),
+                          ),
+                        ),
+                      ),
                       h(
                         'div',
                         { style: { display: 'flex', justifyContent: 'flex-end', gap: narrow ? MOBILE.footerGap : '6px' } },
@@ -3832,7 +3895,7 @@ window.__ModuleLoader__.load({
                             // the desktop button next to a thumb-sized confirm.
                             style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}),
                             onClick: () => {
-                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', busy: false };
+                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, busy: false };
                               bump();
                             },
                           },
@@ -3845,13 +3908,28 @@ window.__ModuleLoader__.load({
                             style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
                             disabled: state.adopt.busy === true,
                             onClick: () => {
-                              adoptTemplate(state.adopt.source, {
-                                slug: state.adopt.slug,
-                                name: state.adopt.name,
-                                description: state.adopt.description,
-                                placement: state.adopt.placement,
-                                security: state.adopt.security,
-                              });
+                              adoptTemplate(
+                                state.adopt.source,
+                                Object.assign(
+                                  {
+                                    slug: state.adopt.slug,
+                                    name: state.adopt.name,
+                                    description: state.adopt.description,
+                                    placement: state.adopt.placement,
+                                    security: state.adopt.security,
+                                  },
+                                  // Adopting a folder that ships a `server.js` is also where the
+                                  // project's manifest gets its declaration: the file is the
+                                  // evidence, and the switch is the reader's answer to it. Editing
+                                  // an existing project never rewrites that — the folder owns it.
+                                  state.adopt.backendDeclared === true && state.adopt.existing !== true
+                                    ? { backend: state.adopt.backend === true }
+                                    : {},
+                                ),
+                                // Only sent when the form offered the choice, so a project with no
+                                // backend can never end up allowed by accident.
+                                state.adopt.backendDeclared === true ? state.adopt.backend === true : undefined,
+                              );
                             },
                           },
                           state.adopt.busy === true

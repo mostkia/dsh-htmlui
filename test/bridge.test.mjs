@@ -16,7 +16,7 @@ import { test } from 'node:test';
 const source = readFileSync(new URL('../assets/bridge.js', import.meta.url), 'utf8');
 
 /** Install one fake document environment and evaluate the bridge in it. */
-function loadBridge(config) {
+function loadBridge(config, overrides = {}) {
   const calls = [];
   const dispatched = [];
   const posted = [];
@@ -56,11 +56,11 @@ function loadBridge(config) {
     };
     calls.push({ kind: 'eventsource', url });
   };
-  const fetch_ = (url, init) => {
+  const fetch_ = overrides.fetch ?? ((url, init) => {
     const body = init === undefined ? undefined : JSON.parse(init.body);
     calls.push({ kind: 'fetch', url, body, init });
     return Promise.resolve({ json: () => Promise.resolve({ ok: true, actionId: 'a-1' }) });
-  };
+  });
   const CustomEvent = function CustomEvent(type, init) {
     this.type = type;
     this.detail = init === undefined ? undefined : init.detail;
@@ -98,7 +98,7 @@ test('installs exactly one bridge with the documented surface', () => {
   assert.equal(bridge.sessionId, 'session-1');
   assert.equal(bridge.theme(), 'dark');
   assert.equal(env.document.documentElement.attributes['data-dsh-htmlui-theme'], 'dark');
-  for (const key of ['send', 'resize', 'close', 'on', 'off', 'stream', 'ready', 'state']) {
+  for (const key of ['send', 'resize', 'close', 'on', 'off', 'stream', 'ready', 'state', 'app', 'appUrl']) {
     assert.ok(bridge[key] !== undefined, `${key} must be exposed`);
   }
   // Re-evaluating must not replace the installed bridge.
@@ -125,8 +125,44 @@ test('send posts the action with its capability and session identity', async () 
   assert.equal(refused.ok, false);
 });
 
-test('state reads the injected value and writes through the host', async () => {
-  const env = loadBridge(baseConfig);
+test('a document calls its own project backend with no model round trip', async () => {
+  const answers = [];
+  const env = loadBridge(baseConfig, {
+    fetch: (url, init) => {
+      answers.push({ url, init });
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('{"now":7}') });
+    },
+  });
+  const bridge = env.window.dshHTML;
+
+  // A body makes it a POST, and the answer is read as text so `json()` works on any engine.
+  const answer = await bridge.app('status', { body: { range: '7d' }, query: { fresh: 1 } });
+  assert.equal(answers[0].url, '/plugins/@mostkia/dsh-htmlui/app/ui-1a2b3c4d/status?t=tok-123&fresh=1');
+  assert.equal(answers[0].init.method, 'POST');
+  assert.equal(answers[0].init.body, '{"range":"7d"}');
+  assert.equal(answers[0].init.headers['content-type'], 'application/json');
+  assert.equal(answers[0].init.credentials, 'omit');
+  assert.deepEqual(answer.json(), { now: 7 });
+  assert.equal(answer.body, '{"now":7}');
+
+  // No body means GET, and a leading slash is not part of the path.
+  await bridge.app('/plain');
+  assert.equal(answers[1].url, '/plugins/@mostkia/dsh-htmlui/app/ui-1a2b3c4d/plain?t=tok-123');
+  assert.equal(answers[1].init.method, 'GET');
+  assert.equal(answers[1].init.body, undefined);
+
+  // The same address, for a resource the page loads itself rather than fetches.
+  assert.equal(bridge.appUrl('img/logo.png', { v: 2 }), '/plugins/@mostkia/dsh-htmlui/app/ui-1a2b3c4d/img/logo.png?t=tok-123&v=2');
+
+  // A bridge that was never configured fails closed instead of throwing.
+  const bare = loadBridge({});
+  const refused = await bare.window.dshHTML.app('status');
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /not configured/u);
+  assert.equal(bare.window.dshHTML.appUrl('status'), null);
+});
+
+test('state reads the injected value and writes through the host', async () => {  const env = loadBridge(baseConfig);
   assert.deepEqual(env.window.dshHTML.state.get(), { step: 3 });
   await env.window.dshHTML.state.set({ step: 4 });
   const call = env.calls.find((entry) => entry.kind === 'fetch' && entry.body.op === 'state');

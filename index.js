@@ -61,7 +61,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.2';
+const PLUGIN_VERSION = '0.2.0';
 
 /**
  * Placements this plugin offers.
@@ -121,6 +121,26 @@ const SSE_HEARTBEAT_MS = 15_000;
 /** Writes: a burst, then one every 1.5 s. Reads: far wider, because paging and search are normal. */
 const ACTION_BUCKET = { capacity: 8, refillMs: 1_500 };
 const READ_BUCKET = { capacity: 40, refillMs: 100 };
+
+/**
+ * A project's own backend: server-side code that lives in the project's directory.
+ *
+ * A document may only reach the backend of the project it came from, and only while the reader
+ * has allowed that project to run backend code on this machine — the project declares one in its
+ * manifest, the reader grants it, and neither alone is enough. The backend runs in this process:
+ * see `createBackends` for what that means and why it is stated plainly everywhere it appears.
+ */
+const APP_PREFIX = `${ROUTE_PREFIX}/app/`;
+/** The file a backend is read from when the manifest only says `true`. */
+const APP_DEFAULT_FILE = 'server.js';
+/** How long one backend call may run before this route answers on its behalf. */
+const APP_TIMEOUT_MS = 10_000;
+/** What one backend call may send, and what its answer may weigh. */
+const APP_MAX_BYTES = 1 << 20;
+/** How long a project's backend stays loaded after its last call. */
+const APP_IDLE_MS = 10 * 60_000;
+/** The headers a backend is shown: never the document's capability token, never a cookie. */
+const APP_VISIBLE_HEADERS = ['accept', 'accept-language', 'content-type', 'user-agent'];
 
 const UI_ID_RE = /^ui-[0-9a-f]{8,32}$/;
 const TEMPLATE_SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -490,6 +510,12 @@ function createStore(root) {
     return {
       templatesDir: typeof value.templatesDir === 'string' && value.templatesDir.length > 0 ? value.templatesDir : undefined,
       templatesAsked: value.templatesAsked === true,
+      // The projects whose backend the reader has allowed to run here. Kept beside the template
+      // directory because it is the same kind of fact: a decision about this machine, made in
+      // the page, that every later activation has to honour.
+      backendProjects: Array.isArray(value.backendProjects)
+        ? value.backendProjects.filter((slug) => typeof slug === 'string' && TEMPLATE_SLUG_RE.test(slug))
+        : [],
     };
   }
 
@@ -529,6 +555,25 @@ function createStore(root) {
     const settings = readSettings();
     if (settings.templatesAsked === true) return;
     writeSettings(Object.assign({}, settings, { templatesAsked: true }));
+  }
+
+  /**
+   * The reader's answer to "may this project run backend code on this machine?".
+   *
+   * Stored here rather than in the project's own manifest, and deliberately: the manifest travels
+   * with the folder, so a project copied in from anywhere could otherwise grant itself the right
+   * to run code in the host process. The declaration says what the project ships; this says what
+   * the reader allowed. Granting is therefore always an explicit act in this page.
+   */
+  function setBackendAllowed(input, allowed) {
+    const slug = typeof input === 'string' ? input.trim() : '';
+    if (!TEMPLATE_SLUG_RE.test(slug)) return { ok: false, error: 'a valid project id is required' };
+    const settings = readSettings();
+    const current = new Set(settings.backendProjects);
+    if (allowed === true) current.add(slug);
+    else current.delete(slug);
+    writeSettings(Object.assign({}, settings, { backendProjects: [...current] }));
+    return { ok: true, slug, allowed: current.has(slug) };
   }
 
   function readUi(id) {
@@ -791,7 +836,11 @@ function createStore(root) {
           files = [];
         }
         if (files.length === 0) continue;
-        out.push({ kind: 'dir', name: entry.name, html: files.length });
+        // A folder that ships a `server.js` is offered the backend switch when it is adopted:
+        // it has no manifest yet, so the file itself is the only declaration there can be. The
+        // switch writes the declaration into the manifest being created, and the reader's
+        // allowance stays where every allowance lives.
+        out.push({ kind: 'dir', name: entry.name, html: files.length, server: existsSync(join(root, entry.name, APP_DEFAULT_FILE)) });
         continue;
       }
       if (!/\.html?$/iu.test(entry.name)) continue;
@@ -857,6 +906,10 @@ function createStore(root) {
         // it; the original stays where the reader put it.
         writeTextAtomic(join(dir, 'index.html'), readFileSync(join(dir, entry), 'utf8'));
       }
+      // The switch in the form is offered for a folder that ships a `server.js`, and the file has
+      // to still be there when the manifest is written — a declaration with nothing behind it
+      // would only produce a 404 later.
+      const declaration = wanted.backend === true && existsSync(join(dir, APP_DEFAULT_FILE)) ? { backend: APP_DEFAULT_FILE } : {};
       const source = readFileSync(join(dir, 'index.html'), 'utf8');
       writeJsonAtomic(join(dir, 'meta.json'), {
         slug,
@@ -864,6 +917,7 @@ function createStore(root) {
         description,
         placement,
         security,
+        ...declaration,
         bytes: byteLength(source),
         updatedAt: Date.now(),
       });
@@ -1137,6 +1191,7 @@ function createStore(root) {
     readSettings,
     setTemplatesDir,
     markTemplatesAsked,
+    setBackendAllowed,
     readSlot,
     writeSlot,
     removeSlot,
@@ -1152,6 +1207,256 @@ function createStore(root) {
     writeState,
     uiPath,
   };
+}
+
+// ------------------------------------------------------------ project backends
+
+/**
+ * The backend of a project: a `server.js` beside the project's own `index.html`.
+ *
+ * Why it exists. A document can already talk to the host — state, slots, actions — but an action
+ * goes to the model, and a slot only holds what the page itself wrote. Neither can go and fetch
+ * something and hand it to the page. A backend can: the panel asks its own project, the project
+ * answers, and no model turn, no tokens, and no waiting are involved.
+ *
+ * What it costs, stated plainly because this is the whole trust story: backend code runs *in this
+ * process*, with the privileges this plugin has. It is not a sandbox and nothing here pretends it
+ * is. Three things bound it instead.
+ *
+ *   1. Two keys, not one. The project's manifest declares a backend (`"backend": true`, or a path
+ *      inside the project); the reader allows that project to run one. Both are required, and a
+ *      manifest cannot grant itself the reader's half — which is why the allowance lives in the
+ *      plugin's settings and not in the folder that travels between machines.
+ *   2. It is reachable only from its own documents. The route is keyed by UI id and checked with
+ *      that document's capability token, so a document reaches the backend of the project it came
+ *      from and no other.
+ *   3. It cannot hang or flood the host unnoticed: one call gets `APP_TIMEOUT_MS`, bodies and
+ *      answers are capped, calls take from the same rate-limit bucket as the rest of the carrier,
+ *      and every failure becomes an answer instead of an exception.
+ *
+ * The module stays loaded between calls, so a backend may keep state (a polling cache is the whole
+ * point) and is dropped after `APP_IDLE_MS` without a call. Editing the file — or anything it
+ * requires from the project directory — reloads it on the next call, because the require cache is
+ * purged for that directory first. That purge is also why the entry is CommonJS: an ES module
+ * graph cannot be invalidated, so only the entry file would ever reload.
+ */
+function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS }) {
+  const require = createRequire(import.meta.url);
+  /** slug -> the loaded backend: its module, its call counters, and its idle timer. */
+  const loaded = new Map();
+
+  function log(message) {
+    try {
+      logger?.warn?.(`dsh-htmlui: ${message}`);
+    } catch {
+      /* a logger that throws is not a reason to lose the answer */
+    }
+  }
+
+  /**
+   * The file a project declares, or `undefined` when it declares no backend at all.
+   *
+   * Takes either shape the plugin has of a project: the parsed manifest (`readTemplate().meta`) or
+   * a catalogue row, which carries the manifest's fields flattened into itself.
+   */
+  function declarationOf(meta) {
+    const value = meta === null || meta === undefined ? undefined : meta.backend;
+    if (value === true) return APP_DEFAULT_FILE;
+    if (typeof value !== 'string') return undefined;
+    const wanted = value.trim().replace(/\\/gu, '/');
+    return wanted.length > 0 ? wanted : undefined;
+  }
+
+  /** The project directory and the backend file inside it, resolved and kept inside. */
+  function targetOf(slug) {
+    if (typeof slug !== 'string' || !TEMPLATE_SLUG_RE.test(slug)) return undefined;
+    const template = store.readTemplate(slug);
+    if (template === undefined || typeof template.documentPath !== 'string') return undefined;
+    const declared = declarationOf(template.meta);
+    if (declared === undefined) return undefined;
+    const dir = dirname(template.documentPath);
+    const file = resolve(dir, declared);
+    if (file !== dir && !file.startsWith(`${dir}${sep}`)) return undefined;
+    return { slug, dir, file, relative: declared };
+  }
+
+  function allowed(slug) {
+    return store.readSettings().backendProjects.includes(slug);
+  }
+
+  /** Forget the project's own modules, so an edit is picked up by the next call. */
+  function purge(dir) {
+    const prefix = `${dir}${sep}`;
+    for (const key of Object.keys(require.cache)) {
+      if (key === dir || key.startsWith(prefix)) delete require.cache[key];
+    }
+  }
+
+  function stop(entry, reason) {
+    if (typeof entry.stopped !== 'function') return;
+    try {
+      const result = entry.stopped(reason);
+      if (result !== null && typeof result === 'object' && typeof result.then === 'function') {
+        result.then(undefined, (error) => log(`backend ${entry.slug} failed while stopping: ${error?.message ?? error}`));
+      }
+    } catch (error) {
+      log(`backend ${entry.slug} failed while stopping: ${error?.message ?? error}`);
+    }
+  }
+
+  /** Drop a project's backend: its timer, its module cache, and its `stop()` hook. */
+  function forget(slug, reason) {
+    const entry = loaded.get(slug);
+    if (entry === undefined) return false;
+    loaded.delete(slug);
+    if (entry.idle !== undefined) clearTimeout(entry.idle);
+    purge(entry.dir);
+    stop(entry, reason);
+    return true;
+  }
+
+  function stampOf(file) {
+    const stats = statSync(file);
+    if (stats.isFile() !== true) throw new Error('not a file');
+    return `${stats.mtimeMs}:${stats.size}`;
+  }
+
+  async function load(target, stamp) {
+    purge(target.dir);
+    // eslint-disable-next-line import/no-dynamic-require
+    const module = require(target.file);
+    const handle = typeof module === 'function' ? module : typeof module?.handle === 'function' ? module.handle : undefined;
+    if (handle === undefined) {
+      throw new Error('a backend must export a function, or an object with a handle() function');
+    }
+    const entry = {
+      slug: target.slug,
+      dir: target.dir,
+      file: target.file,
+      stamp,
+      handle,
+      started: typeof module?.start === 'function' ? module.start.bind(module) : undefined,
+      stopped: typeof module?.stop === 'function' ? module.stop.bind(module) : undefined,
+      loadedAt: Date.now(),
+      calls: 0,
+      failures: 0,
+      lastError: undefined,
+      idle: undefined,
+    };
+    // `start()` may do the first fetch or set up a timer; awaiting it means the first request
+    // already sees a warm backend instead of racing it.
+    if (entry.started !== undefined) await entry.started({ slug: target.slug, dir: target.dir, pluginVersion: PLUGIN_VERSION });
+    loaded.set(target.slug, entry);
+    return entry;
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise((resolvePromise, rejectPromise) => {
+      const timer = setTimeout(() => {
+        const error = new Error(`no answer within ${ms} ms`);
+        error.timeout = true;
+        rejectPromise(error);
+      }, ms);
+      if (typeof timer.unref === 'function') timer.unref();
+      Promise.resolve(promise).then(
+        (value) => {
+          clearTimeout(timer);
+          resolvePromise(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          rejectPromise(error);
+        },
+      );
+    });
+  }
+
+  /** What a backend may return, turned into something a route can send. */
+  function normalizeAnswer(value) {
+    if (value === undefined || value === null) return { status: 204, type: 'application/json', body: undefined };
+    if (typeof value === 'string') return { status: 200, type: 'text/plain; charset=utf-8', body: value };
+    if (Buffer.isBuffer(value) || value instanceof Uint8Array) return { status: 200, type: 'application/octet-stream', body: Buffer.from(value) };
+    if (typeof value === 'object' && Number.isFinite(value.status)) {
+      const status = clampInt(value.status, 100, 599, 200);
+      const body = value.body === undefined ? value.json : value.body;
+      if (typeof body === 'string') return { status, type: 'text/plain; charset=utf-8', body };
+      if (Buffer.isBuffer(body) || body instanceof Uint8Array) return { status, type: 'application/octet-stream', body: Buffer.from(body) };
+      return { status, type: 'application/json', body };
+    }
+    return { status: 200, type: 'application/json', body: value };
+  }
+
+  /**
+   * Run one call against a project's backend.
+   *
+   * Answers are always a `{ status, type, body }` the route can send, including for every refusal:
+   * a document asking the wrong project, or one whose project was never allowed, gets a status and
+   * a sentence, never a thrown error.
+   */
+  async function call(slug, request) {
+    const target = targetOf(slug);
+    if (target === undefined) return { status: 404, type: 'application/json', body: { ok: false, error: 'this interface has no project backend' } };
+    if (!allowed(slug)) {
+      return { status: 403, type: 'application/json', body: { ok: false, error: `the backend of ${slug} is not allowed; the reader enables it where the project is imported` } };
+    }
+    let stamp;
+    try {
+      stamp = stampOf(target.file);
+    } catch {
+      forget(slug, 'missing');
+      return { status: 404, type: 'application/json', body: { ok: false, error: `no backend file at ${target.relative} in this project` } };
+    }
+    let entry = loaded.get(slug);
+    if (entry !== undefined && entry.stamp !== stamp) {
+      log(`backend ${slug} changed on disk; reloading it`);
+      forget(slug, 'changed');
+      entry = undefined;
+    }
+    if (entry === undefined) {
+      try {
+        entry = await load(target, stamp);
+        log(`backend ${slug} loaded from ${target.relative}`);
+      } catch (error) {
+        const detail = String(error?.message ?? error);
+        log(`backend ${slug} failed to load: ${detail}`);
+        return { status: 500, type: 'application/json', body: { ok: false, error: 'the backend failed to load', detail } };
+      }
+    }
+    if (entry.idle !== undefined) clearTimeout(entry.idle);
+    entry.idle = setTimeout(() => {
+      log(`backend ${slug} unloaded after ${Math.round(APP_IDLE_MS / 60_000)} idle minutes`);
+      forget(slug, 'idle');
+    }, APP_IDLE_MS);
+    if (typeof entry.idle.unref === 'function') entry.idle.unref();
+    entry.calls += 1;
+    try {
+      const answer = await withTimeout(entry.handle(request), timeoutMs);
+      entry.lastError = undefined;
+      return normalizeAnswer(answer);
+    } catch (error) {
+      const detail = String(error?.message ?? error);
+      entry.failures += 1;
+      entry.lastError = detail;
+      log(`backend ${slug} failed: ${detail}`);
+      return error?.timeout === true
+        ? { status: 504, type: 'application/json', body: { ok: false, error: 'the backend did not answer in time', detail } }
+        : { status: 500, type: 'application/json', body: { ok: false, error: 'the backend threw', detail } };
+    }
+  }
+
+  /** What `/health` reports: which backends are loaded, and how they have behaved. */
+  function status() {
+    return [...loaded.values()].map((entry) => ({
+      slug: entry.slug,
+      file: entry.file,
+      loadedAt: entry.loadedAt,
+      calls: entry.calls,
+      failures: entry.failures,
+      lastError: entry.lastError,
+    }));
+  }
+
+  return { call, forget, status, declarationOf, targetOf };
 }
 
 // --------------------------------------------------------------- SSE hub
@@ -1388,6 +1693,11 @@ export function apply(ctx, config) {
     return join(base, 'htmlui');
   })();
   const maxInlineBytes = clampInt(settings.maxInlineBytes, 1024, MAX_DOCUMENT_BYTES, DEFAULT_MAX_INLINE_BYTES);
+  // How long one backend call may take. Configurable because "how slow is too slow" is a property
+  // of the panel, not of the plugin: a backend that talks to a slow API needs a longer leash than
+  // one that reads a file, and the default has to be short enough that a hung one cannot look like
+  // a frozen page.
+  const appTimeoutMs = clampInt(settings.appTimeoutMs, 100, 120_000, APP_TIMEOUT_MS);
   const allowedOrigins = normalizeOrigins(settings.allowedOrigins);
   const actionPrompt =
     typeof settings.actionPrompt === 'string' && settings.actionPrompt.trim().length > 0
@@ -1397,6 +1707,8 @@ export function apply(ctx, config) {
   const store = createStore(root);
   const hub = createHub(ctx.logger);
   const logger = ctx.logger;
+  /** The project backends this activation has loaded; see `createBackends`. */
+  const backends = createBackends({ store, logger, timeoutMs: appTimeoutMs });
 
   /**
    * Per-UI token buckets keep a runaway document from flooding the model.
@@ -2162,6 +2474,7 @@ export function apply(ctx, config) {
       .then(() => {
         const all = store.listTemplates();
         const settings = store.readSettings();
+        const allowedBackends = new Set(settings.backendProjects);
         sendJson(res, 200, {
           ok: true,
           // The catalogue is read from disk on every open, and the directory it reads is
@@ -2183,6 +2496,12 @@ export function apply(ctx, config) {
             security: securityOf(template),
             bundled: template.bundled === true,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
+            // A backend is two facts, and the page shows both: whether the project ships one,
+            // and whether the reader has allowed it to run here.
+            backend: {
+              declared: backends.declarationOf(template) !== undefined,
+              allowed: allowedBackends.has(String(template.slug ?? '')),
+            },
           })),
         });
       })
@@ -2380,6 +2699,149 @@ export function apply(ctx, config) {
    * The path is resolved inside the project folder and refused if it escapes, and a
    * `strict` project serves nothing at all.
    */
+  /**
+   * The reader's answer about one project's backend.
+   *
+   * Refusing is also the way a running backend is stopped: the allowance is read on every call, so
+   * taking it away takes effect on the next one, and the loaded module is dropped here so nothing
+   * keeps running behind a decision that was reversed.
+   */
+  function handleTemplateBackend(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
+        if (!TEMPLATE_SLUG_RE.test(slug)) {
+          sendJson(res, 400, { ok: false, error: 'a valid project id is required' });
+          return;
+        }
+        const template = store.readTemplate(slug);
+        if (template === undefined) {
+          sendJson(res, 404, { ok: false, error: `no such project: ${slug}` });
+          return;
+        }
+        const declared = backends.declarationOf(template.meta) !== undefined;
+        const result = store.setBackendAllowed(slug, body.allowed === true);
+        if (result.ok !== true) {
+          sendJson(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        if (result.allowed !== true) backends.forget(slug, 'revoked');
+        sendJson(res, 200, { ok: true, slug, declared, allowed: result.allowed });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
+  /**
+   * One call into a project's backend, from one of that project's own documents.
+   *
+   * The document is identified by its UI id plus its capability token, exactly as the document and
+   * project-file routes are; the project is then read from that record rather than from anything
+   * the caller sent. A document can therefore only ever reach its own project's backend.
+   */
+  async function handleApp(req, res, url, method) {
+    try {
+      const rest = url.pathname.slice(APP_PREFIX.length);
+      const parts = rest.split('/').filter((part) => part.length > 0);
+      const uiId = parts.shift();
+      const wanted = parts.join('/');
+      const token = url.searchParams.get('t') ?? '';
+      if (uiId === undefined || uiId.length === 0 || !tokenMatches(uiId, token)) {
+        sendJson(res, 403, { ok: false, error: 'forbidden' });
+        return;
+      }
+      const current = store.readUi(uiId);
+      if (current === undefined) {
+        sendJson(res, 404, { ok: false, error: 'not found' });
+        return;
+      }
+      const slug = typeof current.meta.template === 'string' ? current.meta.template : undefined;
+      if (slug === undefined) {
+        sendJson(res, 404, { ok: false, error: 'this interface has no project backend' });
+        return;
+      }
+      if (!takeToken(uiId, READ_BUCKET)) {
+        sendJson(res, 429, { ok: false, error: 'too many backend calls' });
+        return;
+      }
+      let body = '';
+      if (method === 'POST') {
+        try {
+          body = await readBody(req, APP_MAX_BYTES);
+        } catch (error) {
+          sendJson(res, 413, { ok: false, error: String(error?.message ?? error) });
+          return;
+        }
+      }
+      const headers = {};
+      for (const name of APP_VISIBLE_HEADERS) {
+        const value = req.headers[name];
+        if (typeof value === 'string') headers[name] = value;
+      }
+      const query = {};
+      for (const [key, value] of url.searchParams) {
+        if (key !== 't') query[key] = value;
+      }
+      const answer = await backends.call(slug, {
+        method,
+        // The path *within* the backend, so `app('status')` arrives as `status` — the project
+        // decides what its own routes are, and a leading slash is not a difference worth keeping.
+        path: wanted,
+        query,
+        headers,
+        body,
+        uiId,
+        sessionId: current.meta.sessionId ?? '',
+        slug,
+        pluginVersion: PLUGIN_VERSION,
+        json: () => {
+          try {
+            return body.trim().length === 0 ? null : JSON.parse(body);
+          } catch {
+            return undefined;
+          }
+        },
+      });
+      sendBackendAnswer(res, answer);
+    } catch (error) {
+      logger?.warn?.(`dsh-htmlui: backend call failed: ${error?.message ?? error}`);
+      try {
+        sendJson(res, 500, { ok: false, error: 'internal error' });
+      } catch {
+        /* the socket is already gone */
+      }
+    }
+  }
+
+  /** Send what a backend returned, holding it to the same size cap as everything else here. */
+  function sendBackendAnswer(res, answer) {
+    if (answer.status === 204) {
+      res.writeHead(204, { 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
+    const payload = answer.type === 'application/json' ? JSON.stringify(answer.body) : answer.body;
+    if (typeof payload !== 'string' && Buffer.isBuffer(payload) !== true) {
+      sendJson(res, 500, { ok: false, error: 'the backend answered with something this route cannot send' });
+      return;
+    }
+    if (byteLength(typeof payload === 'string' ? payload : payload.toString('utf8')) > APP_MAX_BYTES) {
+      sendJson(res, 502, { ok: false, error: `the backend answered with more than ${APP_MAX_BYTES} bytes` });
+      return;
+    }
+    if (answer.type === 'application/json') {
+      sendJson(res, answer.status, answer.body);
+      return;
+    }
+    res.writeHead(answer.status, {
+      'content-type': answer.type,
+      'cache-control': 'no-store',
+      'content-length': Buffer.byteLength(payload),
+      'x-content-type-options': 'nosniff',
+      'access-control-allow-origin': '*',
+    });
+    res.end(payload);
+  }
+
   function handleFiles(req, res, url) {
     const rest = url.pathname.slice(`${ROUTE_PREFIX}/files/`.length);
     const parts = rest.split('/').filter((part) => part.length > 0);
@@ -2809,14 +3271,20 @@ export function apply(ctx, config) {
       // A project that serves its own files: the document is requested at
       // `.../files/<id>/index.html` there, so relative references land beside it.
       const isProjectFile = path.startsWith(`${ROUTE_PREFIX}/files/`);
-      const token = isDocument || isProjectFile ? url.searchParams.get('t') ?? '' : '';
+      // A project's own backend. The UI id is in the path and the capability is in the query —
+      // the token identifies the document, and the document's record identifies the project, so
+      // the caller never gets to name which project it is talking to.
+      const isApp = path.startsWith(APP_PREFIX);
+      const token = isDocument || isProjectFile || isApp ? url.searchParams.get('t') ?? '' : '';
       const uiIdFromPath = isDocument
         ? path.slice(`${ROUTE_PREFIX}/ui/`.length).split('/')[0]
         : isProjectFile
           ? path.slice(`${ROUTE_PREFIX}/files/`.length).split('/')[0]
-          : '';
+          : isApp
+            ? path.slice(APP_PREFIX.length).split('/')[0]
+            : '';
       const carrierDefers = path === `${ROUTE_PREFIX}/rpc` || path === `${ROUTE_PREFIX}/events`;
-      const capability = isDocument || isProjectFile ? tokenMatches(uiIdFromPath, token) : carrierDefers ? 'defer' : false;
+      const capability = isDocument || isProjectFile || isApp ? tokenMatches(uiIdFromPath, token) : carrierDefers ? 'defer' : false;
       const decision = originDecision(req, capability, allowedOrigins);
       if (!decision.ok) {
         sendJson(res, decision.code, { ok: false, error: decision.message });
@@ -2843,6 +3311,9 @@ export function apply(ctx, config) {
             sseClients: hub.size(),
           },
           slots: slots.map((slot) => ({ name: slot.name, kind: slot.kind, rows: slot.rows ?? 0, bytes: slot.bytes ?? 0 })),
+          // Project backends that are loaded right now, with what they have been asked to do.
+          // A loaded backend is otherwise invisible — there is no manager for them either.
+          backends: backends.status(),
         });
         return;
       }
@@ -2862,6 +3333,10 @@ export function apply(ctx, config) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTemplatesAdopt(req, res);
       }
+      if (path === `${ROUTE_PREFIX}/templates/backend`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplateBackend(req, res);
+      }
       if (path === `${ROUTE_PREFIX}/ui/ticket`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTicket(req, res);
@@ -2877,6 +3352,13 @@ export function apply(ctx, config) {
       if (isProjectFile) {
         if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleFiles(req, res, url);
+      }
+      if (isApp) {
+        if (method !== 'GET' && method !== 'POST' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        // Asynchronous, and it answers every outcome itself: dispatch stays a synchronous router
+        // that never leaves a request unanswered, so the promise is deliberately not awaited.
+        handleApp(req, res, url, method);
+        return;
       }
       if (path === `${ROUTE_PREFIX}/assets/${BRIDGE_FILE}`) {
         if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

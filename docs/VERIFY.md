@@ -159,7 +159,33 @@ Toggle the DSH theme. A document that reads `--dsh-htmlui-*` or calls
 `dshHTML.theme()` must follow; the injected `data-dsh-htmlui-theme` attribute
 flips with it.
 
-## 6. Triage
+## 6. A project's backend
+
+A project may ship a `server.js` beside its `index.html`; the host runs it, and the project's own
+documents call it with `dshHTML.app(...)` — no model turn and no tokens. Setting one up, in order:
+
+1. Put `server.js` in the project folder and set `"backend": true` in its `meta.json` (`true` means
+   `server.js`; a string names another file inside the project).
+2. Open the project's pencil — or adopt a folder that ships one — and tick **Run this project's
+   backend**. The catalogue reports both facts as `backend.declared` and `backend.allowed`, and the
+   form offers the tick only when the first is true.
+3. Render the project and run `await dshHTML.app('ping')` in the document's own console.
+
+What to expect:
+
+- Before step 2 the same call answers `403`, with a message naming the project. After it, the
+  backend's own value comes back; un-ticking the switch stops it on the next call, not on the next
+  restart.
+- A backend keeps state between calls: a counter in its module increments across two calls. Edit
+  `server.js`, call again, and the edited file answers — no cold start and no page refresh.
+- `curl -s http://127.0.0.1:$PORT/plugins/@mostkia/dsh-htmlui/health` lists it under `backends`
+  with `calls` and `failures`; a loaded backend is visible nowhere else.
+- A handler that throws answers `500` with its message in `detail`; one that never resolves answers
+  `504` after `appTimeoutMs` (ten seconds by default) — the panel is told, not left waiting.
+- A document from another project cannot reach it: the route is keyed by the calling document's own
+  id, so the project comes from the record, never from the request.
+
+## 7. Triage
 
 | Symptom | Likely cause | Check |
 |---|---|---|
@@ -170,3 +196,6 @@ flips with it.
 | A surface stays after `op=close` | Another page closed it and this one has not synced | Reload; it converges on `/ui/list` |
 | An image or font inside a document 404s | A relative URL resolves against the carrier, not the workspace | Use an absolute URL or a data URL |
 | 403 on every carrier route | The page's origin is not loopback and is not listed | `/health` → `trust`, then `config.allowedOrigins` |
+| `dshHTML.app` answers 403 | The project ships a backend but the reader has not allowed it | The project's pencil → the backend switch; `/templates` reports `backend.declared` / `.allowed` |
+| `dshHTML.app` answers 404 | The manifest declares no backend, or the file it names is gone | `meta.json`'s `backend`, and the file it points at |
+| `dshHTML.app` answers 504 | The handler did not answer inside `appTimeoutMs` | The handler's own timing; raise `appTimeoutMs` for a slow API |

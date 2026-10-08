@@ -8,6 +8,7 @@
  *   dshHTML.send(action, data)          -> POST an action; the model receives it
  *   dshHTML.state.get() / .set(value)   -> per-interface scratch state; survives a reload only
  *   dshHTML.store.get(name) / .set(...) -> named slots shared by every panel, kept on disk
+ *   dshHTML.app(path, init) / .appUrl() -> this project's own backend, with no model round trip
  *   dshHTML.resize('520x360')           -> ask the host to resize the surface
  *   dshHTML.close()                     -> ask the host to remove the surface
  *   dshHTML.on(type, handler)           -> 'assistant' | 'session' | 'action' | 'store' | 'theme' | 'ready'
@@ -489,6 +490,88 @@
           });
         },
       },
+    },
+    /**
+     * Call this project's own backend, with no model round trip.
+     *
+     * A project may ship a `server.js` beside its `index.html`; the host runs that file in the
+     * same process as the plugin and answers here. The call carries this document's capability
+     * token, so the host knows which project is asking and no other project can be reached from
+     * here — and the reader has to have allowed that project to run backend code, or the answer is
+     * a `403` that says so.
+     *
+     * Resolves to a response-shaped object rather than a raw `Response`, so a document can read
+     * `(await dshHTML.app('status')).json()` on any engine this plugin supports:
+     * `{ ok, status, body, text(), json() }`, where `body` is the text exactly as it arrived.
+     */
+    app: function (path, init) {
+      var options = init !== null && typeof init === 'object' ? init : {};
+      var url = this.appUrl(path, options.query);
+      var failed = function (message) {
+        return {
+          ok: false,
+          status: 0,
+          body: '',
+          error: message,
+          text: function () {
+            return '';
+          },
+          json: function () {
+            return null;
+          },
+        };
+      };
+      if (url === null) return Promise.resolve(failed('bridge is not configured'));
+      var headers = Object.assign({}, options.headers);
+      var method = typeof options.method === 'string' ? options.method.toUpperCase() : options.body === undefined ? 'GET' : 'POST';
+      var call = { method: method, credentials: 'omit', cache: 'no-store', headers: headers };
+      if (options.body !== undefined) {
+        if (typeof options.body === 'string') {
+          call.body = options.body;
+          if (headers['content-type'] === undefined) headers['content-type'] = 'text/plain; charset=utf-8';
+        } else {
+          call.body = JSON.stringify(options.body);
+          if (headers['content-type'] === undefined) headers['content-type'] = 'application/json';
+        }
+      }
+      return fetch(url, call)
+        .then(function (response) {
+          return response.text().then(function (text) {
+            return {
+              ok: response.ok,
+              status: response.status,
+              body: text,
+              text: function () {
+                return text;
+              },
+              json: function () {
+                try {
+                  return text.length === 0 ? null : JSON.parse(text);
+                } catch (error) {
+                  return null;
+                }
+              },
+            };
+          });
+        })
+        .catch(function (error) {
+          lastError = String((error && error.message) || error);
+          return failed(lastError);
+        });
+    },
+    /** The URL `app()` calls: for an `<img src>`, a stylesheet, or a link the page builds itself. */
+    appUrl: function (path, query) {
+      if (routeBase.length === 0) return null;
+      var clean = String(path === undefined || path === null ? '' : path).replace(/^\/+/, '');
+      var url = routeBase + '/app/' + encodeURIComponent(uiId) + '/' + clean + '?t=' + encodeURIComponent(token);
+      if (query !== null && typeof query === 'object') {
+        Object.keys(query).forEach(function (key) {
+          var value = query[key];
+          if (value === undefined || value === null) return;
+          url += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(String(value));
+        });
+      }
+      return url;
     },
     resize: function (size) {
       return post({ op: 'resize', size: size }).then(function (result) {
