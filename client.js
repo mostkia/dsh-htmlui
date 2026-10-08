@@ -3354,8 +3354,13 @@ window.__ModuleLoader__.load({
                 // A fullscreen surface covers the conversation column, not the frame: the
                 // sidebar belongs to the user, and covering it hides their sessions. The
                 // column's own edges are measured from our seat inside it.
-                left: state.column.width > 0 ? `${state.column.left}px` : '0',
-                width: state.column.width > 0 ? `${state.column.width}px` : '100%',
+                //
+                // 手机: the narrow shell has no persistent sidebar to protect, and the seat we
+                // measure from is a column inside it rather than the screen — so measuring still
+                // covered a column and the surface came up short of the edges. On a narrow viewport
+                // the screen *is* the column, so it is covered whole. Desktop keeps the measurement.
+                left: narrowViewport() !== true && state.column.width > 0 ? `${state.column.left}px` : '0',
+                width: narrowViewport() !== true && state.column.width > 0 ? `${state.column.width}px` : '100%',
                 height: '100%',
                 zIndex: 5,
                 display: active ? 'flex' : 'none',
@@ -3886,7 +3891,7 @@ window.__ModuleLoader__.load({
                   // 手机优先, and laid out as two lines on purpose: the project and its pencil, then
                   // the control on the left with the three marks pushed to the right edge, where they
                   // read as one answer to "what is this project doing right now".
-                  style: { display: 'flex', flexDirection: 'column', gap: '6px', padding: '6px 0' },
+                  style: { display: 'flex', flexDirection: 'column', gap: '3px', padding: '0' },
                 },
                 h(
                   'div',
@@ -3936,13 +3941,14 @@ window.__ModuleLoader__.load({
                 declared
                   ? h(
                       'div',
-                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
+                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '3px' } },
                       // This list is the authoritative way to stop a backend: it lists the projects
                       // themselves, so it is still here after the panel — and the manager row — are gone.
+                      // The indent lines the button up under the project name rather than under the radio.
                       stopBackendButton(template.slug, backend, (result) => {
                         state.templates.notice = result.message;
                         bump();
-                      }),
+                      }, { marginLeft: '10px' }),
                       h('span', { style: { flex: '1 1 auto' } }),
                       ...backendChips(backend, true),
                     )
