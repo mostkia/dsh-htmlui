@@ -866,6 +866,8 @@ window.__ModuleLoader__.load({
       residentSwitch: 'Resident',
       residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
+      managerBackends: 'Backend processes',
+      managerBackendsHint: 'still running, with no interface of theirs left in this session',
       backendResident: 'Resident',
       backendFollow: 'Follows the panel',
       backendResidentHint: 'Stays up after the panel closes',
@@ -979,6 +981,8 @@ window.__ModuleLoader__.load({
         residentSwitch: '常驻',
         residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想停它：用管理器行或项目行里的「停止后台」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
+        managerBackends: '后台进程',
+        managerBackendsHint: '仍在运行，本会话里已经没有它的界面了',
         backendResident: '常驻',
         backendFollow: '跟随面板',
         backendResidentHint: '关掉面板也不会停',
@@ -2632,6 +2636,13 @@ window.__ModuleLoader__.load({
           ),
         );
       });
+      // Loaded backends this page has no interface for. They are what makes 停止后台 a control that
+      // must not be attached to a record: the record can be removed while the process keeps running.
+      const orphans = (state.templates.items ?? []).filter((template) => {
+        const info = backendInfoOf(template);
+        if (info === undefined || info.loaded !== true) return false;
+        return records.some((record) => record.template === template.slug) !== true;
+      });
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', padding: '10px 12px' } },
@@ -2683,6 +2694,59 @@ window.__ModuleLoader__.load({
         records.length === 0
           ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML interface.'))
           : h('div', null, ...rows),
+        // A resident backend outlives the interface that started it, so the interface's row cannot be
+        // the only place the reader can stop it: removing a panel here — or closing it from anywhere
+        // else — would take the one control with it. Projects whose backend is loaded are therefore
+        // listed on their own, whether or not this session still has an interface of theirs.
+        orphans.length === 0
+          ? null
+          : h(
+              'div',
+              { style: { marginTop: '12px' } },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' } },
+                h('span', { style: titleStyle }, tr('managerBackends', 'Backend processes')),
+                h(
+                  'span',
+                  { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
+                  tr('managerBackendsHint', 'still running, with no interface of theirs left in this session'),
+                ),
+              ),
+              h(
+                'div',
+                null,
+                ...orphans.map((template) => {
+                  const info = backendInfoOf(template);
+                  return h(
+                    'div',
+                    {
+                      key: `backend-${template.slug}`,
+                      style: {
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        padding: '10px 12px',
+                        borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
+                      },
+                    },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+                      h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) }, templateListItem(template)),
+                      h('span', { style: { flex: '1 1 auto' } }),
+                      chip(tr('backendBadge', 'Backend'), 'badge'),
+                      ...backendChips(info, false),
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
+                      stopBackendButton(template.slug, info, (result) => setStatus(result.message)),
+                    ),
+                  );
+                }),
+              ),
+            ),
       );
     }
 
