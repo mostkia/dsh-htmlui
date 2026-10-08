@@ -871,7 +871,6 @@ window.__ModuleLoader__.load({
       residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
       managerBackends: 'Backend processes',
-      managerBackendsHint: 'alive right now — a resident one stays, one that follows its panel unloads after the idle delay',
       backendWillIdle: 'Unloads on its own',
       backendResident: 'Resident',
       backendFollow: 'Follows the panel',
@@ -991,7 +990,6 @@ window.__ModuleLoader__.load({
         residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想停它：用管理器行或项目行里的「停止后台」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
         managerBackends: '后台进程',
-        managerBackendsHint: '此刻还活着——常驻的会一直留着，跟随面板的会在空闲后自己卸载',
         backendWillIdle: '空闲后自动卸载',
         backendResident: '常驻',
         backendFollow: '跟随面板',
@@ -1211,9 +1209,12 @@ window.__ModuleLoader__.load({
         if (value === null || value.ok !== true) {
           return { ok: false, slug, message: tr('backendStopFailed', 'The host did not stop it; the backend may still be running.') };
         }
+        // A stop that worked needs no sentence: the row disappearing is the whole answer, and a line
+        // about it is noise to read and dismiss. The two cases where nothing visibly happened still
+        // speak up — a backend that was not running, and a stop that failed.
         const message =
           value.stopped === true
-            ? tr('backendStopDone', 'Stopped the {slug} backend; opening that panel again loads it again.', { slug })
+            ? ''
             : tr('backendStopIdle', 'The {slug} backend was not running.', { slug });
         // The catalogue is the only thing on this page that says "loaded", so it is re-read
         // before the answer is shown: the row behind the message has to agree with it.
@@ -1489,8 +1490,11 @@ window.__ModuleLoader__.load({
         'button',
         {
           type: 'button',
-          style: Object.assign({}, buttonStyle, extraStyle ?? {}, backend.loaded === true ? {} : disabledStyle),
-          disabled: backend.loaded !== true,
+          // Never disabled. Whether a backend is loaded is the host's fact, read from a catalogue
+          // that can be seconds old — and a greyed button on a process that is in fact running is
+          // exactly the state that made this control look broken. Stopping something that is not
+          // running is a no-op the host answers honestly, so the click is always allowed to ask.
+          style: Object.assign({}, buttonStyle, extraStyle ?? {}),
           title: tr('stopBackendHint', 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.'),
           'aria-label': `${tr('stopBackend', 'Stop backend')}: ${slug}`,
           onClick: () => {
@@ -2561,12 +2565,17 @@ window.__ModuleLoader__.load({
       // Stopping a backend answers here, not in the drawer: this page is where the reader
       // pressed the button, and a message anywhere else reads as nothing having happened.
       const [status, setStatus] = useState(null);
-      // A project with a resident backend keeps running after its panel is gone, so this page
-      // is the only place left that can end it. It can only say whether one is loaded if the
-      // catalogue it holds has the backend field and is recent enough, so the one reading this
-      // page needs is asked for once per mount. Per render would be a request per keystroke.
+      // A project with a resident backend keeps running after its panel is gone, so this page is the
+      // only place left that can end it — and "is it loaded" is a fact only the host has. The
+      // catalogue is therefore re-read while this page is open, not once per mount: a panel that
+      // started a second ago loaded its backend without telling anyone here, and a control disabled
+      // by a stale reading is worse than no control at all.
       useEffect(() => {
         if (backendCatalogueStale()) loadTemplates();
+        const timer = setInterval(() => {
+          if (document.hidden !== true) loadTemplates();
+        }, 5000);
+        return () => clearInterval(timer);
       }, []);
       const records = sessionId === undefined ? [] : recordsFor(sessionId);
       // The backend a row belongs to: a record built from a path or the blank canvas names no
@@ -2696,13 +2705,6 @@ window.__ModuleLoader__.load({
               )
             : null,
         ),
-        // The distinction this page exists to make, said once where the two controls sit side by
-        // side: 隐藏/移除 acts on an interface, 停止后台 acts on a process, and a resident backend
-        // is not touched by the first. Shown only when a listed project actually has a backend —
-        // a reader with none has nothing to be warned about.
-        anyBackend
-          ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, tr('managerBackendHint', 'Hiding or removing an interface does not stop its backend. A resident one keeps running until you press Stop backend.'))
-          : null,
         status === null
           ? null
           : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, String(status)),
@@ -2725,7 +2727,7 @@ window.__ModuleLoader__.load({
                 h(
                   'span',
                   { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
-                  tr('managerBackendsHint', 'still running, with no interface of theirs left in this session'),
+                  tr('managerBackendHint', 'Hiding or removing an interface does not stop its backend. A resident one keeps running until you press Stop backend.'),
                 ),
               ),
               h(

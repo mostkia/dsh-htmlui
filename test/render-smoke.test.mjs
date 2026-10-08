@@ -1109,7 +1109,10 @@ test('a resident backend is marked on the project row and in the manager, and ca
     );
     const stops = buttonsLabelled(dialog, '停止后台');
     assert.equal(stops.length, 1, 'one stop control, for the only project that has a backend');
-    assert.equal(stops[0].props.disabled, false, 'a loaded backend can be stopped');
+    // Never disabled: the catalogue's "loaded" is a fact that can be seconds old, and a greyed button
+    // on a process that is in fact running is what made this control look broken. Asking is always
+    // allowed, and the host answers honestly when there was nothing to stop.
+    assert.notEqual(stops[0].props.disabled, true, 'the stop control is always clickable');
     assert.ok(dialog.text.includes('只结束这个进程，不撤销授权'), 'and the list says what stopping does not do');
 
     // A project that declares no backend, and one whose row says nothing about backends at all,
@@ -1131,7 +1134,10 @@ test('a resident backend is marked on the project row and in the manager, and ca
     const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
     assert.ok(manager.text.includes('带后台'), 'the row says the project has a backend');
     assert.ok(manager.text.includes('常驻') && manager.text.includes('已加载'), 'and what state that backend is in');
-    assert.ok(manager.text.includes('隐藏或移除界面不等于停止后台'), 'hiding is not stopping, said where both controls are');
+    // That sentence is no longer repeated above the list: it belongs with the backend-processes
+    // section, where a reader is looking at processes rather than interfaces. What the manager still
+    // says, and must keep saying, is which project has a backend and what state it is in.
+    assert.ok(!manager.text.includes('隐藏或移除界面不等于停止后台'), 'the list itself carries no reminder');
     assert.equal(buttonsLabelled(manager, '停止后台').length, 1, 'and the one control that does stop it');
     for (const mark of ['未加载', '跟随面板', '已授权', '未授权']) {
       assert.ok(!manager.text.includes(mark), `the manager shows no backend mark for a project that declares none (${mark})`);
@@ -1231,7 +1237,9 @@ test('stopping a backend posts the stop route, and the row behind the message ag
     assert.deepEqual(calls[0].body, { slug: 'heimiao' }, 'and it carries the project id and nothing else');
     assert.equal(result.ok, true);
     assert.equal(result.stopped, true, 'the answer says a process really ended');
-    assert.match(result.message, /heimiao/u, 'and names the project it happened to');
+    // A stop that worked says nothing: the row disappearing is the whole answer. Only the two cases
+    // where nothing visibly happened — nothing was running, or the stop failed — speak up.
+    assert.equal(result.message, '', 'a successful stop needs no message');
     assert.ok(calls.some((call) => call.url.endsWith('/templates')), 'the catalogue is re-read, so the row agrees with the message');
 
     // A backend that was already gone is not a failure, and is not reported as one.
