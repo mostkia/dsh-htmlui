@@ -894,6 +894,10 @@ window.__ModuleLoader__.load({
       residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close backend task in its manager row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
       backendWillIdle: 'Unloads on its own',
+      backendPillRunning: 'Running',
+      backendPillIdle: 'Not running',
+      backendPillRunningHint: 'Its backend is loaded in the host process right now',
+      backendPillIdleHint: 'Nothing is loaded until one of its interfaces calls it',
       backendResident: 'Resident',
       backendFollow: 'Follows the panel',
       backendResidentHint: 'Stays up after the panel closes',
@@ -1026,6 +1030,10 @@ window.__ModuleLoader__.load({
         residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想结束它：用管理器行里的「关闭后台任务」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
         backendWillIdle: '空闲后自动卸载',
+        backendPillRunning: '运行中',
+        backendPillIdle: '未运行',
+        backendPillRunningHint: '它的后端此刻已加载在宿主进程里',
+        backendPillIdleHint: '未加载：等它的某个界面调用时才会起来',
         backendResident: '常驻',
         backendFollow: '跟随面板',
         backendResidentHint: '关掉面板也不会停',
@@ -1493,6 +1501,38 @@ window.__ModuleLoader__.load({
 
     /** A control that cannot do anything right now: dimmed, and not a pointer. */
     const disabledStyle = { opacity: 0.5, cursor: 'default' };
+
+    /**
+     * Whether a programme's backend is running right now, as one pill.
+     *
+     * The colours and the wording are the reader's own: green while it runs, grey when it does not.
+     * Kept apart from `backendChips` on purpose — those say how a backend will live (resident or
+     * following its panel, allowed or not), while this says whether it is alive at this moment.
+     */
+    function backendPill(backend) {
+      const running = backend !== undefined && backend.loaded === true;
+      return h(
+        'span',
+        {
+          style: {
+            flex: '0 0 auto',
+            // 与左边的单选圈留出距离：紧贴着会显得药丸是名字的一部分。
+            marginLeft: '10px',
+            fontSize: '11px',
+            padding: '1px 5px',
+            color: '#fff',
+            borderRadius: '25px',
+            border: `1px ${running ? '#4CAF50' : '#9E9E9E'} solid`,
+            background: running ? '#4CAF50' : '#9E9E9E',
+            whiteSpace: 'nowrap',
+          },
+          title: running
+            ? tr('backendPillRunningHint', 'Its backend is loaded in the host process right now')
+            : tr('backendPillIdleHint', 'Nothing is loaded until one of its interfaces calls it'),
+        },
+        running ? tr('backendPillRunning', 'Running') : tr('backendPillIdle', 'Not running'),
+      );
+    }
 
     /**
      * The backend state of one project, as chips and nothing else.
@@ -4359,6 +4399,9 @@ window.__ModuleLoader__.load({
                       // Ending a process belongs to the manager row — one place, next to the
                       // interface it belongs to — so the drawer keeps the marks and the pencil and
                       // nothing that acts on a running backend.
+                      // 正在运行 / 未运行 先说，它是这一行里唯一会变的状态；各枚徽标说“它将怎么活”，
+                      // 药丸说“它此刻活着没有”——两件事，所以不合并成一枚。
+                      backendPill(backend),
                       h('span', { style: { flex: '1 1 auto' } }),
                       ...backendChips(backend, true),
                     )
