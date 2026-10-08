@@ -863,7 +863,7 @@ window.__ModuleLoader__.load({
       // 常驻 reads as a second decision about the same backend: first whether it may run at
       // all, then whether it survives the panel. Both are about the same process, so both
       // live in the same form, and the hint names every way to stop it.
-      residentSwitch: 'Resident (keeps running after the panel closes)',
+      residentSwitch: 'Resident',
       residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
       backendResident: 'Resident',
@@ -976,7 +976,7 @@ window.__ModuleLoader__.load({
         adoptBackend: '允许该项目的后台代码运行',
         adoptBackendHint: '项目目录里的 server.js 会在 DSH 进程内运行，权限与本插件相同——等于完全信任它。',
         adoptBackendNone: '该项目没有后台：在项目目录放一个 server.js，并在 meta.json 里用 backend 字段指认它。',
-        residentSwitch: '常驻（关掉面板也继续跑）',
+        residentSwitch: '常驻',
         residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想停它：用管理器行或项目行里的「停止后台」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
         backendResident: '常驻',
@@ -1427,16 +1427,18 @@ window.__ModuleLoader__.load({
       return h('span', { key, style: chipStyle }, text);
     }
 
-    /** A mark's small print: the sentence a chip alone cannot carry. */
-    const chipNoteStyle = { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' };
-
     /** A control that cannot do anything right now: dimmed, and not a pointer. */
     const disabledStyle = { opacity: 0.5, cursor: 'default' };
 
     /**
-     * The backend status of one project, as chips plus the sentence that says what the state
-     * means. `withPermission` is the drawer's extra: the permission is a per-project decision
-     * the reader made, and the project list is where they go to revisit it.
+     * The backend status of one project, as chips and nothing else.
+     */
+    /**
+     * The backend state of one project, as chips and nothing else.
+     *
+     * The sentence that used to sit beside them now lives in the residency chip's tooltip: on a
+     * phone the small print wrapped onto a second line, which made every row taller than the
+     * control it was explaining, and the chips read on their own anyway.
      */
     function backendChips(backend, withPermission) {
       const marks = [];
@@ -1446,8 +1448,17 @@ window.__ModuleLoader__.load({
         marks.push(chip(backend.allowed ? tr('backendAllowed', 'Allowed') : tr('backendDenied', 'Not allowed'), 'allowed'));
       }
       marks.push(
-        chip(backend.resident ? tr('backendResident', 'Resident') : tr('backendFollow', 'Follows the panel'), 'resident'),
-        h('span', { key: 'note', style: chipNoteStyle }, backend.resident ? tr('backendResidentHint', 'Stays up after the panel closes') : tr('backendFollowHint', 'Unloads a while after the panel closes')),
+        h(
+          'span',
+          {
+            key: 'resident',
+            style: chipStyle,
+            title: backend.resident
+              ? tr('backendResidentHint', 'Stays up after the panel closes')
+              : tr('backendFollowHint', 'Unloads a while after the panel closes'),
+          },
+          backend.resident ? tr('backendResident', 'Resident') : tr('backendFollow', 'Follows the panel'),
+        ),
         chip(backend.loaded ? tr('backendLoaded', 'Loaded') : tr('backendIdle', 'Not loaded'), 'loaded'),
       );
       return marks;
@@ -2556,17 +2567,19 @@ window.__ModuleLoader__.load({
             style: {
               display: 'flex',
               alignItems: 'center',
-              // 手机优先: a row carries a title, four marks, a sentence and up to three controls, so
-              // it wraps instead of pushing the controls past the edge where nothing can reach them.
+              // 手机优先: the title takes a line of its own (below), and the marks and controls wrap
+              // under it rather than being squeezed onto a second ragged line beside it.
               flexWrap: 'wrap',
-              gap: '10px',
+              gap: '6px',
               padding: '7px 10px',
               borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
             },
           },
           h(
             'span',
-            { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) },
+            // A full-width title forces the break, which is what keeps a long name from pushing the
+            // chips and the controls into columns of one word each on a phone.
+            { style: Object.assign({}, titleStyle, { flex: '1 1 100%', minWidth: '0' }) },
             // 计算器(jsq): the title a reader recognises, then the project it came from, so
             // two interfaces built from the same project are told apart at a glance.
             `${record.title.length > 0 ? record.title : record.uiId}${record.template !== undefined ? `(${record.template})` : ''}`,
@@ -4229,24 +4242,17 @@ window.__ModuleLoader__.load({
                               { style: { minWidth: '0' } },
                               h(
                                 'div',
-                                { style: { fontSize: '12px', fontWeight: state.adopt.resident === true ? 600 : 400 } },
-                                tr('residentSwitch', 'Resident (keeps running after the panel closes)'),
-                              ),
-                              h(
-                                'div',
                                 {
-                                  style: {
-                                    fontSize: '11px',
-                                    color:
-                                      state.adopt.resident === true
-                                        ? 'var(--dsw-alias-label-primary, #333)'
-                                        : 'var(--dsw-alias-label-secondary, #888)',
-                                  },
+                                  style: { fontSize: '12px', fontWeight: state.adopt.resident === true ? 600 : 400 },
+                                  // The explanation lives in the tooltip: as a wrapped sentence it
+                                  // made the form twice as tall on a phone, and the switch reads on
+                                  // its own. Stopping it is still said where the button is.
+                                  title: tr(
+                                    'residentHint',
+                                    'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
+                                  ),
                                 },
-                                tr(
-                                  'residentHint',
-                                  'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
-                                ),
+                                tr('residentSwitch', 'Resident'),
                               ),
                             ),
                           )

@@ -1098,9 +1098,15 @@ test('a resident backend is marked on the project row and in the manager, and ca
     // The drawer's project list is the authoritative way to end a backend: it lists projects,
     // not interfaces, so it is still here after every panel — and every manager row — is gone.
     const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-    for (const text of ['常驻', '已加载', '已授权', '关掉面板也不会停']) {
+    for (const text of ['常驻', '已加载', '已授权']) {
       assert.ok(dialog.text.includes(text), `the project row says ${text}`);
     }
+    // What residency means is a tooltip now: as an inline line of small print it wrapped onto a
+    // second row on a phone, which made every row taller than the control it was explaining.
+    assert.ok(
+      dialog.elements.some((element) => typeof element.props?.title === 'string' && element.props.title.includes('关掉面板也不会停')),
+      'the residency chip explains itself in a tooltip',
+    );
     const stops = buttonsLabelled(dialog, '停止后台');
     assert.equal(stops.length, 1, 'one stop control, for the only project that has a backend');
     assert.equal(stops[0].props.disabled, false, 'a loaded backend can be stopped');
@@ -1167,8 +1173,13 @@ test('the resident switch is offered only for a declared backend that may run', 
     const boxes = checkboxes(allowed);
     assert.equal(boxes.length, 2, 'the allowance and the resident switch');
     assert.equal(boxes[1].props.checked, true, 'an edit starts from what the host reports');
-    assert.ok(allowed.text.includes('常驻（关掉面板也继续跑）'), 'the switch says what it does');
-    assert.ok(allowed.text.includes('关掉面板也会继续跑'), 'the hint repeats what checked means');
+    assert.ok(allowed.text.includes('常驻'), 'the switch says what it is');
+    // Same reason as the chips: the explanation is a tooltip, so the form does not grow a second
+    // wrapped line on a phone.
+    assert.ok(
+      allowed.elements.some((element) => typeof element.props?.title === 'string' && element.props.title.includes('关掉面板也会继续跑')),
+      'and explains itself in a tooltip',
+    );
     assert.ok(allowed.text.includes('停止后台'), 'and names the controls that stop it');
     // Unchecking it is one of those ways: the box is the value the form carries to the host.
     boxes[1].props.onChange({ target: { checked: false } });
