@@ -146,8 +146,12 @@ function resetStore(records = []) {
   state.bySession.clear();
   state.tickets.clear();
   state.collapsed.clear();
+  state.hidden.clear();
   state.fullscreen = null;
   state.fullscreenDismissed.clear();
+  // The manager's own memory of "this project's interface was closed on purpose": it outlives a
+  // render by design, so a suite that forgets it hands the next one a row it did not create.
+  state.dismissedTemplates.clear();
   state.rightPane.available = false;
   state.rightPane.controller = undefined;
   // Inline hosting is per page, not per record: a reset has to forget it too, or one suite's
@@ -163,6 +167,58 @@ function resetStore(records = []) {
 function resetCreate() {
   state.create = { open: false, source: 'blank', placement: 'dock-right', busy: false };
 }
+
+// ----------------------------------------------------------------- fixtures
+
+/**
+ * One catalogue row for a project that ships a backend, as the host reports it: declared,
+ * allowed, resident and running. The marks the UI draws all hang off these four booleans.
+ */
+const backendProject = (overrides = {}) => ({
+  slug: 'heimiao',
+  name: '黑喵',
+  description: '',
+  bytes: 1,
+  backend: Object.assign({ declared: true, allowed: true, resident: true, loaded: true }, overrides),
+});
+
+/** The catalogue is shared state; every test that needs one sets the whole shape. */
+function setCatalogue(items) {
+  state.templates = {
+    open: true,
+    loaded: true,
+    loadedAt: Date.now(),
+    items,
+    candidates: [],
+    error: null,
+    dir: '/opt/html-templates',
+    configured: true,
+    asked: true,
+    savingDir: false,
+    adopting: '',
+    notice: null,
+  };
+}
+
+/**
+ * Render with our own Chinese table active. These assertions are about the words a reader
+ * reads, and the default in this harness is English — the table has to be the one in play.
+ */
+function withChinese(fn) {
+  const previous = document.documentElement.lang;
+  document.documentElement.lang = 'zh';
+  try {
+    return fn();
+  } finally {
+    document.documentElement.lang = previous;
+  }
+}
+
+/** Every button whose first child is exactly this label. */
+const buttonsLabelled = (tree, label) =>
+  tree.elements.filter((element) => element.type === 'button' && Array.isArray(element.children) && element.children[0] === label);
+
+const checkboxes = (tree) => tree.elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
 
 // --------------------------------------------------------------------- tests
 
@@ -648,23 +704,30 @@ test('the forwarded wheel scrolls the conversation, and the band stops at the co
   resetStore();
 });
 
-test('the session page names each interface with the project it came from', () => {
-  // 计算器(calculator): the title a reader recognises, then the project, so two
-  // interfaces built from the same project are told apart at a glance.
+test('one row per program: two interfaces of one project are one program', () => {
+  // 一行一个程序, never 一行一个界面: two interfaces built from the same project share one
+  // process, so they share one row — with its marks and its controls drawn once.
+  setCatalogue([{ slug: 'calculator', name: '计算器', description: '', bytes: 1, backend: { declared: true, allowed: true, resident: false, loaded: true } }]);
   resetStore([
     __internals.recordFromMeta(
       { htmlui: true, op: 'render', uiId: 'ui-cc550001', sessionId: 'session-1', title: '计算器', placement: 'float', template: 'calculator', revision: 1, bytes: 5 },
       undefined,
     ),
     __internals.recordFromMeta(
-      { htmlui: true, op: 'render', uiId: 'ui-cc550002', sessionId: 'session-1', title: '手写', placement: 'inline', revision: 1, bytes: 5 },
+      { htmlui: true, op: 'render', uiId: 'ui-cc550002', sessionId: 'session-1', title: '手写', placement: 'inline', template: 'heiji', revision: 1, bytes: 5 },
       undefined,
     ),
   ]);
   const page = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  assert.ok(page.text.includes('计算器(calculator)'), 'the project id rides along with the title');
-  assert.ok(page.text.includes('手写') && !page.text.includes('手写('), 'an interface with no project stays plain');
+  assert.ok(page.text.includes('计算器（calculator）'), 'the project name leads and the id it is addressed by follows');
+  assert.ok(page.text.includes('(2)'), 'the count is one per program, not one per interface');
+  const rows = __internals.managerRowsFor('session-1');
+  assert.equal(rows.length, 2, 'two projects, two rows');
+  // A project with no catalogue row and no interface record of its own still reads by its
+  // record's title: there is no name to borrow, and an empty title helps nobody.
+  assert.ok(page.text.includes('手写'), 'a program with no catalogue entry is still named');
   resetStore();
+  state.templates.items = [];
 });
 
 test('the session page carries its own way to start a project', () => {
@@ -773,25 +836,47 @@ test('the create dialog asks what to start from and where to put it', () => {
   resetCreate();
 });
 
-test('the session manager lists what is attached and can remove it', () => {
+test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.
   resetStore();
   const empty = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  assert.match(empty.text, /no HTML interface/u);
+  assert.match(empty.text, /no HTML program/u, 'an empty session says so');
 
+  // One program with a backend, one without: the first gets three controls, the second two.
+  // Both projects are in the catalogue, because a row takes its marks and its controls from the
+  // catalogue entry its record names — a record whose project is not listed has no process.
+  setCatalogue([backendProject(), { slug: 'form', name: '表单', description: '', bytes: 1 }]);
   resetStore([
-    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000001', sessionId: 'session-1', title: '看板', placement: 'background', revision: 2, bytes: 5 }, undefined),
-    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000002', sessionId: 'session-1', title: '表单', placement: 'inline', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000001', sessionId: 'session-1', title: '看板', placement: 'background', template: 'heimiao', revision: 2, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000002', sessionId: 'session-1', title: '表单', placement: 'inline', template: 'form', revision: 1, bytes: 5 }, undefined),
   ]);
   const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  assert.match(listed.text, /\(2\)/u, 'the count is the session count');
-  for (const text of ['看板', '表单', 'background', 'inline', 'ui-99000001', 'ui-99000002', 'Close interface']) {
-    assert.ok(listed.text.includes(text), `the manager shows ${text}`);
-  }
-  // A different session is not this session's business.
+  assert.match(listed.text, /\(2\)/u, 'the count is the session count of programs');
+  // The rows below are read in the reader's own words; the harness defaults to English.
+  withChinese(() => {
+    // Each row is named 名称（slug） — a name a reader recognises, then the id `template=` takes.
+    const chinese = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    for (const text of ['黑喵（heimiao）', '表单（form）', 'background', 'inline', '关闭后台任务', '关闭会话']) {
+      assert.ok(chinese.text.includes(text), `the manager shows ${text}`);
+    }
+    // One program with a backend, one without: the first gets three controls, the second two.
+    assert.equal(buttonsLabelled(listed, 'Close backend task').length, 1, 'the process control is on the backend row');
+    assert.equal(buttonsLabelled(listed, 'Close session').length, 1, 'and the session control on the other');
+    // A background layer carries no hide control and an inline surface never hides, so neither
+    // row offers minimize — there is nothing a minimize could mean for them.
+    assert.equal(buttonsLabelled(listed, 'Minimize').length, 0, 'no hide control for the two forms that cannot hide');
+    // No second section, and never a second row for the same program: a project appears once,
+    // and 「后台进程」 as an independent list is exactly what this row model replaced.
+    assert.ok(!chinese.text.includes('后台进程'), 'there is no separate backend-process section');
+    assert.ok(!chinese.text.includes('停止后台'), 'and no stop-backend control of its own');
+  });
+  // A different session is not this session's business: the rows above belong to session-1, and
+  // session-2 has no records at all. Its build is asserted in the backend-row test below.
   const other = render(__internals.HtmlUiManager, { sessionId: 'session-2' });
-  assert.match(other.text, /no HTML interface/u);
+  assert.ok(!other.text.includes('表单（form）'), 'another session’s programs are not listed here');
+  resetStore();
+  state.templates.items = [];
 });
 
 test('the sandbox follows the project, and only unsafe touches the origin', () => {
@@ -878,7 +963,7 @@ test('a float remembers where it was left, and a touch brings it to the front', 
   resetStore();
 });
 
-test('the session page restores every form that can be hidden', () => {
+test('the session page offers minimize for every form that has one, and none for the rest', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000001', sessionId: 'session-1', title: '背景', placement: 'background', revision: 1, bytes: 5 }, undefined),
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000002', sessionId: 'session-1', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
@@ -887,11 +972,18 @@ test('the session page restores every form that can be hidden', () => {
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000005', sessionId: 'session-1', title: '内联', placement: 'inline', revision: 1, bytes: 5 }, undefined),
   ]);
   const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  const restores = (listed.text.match(/Show/gu) ?? []).length;
-  // Three of the five: a background layer is always on screen and an inline surface lives in
-  // the conversation, so neither can be hidden and neither has anything to restore.
-  assert.equal(restores, 3, 'three of the five forms can be shown again');
-  assert.ok(listed.text.includes('Close interface'), 'and every one of them can be closed, which is what the label now says');
+  // A float and a fullscreen carry a hide control of their own. A dock-right record only has one
+  // while the right column can actually open a tab — with no controller bound it falls back to
+  // the composer dock, which has no hide of its own, so there is nothing to mirror.
+  assert.equal(buttonsLabelled(listed, 'Minimize').length, 2, 'the two forms that can be put away offer it');
+  // A background layer is always on screen and an inline surface lives in the conversation, so
+  // neither can be hidden and neither gets a control that could not do anything.
+  // Nothing is put away yet, so every one of those controls reads 最小化.
+  assert.equal(buttonsLabelled(listed, 'Maximize').length, 0, 'nothing is hidden to begin with');
+  // None of the five names a project, so every row is a program of its own — and each one can
+  // still be closed, which is now 「关闭会话」.
+  assert.equal(buttonsLabelled(listed, 'Close session').length, 5, 'every program can be closed');
+  assert.ok(!listed.text.includes('Close UI'), 'and no program here has a process, so no Close UI');
   resetStore();
 });
 
@@ -1034,58 +1126,9 @@ test('a floating window is fitted to the viewport it is drawn in', () => {
   viewport(1280, 800);
 });
 
-// ------------------------------------------------------- project backends (keepAlive)
+// ------------------------------- shared fixtures for the catalogue and the manager
 
-/**
- * One catalogue row for a project that ships a backend, as the host reports it: declared,
- * allowed, resident and running. The marks the UI draws all hang off these four booleans.
- */
-const backendProject = (overrides = {}) => ({
-  slug: 'heimiao',
-  name: '黑喵',
-  description: '',
-  bytes: 1,
-  backend: Object.assign({ declared: true, allowed: true, resident: true, loaded: true }, overrides),
-});
-
-/** The catalogue is shared state; every test that needs one sets the whole shape. */
-function setCatalogue(items) {
-  state.templates = {
-    open: true,
-    loaded: true,
-    loadedAt: Date.now(),
-    items,
-    candidates: [],
-    error: null,
-    dir: '/opt/html-templates',
-    configured: true,
-    asked: true,
-    savingDir: false,
-    adopting: '',
-    notice: null,
-  };
-}
-
-/**
- * Render with our own Chinese table active. These assertions are about the words a reader
- * reads, and the default in this harness is English — the table has to be the one in play.
- */
-function withChinese(fn) {
-  const previous = document.documentElement.lang;
-  document.documentElement.lang = 'zh';
-  try {
-    return fn();
-  } finally {
-    document.documentElement.lang = previous;
-  }
-}
-
-const buttonsLabelled = (tree, label) =>
-  tree.elements.filter((element) => element.type === 'button' && Array.isArray(element.children) && element.children[0] === label);
-
-const checkboxes = (tree) => tree.elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
-
-test('a resident backend is marked on the project row and in the manager, and can be stopped from both', () => {
+test('the drawer keeps the project marks and only the drawer, and the manager row carries the controls', () => {
   resetStore();
   resetCreate();
   const declared = backendProject();
@@ -1095,37 +1138,35 @@ test('a resident backend is marked on the project row and in the manager, and ca
   state.create.open = true;
 
   withChinese(() => {
-    // The drawer's project list is the authoritative way to end a backend: it lists projects,
-    // not interfaces, so it is still here after every panel — and every manager row — is gone.
+    // The drawer is 项目管理 now: it says what a project is and offers the pencil, and the one
+    // control that acts on a running process lives on the manager row — next to the interface
+    // that process serves, and in one place instead of two.
     const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
     for (const text of ['常驻', '已加载', '已授权']) {
       assert.ok(dialog.text.includes(text), `the project row says ${text}`);
     }
-    // What residency means is a tooltip now: as an inline line of small print it wrapped onto a
+    assert.equal(buttonsLabelled(dialog, '停止后台').length, 0, 'the drawer no longer ends a backend');
+    assert.ok(!dialog.text.includes('只结束这个进程，不撤销授权'), 'and says nothing about a control it does not have');
+    // The pencil is the drawer's job, and every project keeps it.
+    assert.equal(buttonsLabelled(dialog, '✎').length, 3, 'every project keeps its pencil');
+    // What residency means is a tooltip: as an inline line of small print it wrapped onto a
     // second row on a phone, which made every row taller than the control it was explaining.
     assert.ok(
       dialog.elements.some((element) => typeof element.props?.title === 'string' && element.props.title.includes('关掉面板也不会停')),
       'the residency chip explains itself in a tooltip',
     );
-    const stops = buttonsLabelled(dialog, '停止后台');
-    assert.equal(stops.length, 1, 'one stop control, for the only project that has a backend');
-    // Never disabled: the catalogue's "loaded" is a fact that can be seconds old, and a greyed button
-    // on a process that is in fact running is what made this control look broken. Asking is always
-    // allowed, and the host answers honestly when there was nothing to stop.
-    assert.notEqual(stops[0].props.disabled, true, 'the stop control is always clickable');
-    assert.ok(dialog.text.includes('只结束这个进程，不撤销授权'), 'and the list says what stopping does not do');
 
     // A project that declares no backend, and one whose row says nothing about backends at all,
     // get no marks: an empty chip would read as a state nobody can act on.
     setCatalogue([undeclared, silent]);
     const without = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-    for (const mark of ['常驻', '跟随面板', '已加载', '未加载', '已授权', '未授权', '停止后台']) {
+    for (const mark of ['常驻', '跟随面板', '已加载', '未加载', '已授权', '未授权']) {
       assert.ok(!without.text.includes(mark), `a project with no backend shows no ${mark}`);
     }
     setCatalogue([declared, undeclared, silent]);
 
-    // The manager lists interfaces, so the backend has to be named there too — and the row is
-    // where 隐藏/移除 sits, which is exactly the control a reader mistakes for stopping it.
+    // The manager row is where the backend is named and where it is ended. All three marks come
+    // from the catalogue's `backend` field: nothing on the row invents a state of its own.
     resetStore([
       __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
       __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000002', sessionId: 'session-1', title: '手写', placement: 'float', template: 'plain', revision: 1, bytes: 5 }, undefined),
@@ -1134,17 +1175,190 @@ test('a resident backend is marked on the project row and in the manager, and ca
     const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
     assert.ok(manager.text.includes('带后台'), 'the row says the project has a backend');
     assert.ok(manager.text.includes('常驻') && manager.text.includes('已加载'), 'and what state that backend is in');
-    // That sentence is no longer repeated above the list: it belongs with the backend-processes
-    // section, where a reader is looking at processes rather than interfaces. What the manager still
-    // says, and must keep saying, is which project has a backend and what state it is in.
-    assert.ok(!manager.text.includes('隐藏或移除界面不等于停止后台'), 'the list itself carries no reminder');
-    assert.equal(buttonsLabelled(manager, '停止后台').length, 1, 'and the one control that does stop it');
-    for (const mark of ['未加载', '跟随面板', '已授权', '未授权']) {
-      assert.ok(!manager.text.includes(mark), `the manager shows no backend mark for a project that declares none (${mark})`);
+    assert.equal(buttonsLabelled(manager, '关闭后台任务').length, 1, 'and exactly one control ends the process');
+    assert.equal(buttonsLabelled(manager, '最小化').length, 3, 'and every row offers the interface hide');
+    assert.equal(buttonsLabelled(manager, '关闭UI界面').length, 1, 'and the one with a backend can close its interface');
+    assert.equal(buttonsLabelled(manager, '关闭会话').length, 2, 'and the two without one close themselves');
+    // The permission mark is per project and reads as the catalogue answers it. A project that
+    // declares no backend carries no permission mark at all, and no residency mark either — an
+    // empty chip is a state nobody can act on.
+    assert.ok(manager.text.includes('已授权'), 'the allowed backend says so on its row');
+    for (const mark of ['未授权', '未加载', '跟随面板']) {
+      assert.ok(!manager.text.includes(mark), `and a project with no declared backend shows no ${mark}`);
     }
+    // One row per program, and no separate process list: the same project never gets two rows.
+    assert.equal(__internals.managerRowsFor('session-1').length, 3, 'three programs, three rows');
+    assert.ok(!manager.text.includes('后台进程'), 'and no backend-processes section');
     resetStore();
   });
   resetCreate();
+});
+
+test('the manager row is a two-button program or a three-button one, and its label follows the state', () => {
+  resetStore();
+  resetCreate();
+  setCatalogue([backendProject({ placementLast: 'fullscreen', placement: 'float' })]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-m1000001', sessionId: 'session-1', title: 'Alpha', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-m2000001', sessionId: 'session-1', title: 'Beta', placement: 'float', template: 'form', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const [withBackend, withoutBackend] = __internals.managerRowsFor('session-1');
+
+  withChinese(() => {
+    // 带后台: three controls — minimize/maximize, close/restart the interface, end the process.
+    const rich = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
+    assert.deepEqual(
+      rich.elements.filter((element) => element.type === 'button').map((element) => element.children[0]),
+      ['最小化', '关闭UI界面', '关闭后台任务'],
+      'three controls, in that order',
+    );
+    // 无后台: two — the same hide, and closing the session.
+    const lean = render(__internals.HtmlUiManagerRow, { row: withoutBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
+    assert.deepEqual(
+      lean.elements.filter((element) => element.type === 'button').map((element) => element.children[0]),
+      ['最小化', '关闭会话'],
+      'a program with no process has no process control',
+    );
+
+    // The hide label follows the state the interface's own control writes: hide it anywhere and
+    // this row says 最大化, with no second copy of the state to fall out of step.
+    const hiddenId = 'ui-m1000001';
+    assert.equal(__internals.recordHidden(__internals.recordsFor('session-1')[0]), false, 'a fresh interface is up');
+    __internals.state.hidden.add(hiddenId);
+    assert.equal(__internals.recordHidden(__internals.recordsFor('session-1')[0]), true, 'and a minimized float reads as hidden');
+    const minimized = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
+    assert.equal(buttonsLabelled(minimized, '最大化').length, 1, 'the same button now says 最大化');
+    assert.equal(buttonsLabelled(minimized, '最小化').length, 0, 'and no longer says 最小化');
+    // Pressing it is the interface's own hide/unhide, so the state really is shared.
+    __internals.toggleRecord(__internals.recordsFor('session-1')[0], {});
+    assert.equal(__internals.state.hidden.has(hiddenId), false, 'maximize brings the float back');
+
+    // Close UI: the first press only asks, and the question says what is lost. The action itself
+    // is not run — nothing is dismissed and no stop request is sent from a first press.
+    const safe = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
+    const closeUi = buttonsLabelled(safe, '关闭UI界面')[0];
+    closeUi.props.onClick();
+    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press closes nothing');
+    const asking = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'close-ui', props: {} });
+    assert.equal(buttonsLabelled(asking, '确认关闭界面？未保存的运行信息会丢').length, 1, 'and the button becomes the question');
+    assert.equal(buttonsLabelled(asking, '关闭UI界面').length, 0, 'so it is readable as a confirmation, not as the label again');
+
+    // Close backend task: same two steps, and the question says the interfaces go with it.
+    const stopRow = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
+    buttonsLabelled(stopRow, '关闭后台任务')[0].props.onClick();
+    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press ends nothing either');
+    const stopping = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'close-backend', props: {} });
+    assert.equal(buttonsLabelled(stopping, '确认结束进程？界面一起消失').length, 1, 'and this question names the interfaces');
+
+    // A program with no backend asks before closing its session, and says it cannot be undone.
+    const sessionRow = render(__internals.HtmlUiManagerRow, { row: withoutBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
+    buttonsLabelled(sessionRow, '关闭会话')[0].props.onClick();
+    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press closes nothing here either');
+    const closing = render(__internals.HtmlUiManagerRow, { row: withoutBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'close-session', props: {} });
+    assert.equal(buttonsLabelled(closing, '确认关闭？无法恢复').length, 1, 'and this one asks in its own words');
+
+    // Close UI leaves the row behind: the process is still loaded, so the interface can come back.
+    // The control that brings it back is 重启UI界面, in the same position 关闭UI界面 was.
+    for (const record of [...__internals.recordsFor('session-1')]) __internals.dismissRecord(record.uiId);
+    const closed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    assert.match(closed.text, /界面已关闭/u, 'the row says the interface is gone');
+    assert.equal(buttonsLabelled(closed, '重启UI界面').length, 1, 'and offers to bring it back');
+    assert.equal(buttonsLabelled(closed, '关闭UI界面').length, 0, 'instead of offering to close it again');
+    assert.ok(closed.text.includes('带后台'), 'the process is still named, so the row is still the process row');
+    // 无后台的项目只来自界面记录: with its interface gone nothing is left to list, while the
+    // program whose process is still loaded keeps its row — that is the whole difference.
+    assert.deepEqual(
+      __internals.managerRowsFor('session-1').map((row) => row.key),
+      ['heimiao'],
+      'the closed program keeps its row and the record-only one does not',
+    );
+  });
+
+  // 重启UI界面 asks where first, on the same placement words the create dialog uses — no second
+  // vocabulary to learn — and the question can be declined.
+  const restartRow = __internals.managerRowsFor('session-1')[0];
+  const picker = render(__internals.HtmlUiManagerRow, {
+    row: restartRow,
+    sessionId: 'session-1',
+    onStatus: () => {},
+    placementPicking: true,
+    props: {},
+  });
+  assert.match(picker.text, /Show it again as/u, 'the restart asks where');
+  const placementChoices = picker.elements
+    .filter((element) => element.type === 'button')
+    .map((element) => element.children[0])
+    .filter((label) => typeof label === 'string' && !['Minimize', 'Maximize', 'Restart UI', 'Close backend task', 'Cancel'].includes(label));
+  assert.deepEqual(placementChoices, ['Right column (a real split)', 'In the conversation', 'Floating window', 'Fullscreen', 'Background layer'], 'one choice per placement, in the create dialog’s order and words');
+  assert.equal(buttonsLabelled(picker, 'Cancel').length, 1, 'and the question can be declined');
+  assert.equal(
+    picker.elements.filter((element) => element.type === 'button').some((element) => element.props.style?.borderColor === 'var(--dsw-alias-bg-accent, #247bbf)'),
+    true,
+    'with the reader’s last placement preselected',
+  );
+
+  // 重启UI界面 asks where first, on the same placement words the create dialog uses. What it
+  // preselects is the reader's last word on this project — where the interface is now, else what
+  // the catalogue remembers, else the manifest — because "again" means the way it was.
+  const remembered = __internals.managerRowsFor('session-1')[0].template;
+  assert.equal(__internals.managerPlacementFor(remembered, { placement: 'float' }), 'float', 'the live placement wins while the interface is up');
+  assert.equal(__internals.managerPlacementFor({ placementLast: 'fullscreen', placement: 'inline' }, undefined), 'fullscreen', 'then what the project was last opened with');
+  assert.equal(__internals.managerPlacementFor({ placement: 'inline' }, undefined), 'inline', 'then what its manifest declares');
+  assert.equal(__internals.managerPlacementFor(undefined, undefined), 'dock-right', 'and the create flow’s own default is the floor');
+  resetStore();
+  resetCreate();
+  state.templates.items = [];
+});
+
+test('a program whose process is loaded keeps its row after its interface is closed', () => {
+  // This is the state 「关闭UI界面」 leaves behind, and the reason the row is keyed by program and
+  // not by interface: the process outlives the panel, so the row — the only place left that can
+  // end it — has to outlive it too. Its build is the same as any other row's.
+  resetStore();
+  resetCreate();
+  // Declared but not running: nothing is loaded, and this session has no interface of it, so the
+  // manager has no business listing another session's project.
+  setCatalogue([backendProject({ loaded: false, resident: false })]);
+  resetStore();
+  assert.match(render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text, /no HTML program/u, 'a declared backend that is not loaded is not a row');
+
+  // Loaded, with an interface: one row, named by its program, carrying all three marks.
+  setCatalogue([backendProject()]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-bo000001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const shown = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.equal(buttonsLabelled(shown, 'Close UI').length, 1, 'the interface is up, so the button closes it');
+  withChinese(() => {
+    assert.ok(render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text.includes('已加载'), 'and the row says the process is loaded');
+  });
+
+  // Its interface gone — whether closed from here or from anywhere else — the row stays, and the
+  // same button is now the way back in.
+  for (const record of [...__internals.recordsFor('session-1')]) __internals.dismissRecord(record.uiId);
+  const closed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.equal(__internals.recordsFor('session-1').length, 0, 'no interface is left');
+  assert.equal(buttonsLabelled(closed, 'Restart UI').length, 1, 'and the row still offers to render it again');
+  assert.equal(buttonsLabelled(closed, 'Close backend task').length, 1, 'and to end the process it still stands for');
+  withChinese(() => {
+    assert.ok(render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text.includes('界面已关闭'), 'the row says plainly why it is still here');
+  });
+  // Another session sees it too: "loaded" is the one session-independent fact the host reports
+  // about a process, and a reader looking for the way to end it is looking at this page.
+  assert.equal(__internals.managerRowsFor('session-2').length, 1, 'the loaded process has a row wherever it is looked at');
+  assert.equal(__internals.managerRowsFor('session-2')[0].records.length, 0, 'with no interface of this session in it');
+
+  // Once the process is gone the row is gone with it. The manager's own close remembers the
+  // project for one reading, so a process that dies mid-refresh does not take the row — and the
+  // button under the reader's finger — away with it; with nothing loaded and nothing remembered,
+  // the row is simply gone.
+  setCatalogue([backendProject({ loaded: false, resident: false })]);
+  __internals.state.dismissedTemplates.add('heimiao');
+  assert.equal(__internals.managerRowsFor('session-1').length, 1, 'a close the manager just made keeps the row through one stale reading');
+  __internals.state.dismissedTemplates.clear();
+  assert.equal(__internals.managerRowsFor('session-1').length, 0, 'and with the process unloaded there is nothing left to list');
+  resetStore();
+  state.templates.items = [];
 });
 
 test('the resident switch is offered only for a declared backend that may run', () => {
@@ -1186,7 +1400,12 @@ test('the resident switch is offered only for a declared backend that may run', 
       allowed.elements.some((element) => typeof element.props?.title === 'string' && element.props.title.includes('关掉面板也会继续跑')),
       'and explains itself in a tooltip',
     );
-    assert.ok(allowed.text.includes('停止后台'), 'and names the controls that stop it');
+    // The hint that used to sit under the switches lives in that same tooltip, and still names
+    // where the process is ended: the manager row. That control is the only one now.
+    assert.ok(
+      allowed.elements.some((element) => typeof element.props?.title === 'string' && element.props.title.includes('管理器行')),
+      'and its hint still says which control ends the process',
+    );
     // Unchecking it is one of those ways: the box is the value the form carries to the host.
     boxes[1].props.onChange({ target: { checked: false } });
     assert.equal(state.adopt.resident, false, 'the box is the value the form submits');

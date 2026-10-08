@@ -234,6 +234,14 @@ window.__ModuleLoader__.load({
       fullscreen: null,
       /** Interfaces the user switched away from, so auto-open does not fight them. */
       fullscreenDismissed: new Set(),
+      /**
+       * Projects whose interface the reader closed while the process stayed up.
+       *
+       * The manager keeps a row per program, and a program with no interface is the state
+       * 「关闭UI界面」 leaves behind: the process is still loaded, so the row — and the 「重启UI界面」
+       * control on it — has to survive the catalogue refresh that follows the close.
+       */
+      dismissedTemplates: new Set(),
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
@@ -823,18 +831,33 @@ window.__ModuleLoader__.load({
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
         managerView: 'HTML manager',
-        managerTitle: 'HTML interfaces in this session',
-        managerClose: 'Close interface',
+        managerTitle: 'HTML programs in this session',
+        // 行的按钮：最小化/最大化是同一个按钮，文案跟着界面自己的隐藏状态走；其余两个
+        // 各做一件不可逆的事（关界面 / 结束进程），所以第一次点击只变成一句确认。
+        managerMinimize: 'Minimize',
+        managerMaximize: 'Maximize',
+        managerCloseUi: 'Close UI',
+        managerCloseUiHint: 'Destroys this interface; anything it held in memory goes with it. The process keeps running.',
+        managerRestartUi: 'Restart UI',
+        managerCloseBackend: 'Close backend task',
+        managerCloseSession: 'Close session',
+        managerConfirmCloseUi: 'Close it? Unsaved runtime state is lost',
+        managerConfirmCloseBackend: 'End the process? Its interfaces close too',
+        managerConfirmCloseSession: 'Close it? This cannot be undone',
+        managerUiClosed: 'UI closed',
+        managerUiClosedHint: 'The backend is still loaded; restart the UI to get the interface back.',
+        managerUiHiddenHint: 'Hidden by the interface’s own hide control — this is the same state.',
+        managerPlacementTitle: 'Show it again as',
+        managerHintHide: 'is the same hide the interface’s own control does.',
+        managerHintRest: 'Closing the interface throws it away and keeps its process; ending the process takes the interfaces with it.',
       managerRestoreUi: 'Restore interface',
-      managerRestoreUiHint: 'Open this project again in this session',
+      managerRestoreUiHint: 'Render this project again in this session',
       managerRestoreUiDone: 'Interface restored.',
       managerRestoreUiFailed: 'Could not restore that interface.',
         closeFailed: 'The host refused to remove it; it is still attached.',
-        managerRestore: 'Show',
         managerHidden: 'hidden',
         minimize: 'Hide the window',
-        managerCloseAll: 'Close all interfaces',
-        managerEmpty: 'This session has no HTML interface.',
+        managerEmpty: 'This session has no HTML program.',
         managerNew: 'New HTML project',
         create: 'Create',
         creating: 'Creating…',
@@ -868,9 +891,8 @@ window.__ModuleLoader__.load({
       // all, then whether it survives the panel. Both are about the same process, so both
       // live in the same form, and the hint names every way to stop it.
       residentSwitch: 'Resident',
-      residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
+      residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close backend task in its manager row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
-      managerBackends: 'Backend processes',
       backendWillIdle: 'Unloads on its own',
       backendResident: 'Resident',
       backendFollow: 'Follows the panel',
@@ -880,12 +902,11 @@ window.__ModuleLoader__.load({
       backendIdle: 'Not loaded',
       backendAllowed: 'Allowed',
       backendDenied: 'Not allowed',
-      stopBackend: 'Stop backend',
-      stopBackendHint: 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.',
-      managerBackendHint: 'Hiding or removing an interface does not stop its backend. A resident one keeps running until you press Stop backend.',
-      backendStopDone: 'Stopped the {slug} backend; opening that panel again loads it again.',
+      // 「停止后台」不再有独立按钮：它现在是管理器行上的「关闭后台任务」，并且会连带关掉该项目的界面。
       backendStopIdle: 'The {slug} backend was not running.',
       backendStopFailed: 'The host did not stop it; the backend may still be running.',
+      stopBackend: 'Stop backend',
+      stopBackendHint: 'Ends the process only, without withdrawing permission; opening its panel again loads it again.',
         securityStrict: 'Strict (default)',
         securityLocal: 'Own files only',
         securityOpen: 'Own files + network',
@@ -945,18 +966,33 @@ window.__ModuleLoader__.load({
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
         managerView: 'HTML管理器',
-        managerTitle: '本会话的 HTML 界面',
-        managerClose: '关闭 UI 界面',
+        managerTitle: '本会话的 HTML 程序',
+        // 一行的按钮：最小化/最大化共用一个位置，文案跟着界面自身的隐藏状态走；另外两个
+        // 各自做一件不可逆的事（关界面 / 结束进程），所以第一次点击只变成一句确认。
+        managerMinimize: '最小化',
+        managerMaximize: '最大化',
+        managerCloseUi: '关闭UI界面',
+        managerCloseUiHint: '销毁这个界面，它内存里的内容一并丢失；后台进程继续跑。',
+        managerRestartUi: '重启UI界面',
+        managerCloseBackend: '关闭后台任务',
+        managerCloseSession: '关闭会话',
+        managerConfirmCloseUi: '确认关闭界面？未保存的运行信息会丢',
+        managerConfirmCloseBackend: '确认结束进程？界面一起消失',
+        managerConfirmCloseSession: '确认关闭？无法恢复',
+        managerUiClosed: '界面已关闭',
+        managerUiClosedHint: '后台进程还加载着：点「重启UI界面」就能把界面找回来。',
+        managerUiHiddenHint: '这是界面自己的隐藏按钮造成的状态，两边就是同一个状态。',
+        managerPlacementTitle: '重新显示为',
+        managerHintHide: '和界面自身那个隐藏按钮是同一个状态。',
+        managerHintRest: '关闭界面丢掉界面、留下进程；结束进程会把界面一并带走。',
         managerRestoreUi: '恢复 UI 界面',
-        managerRestoreUiHint: '在本会话里重新打开这个项目',
+        managerRestoreUiHint: '在本会话里重新渲染这个项目',
         managerRestoreUiDone: '界面已恢复。',
         managerRestoreUiFailed: '界面恢复失败。',
         closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
-        managerRestore: '恢复显示',
         managerHidden: '已隐藏',
         minimize: '隐藏窗口',
-        managerCloseAll: '关闭全部 UI 界面',
-        managerEmpty: '本会话没有 HTML 界面。',
+        managerEmpty: '本会话没有 HTML 程序。',
         managerNew: '新建 HTML 项目',
         create: '创建',
         creating: '正在创建…',
@@ -987,9 +1023,8 @@ window.__ModuleLoader__.load({
         adoptBackendHint: '项目目录里的 server.js 会在 DSH 进程内运行，权限与本插件相同——等于完全信任它。',
         adoptBackendNone: '该项目没有后台：在项目目录放一个 server.js，并在 meta.json 里用 backend 字段指认它。',
         residentSwitch: '常驻',
-        residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想停它：用管理器行或项目行里的「停止后台」，或取消勾选这个开关 —— 两者都会当场卸载。',
+        residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想结束它：用管理器行里的「关闭后台任务」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
-        managerBackends: '后台进程',
         backendWillIdle: '空闲后自动卸载',
         backendResident: '常驻',
         backendFollow: '跟随面板',
@@ -999,10 +1034,9 @@ window.__ModuleLoader__.load({
         backendIdle: '未加载',
         backendAllowed: '已授权',
         backendDenied: '未授权',
+        // 「停止后台」不再有自己的按钮：它现在是管理器行上的「关闭后台任务」，并且会连带关掉该项目的界面。
         stopBackend: '停止后台',
-        stopBackendHint: '带后台的项目：「停止后台」只结束这个进程，不撤销授权；下次打开它的面板会重新加载。',
-        managerBackendHint: '隐藏或移除界面不等于停止后台：常驻的后台要按「停止后台」才会停。',
-        backendStopDone: '已停止 {slug} 的后台；再打开该面板会重新加载它。',
+        stopBackendHint: '只结束这个进程，不撤销授权；下次打开它的面板会重新加载。',
         backendStopIdle: '{slug} 的后台没有在跑。',
         backendStopFailed: '宿主没有停止它，后台可能还在跑。',
         securityStrict: '严格（默认）',
@@ -1418,6 +1452,21 @@ window.__ModuleLoader__.load({
     };
 
     /**
+     * A manager row's own button: the same look, a taller tap target.
+     *
+     * 手机优先 / 手机: three controls now share one row, so each one is 26px tall instead of 22 and
+     * keeps its label on one line — the difference between a row that can be operated with a thumb
+     * and one that needs a stylus.
+     */
+    const rowButtonStyle = Object.assign({}, buttonStyle, { minHeight: '26px', padding: '0 8px', whiteSpace: 'nowrap' });
+
+    /** The placement currently preselected in the restart picker. */
+    const rowButtonActiveStyle = {
+      borderColor: 'var(--dsw-alias-bg-accent, #247bbf)',
+      background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.08))',
+    };
+
+    /**
      * A chip: the small rounded mark a status reads as. Always a `span` and never a control —
      * a mark that looks like a button is one readers try to press, and the one pressable thing
      * in this family has a label that says what it does.
@@ -1482,29 +1531,6 @@ window.__ModuleLoader__.load({
           : null,
       );
       return marks;
-    }
-
-    /** The one control that ends a running backend process. Never a permission change. */
-    function stopBackendButton(slug, backend, onDone, extraStyle) {
-      return h(
-        'button',
-        {
-          type: 'button',
-          // Never disabled. Whether a backend is loaded is the host's fact, read from a catalogue
-          // that can be seconds old — and a greyed button on a process that is in fact running is
-          // exactly the state that made this control look broken. Stopping something that is not
-          // running is a no-op the host answers honestly, so the click is always allowed to ask.
-          style: Object.assign({}, buttonStyle, extraStyle ?? {}),
-          title: tr('stopBackendHint', 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.'),
-          'aria-label': `${tr('stopBackend', 'Stop backend')}: ${slug}`,
-          onClick: () => {
-            stopBackend(slug).then((result) => {
-              if (result !== null) onDone(result);
-            });
-          },
-        },
-        tr('stopBackend', 'Stop backend'),
-      );
     }
 
     const frameStyle = {
@@ -2551,12 +2577,413 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The session's HTML interfaces, listed where the reader already is.
+     * Which placements can be hidden at all.
      *
-     * A `background` layer is click-through by design and an `inline` one is seamless,
-     * so neither offers a control of its own; without this page a user has no way to
-     * remove what a model attached. `conversation.view` is the shipped seat for a
-     * session-scoped page like this one, and its label is the row it appears in.
+     * `background` is a click-through layer and `inline` lives in the conversation, so neither
+     * has anything a "minimize" could mean; every other form carries a control of its own on the
+     * surface itself. The manager offers minimize/maximize exactly for the forms that have one,
+     * so its button never disagrees with the surface about whether something can be put away.
+     */
+    function managerCanHide(record) {
+      if (record.placement === 'float' || record.placement === 'fullscreen') return true;
+      // dock-right is the right column's tab. With no controller bound the record falls back to
+      // the composer dock, which has no hide of its own — so there is nothing to mirror there.
+      return record.placement === 'dock-right' && rightPaneReady();
+    }
+
+    /**
+     * Whether one interface is currently hidden — the *same* state its own hide control writes.
+     *
+     * Three forms, three stores, one question: a float is minimized through `state.hidden`, a
+     * fullscreen one through `state.fullscreenDismissed` ("back to chat") and a right-column one
+     * through `state.collapsed` (the frame's own collapse). Reading all three here is what makes
+     * the manager's label follow the surface instead of a copy of it that drifts.
+     */
+    function recordHidden(record) {
+      if (record.placement === 'float') return state.hidden.has(record.uiId);
+      if (record.placement === 'fullscreen') return state.fullscreenDismissed.has(record.uiId);
+      if (record.placement === 'dock-right') return state.collapsed.get(record.uiId) === true;
+      return false;
+    }
+
+    /**
+     * Hide or show one interface, by writing the very state its own control writes.
+     *
+     * Deliberately not a second mechanism: `restoreRecord` is the one the session page already
+     * uses to bring each form back, and the hide branch below mirrors `HtmlUiFrame`'s minimize —
+     * so pressing the manager's button leaves both sides in the same place, in both directions.
+     */
+    function toggleRecord(record, props) {
+      const hidden = recordHidden(record);
+      if (record.placement === 'dock-right') {
+        if (!rightPaneReady()) return;
+        if (hidden) openRightPane(record.uiId);
+        else toggleCollapsed(record.uiId);
+        return;
+      }
+      if (record.placement === 'float') {
+        if (hidden) state.hidden.delete(record.uiId);
+        else state.hidden.add(record.uiId);
+        bump();
+        return;
+      }
+      if (record.placement === 'fullscreen') {
+        if (hidden) {
+          state.fullscreen = record.uiId;
+          state.fullscreenDismissed.delete(record.uiId);
+        } else {
+          state.fullscreen = null;
+          state.fullscreenDismissed.add(record.uiId);
+        }
+        bump();
+        return;
+      }
+      if (!hidden) restoreRecord(record, props);
+    }
+
+    /** 名称（slug）: the project's human name, and the id it is addressed by when they differ. */
+    function managerTitleOf(template, record) {
+      const slug =
+        template !== undefined && typeof template.slug === 'string' && template.slug.length > 0
+          ? template.slug
+          : typeof record?.template === 'string'
+            ? record.template
+            : '';
+      const name =
+        template !== undefined && typeof template.name === 'string' && template.name.length > 0
+          ? template.name
+          : record !== undefined && typeof record.title === 'string' && record.title.length > 0
+            ? record.title
+            : slug;
+      if (name.length === 0) return '';
+      return slug.length === 0 || name === slug ? name : `${name}（${slug}）`;
+    }
+
+    /** Whether a project's process is still there, as far as this catalogue reading goes. */
+    function managerBackendLive(backend) {
+      if (backend === undefined) return false;
+      return backend.loaded === true;
+    }
+
+    /**
+     * Where a restart should put the interface back.
+     *
+     * The reader's last word on this project wins: where the interface is right now (they are
+     * restarting *that*), else the placement the catalogue remembers it was last opened with,
+     * else what its manifest declares. The create dialog's own default is the floor, so the
+     * picker always opens on a chosen option rather than on none.
+     */
+    function managerPlacementFor(template, record) {
+      const candidates = [record === undefined ? undefined : record.placement, template === undefined ? undefined : template.placementLast, template === undefined ? undefined : template.placement];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+      }
+      return 'dock-right';
+    }
+
+    /**
+     * One program per row — the whole point of this page.
+     *
+     * The old model drew an interface row plus a separate "backend processes" section, which
+     * meant one project could appear twice with two different sets of controls. Here a session's
+     * records are grouped by the project they came from, and a project whose backend is still
+     * live keeps its row even with no interface at all: that is exactly the state left behind by
+     * 「关闭UI界面」, and it is where 「重启UI界面」 lives.
+     */
+    function managerRowsFor(sessionId) {
+      const records = sessionId === undefined ? [] : recordsFor(sessionId);
+      const rows = new Map();
+      for (const record of records) {
+        // The key is the project id, and never the uiId: several interfaces from one project are
+        // one program with one process. A record built from a path or the blank canvas names no
+        // project, so it is a program of its own.
+        const key = typeof record.template === 'string' && record.template.length > 0 ? record.template : `ui:${record.uiId}`;
+        const row = rows.get(key);
+        if (row === undefined) rows.set(key, { key, slug: typeof record.template === 'string' ? record.template : '', template: undefined, records: [record] });
+        else row.records.push(record);
+      }
+      const items = Array.isArray(state.templates.items) ? state.templates.items : [];
+      for (const template of items) {
+        const slug = typeof template.slug === 'string' ? template.slug : '';
+        if (slug.length === 0) continue;
+        const backend = backendInfoOf(template);
+        if (backend === undefined || backend.declared !== true) continue;
+        const row = rows.get(slug);
+        if (row === undefined) {
+          // No interface in this session, so the row exists only because the process does. Two
+          // cases, and both are honest: the catalogue says it is loaded right now, or this session
+          // closed its interface on purpose (which is remembered until the process is really gone).
+          // A project that is merely declared, never opened here and not running, is somebody
+          // else's — listing it in every session's manager would be a row this session cannot act on.
+          if (!managerBackendLive(backend) && !state.dismissedTemplates.has(slug)) continue;
+          rows.set(slug, { key: slug, slug, template, records: [] });
+        } else {
+          row.template = template;
+        }
+      }
+      return Array.from(rows.values());
+    }
+
+    /**
+     * One row's two-step confirmation.
+     *
+     * No modal: the confirmation is the button itself, which is where the reader is already
+     * looking and which cannot be missed behind an overlay. Three seconds of no second press
+     * restores the original label, because a control left saying 「确认…」 forever is a trap.
+     */
+    function HtmlUiManagerRow(props) {
+      const { row, sessionId, onStatus } = props;
+      // Local by design: a confirmation belongs to the row in front of the reader, and it must
+      // not survive a re-render of the page or leak into another project's row.
+      const [armedState, setArmedState] = useState(null);
+      const [pickingState, setPickingState] = useState(false);
+      // Which placement a chosen restart actually used. Kept so the last choice stays marked
+      // while the host tears the old records down and the new surface comes up.
+      const [placementPicked, setPlacementPicked] = useState(null);
+      // `armed` and `placementPicking` as props override the row's own state: the three-step
+      // machine (idle → 确认 → act) and the placement question are then readable from one shallow
+      // render each, with no timer and no second mount. The live page never passes either.
+      const controlled = props.armed !== undefined;
+      const armed = controlled ? props.armed : armedState;
+      const setArmed = controlled ? () => {} : setArmedState;
+      const pickingControlled = props.placementPicking !== undefined;
+      const placementPicking = pickingControlled ? props.placementPicking : pickingState;
+      const setPlacementPicking = pickingControlled ? () => {} : setPickingState;
+      useEffect(() => {
+        if (controlled || armed === null) return undefined;
+        // 3 seconds, then back to the original label: a control left saying 「确认…」 forever is
+        // the trap this whole interaction exists to avoid.
+        const timer = setTimeout(() => setArmed(null), 3000);
+        return () => clearTimeout(timer);
+      }, [armed, controlled]);
+
+      const records = row.records;
+      const template = row.template;
+      const backend = template === undefined ? undefined : backendInfoOf(template);
+      const hasBackend = backend !== undefined && backend.declared === true;
+      // `open` here means "this program has an interface on screen right now", which is what the
+      // interface button's two jobs key off.
+      const open = records.length > 0;
+      const shown = records.find((record) => !recordHidden(record));
+      const hidden = open && shown === undefined;
+      // The one interface the hide control acts on: a visible one if there is any, otherwise the
+      // first record — a row whose every interface is put away still has something to bring back.
+      const hider = shown ?? records[0];
+      const canHide = hider !== undefined && managerCanHide(hider);
+      const title = managerTitleOf(template, records[0]);
+      const armedLabel =
+        armed === 'close-ui'
+          ? tr('managerConfirmCloseUi', 'Close it? Unsaved runtime state is lost')
+          : armed === 'close-backend'
+            ? tr('managerConfirmCloseBackend', 'End the process? Its interfaces close too')
+            : armed === 'close-session'
+              ? tr('managerConfirmCloseSession', 'Close it? This cannot be undone')
+              : null;
+      const confirmThen = (key, act) => () => {
+        if (armed !== key) {
+          setArmed(key);
+          return;
+        }
+        setArmed(null);
+        act();
+      };
+
+      /** Close every interface of this project: the record goes, the process (if any) does not. */
+      const closeUi = () => {
+        // Remembered, so the row survives the catalogue refresh that follows: the process is still
+        // loaded and 「重启UI界面」 is how the reader gets the interface back.
+        if (row.slug.length > 0) state.dismissedTemplates.add(row.slug);
+        for (const record of records) dismissRecord(record.uiId);
+      };
+      /** End the process *and* its interfaces: a window onto nothing is a window nobody can reach. */
+      const closeBackend = () => {
+        if (row.slug.length > 0) state.dismissedTemplates.delete(row.slug);
+        closeUi();
+        onStatus(null);
+        stopBackend(row.slug).then((result) => {
+          if (result !== null && result.message.length > 0) onStatus(result.message);
+        });
+      };
+      const openPicker = () => {
+        setPlacementPicking(true);
+        // 预选上次用的 placement: reopening a project the way it was is the whole point of a
+        // restart, and being asked again with nothing selected is a question with no default.
+        setPlacementPicked(managerPlacementFor(template, hider));
+      };
+      const renderAgain = (chosen) => {
+        setPlacementPicking(false);
+        setPlacementPicked(chosen);
+        // Close whatever is up first, so the chosen placement is the only copy. The render waits
+        // for the host to tear the old records down: the host remembers one placement per project,
+        // and a render that overtakes the close leaves the old surface drawn where it was.
+        for (const record of records) dismissRecord(record.uiId);
+        setTimeout(() => {
+          applyTemplate(row.slug, sessionId, chosen).then((ok) => {
+            onStatus(ok ? tr('managerRestoreUiDone', 'Interface restored.') : tr('managerRestoreUiFailed', 'Could not restore that interface.'));
+          });
+        }, 120);
+      };
+
+      const controls = [];
+      if (canHide) {
+        // One button, two words: 最小化 while the surface is up, 最大化 once it is put away. Both
+        // write the state the surface's own control writes, so the two are never out of step.
+        controls.push(
+          h(
+            'button',
+            {
+              key: 'hide',
+              type: 'button',
+              style: rowButtonStyle,
+              title: hidden ? tr('managerUiHiddenHint', 'Hidden by the interface’s own hide control — this is the same state.') : undefined,
+              'aria-label': `${hidden ? tr('managerMaximize', 'Maximize') : tr('managerMinimize', 'Minimize')}: ${title}`,
+              onClick: () => toggleRecord(hider, props),
+            },
+            hidden ? tr('managerMaximize', 'Maximize') : tr('managerMinimize', 'Minimize'),
+          ),
+        );
+      }
+      if (hasBackend) {
+        // One position, two jobs: with an interface up it closes it; with none it brings one back.
+        // The confirm label only ever replaces 关闭UI界面 — 重启UI界面 is not destructive, so it
+        // goes straight to asking where.
+        const uiLabel = armed === 'close-ui' && open ? armedLabel : open ? tr('managerCloseUi', 'Close UI') : tr('managerRestartUi', 'Restart UI');
+        controls.push(
+          h(
+            'button',
+            {
+              key: 'ui',
+              type: 'button',
+              style: rowButtonStyle,
+              title: open
+                ? tr('managerCloseUiHint', 'Destroys this interface; anything it held in memory goes with it. The process keeps running.')
+                : tr('managerUiClosedHint', 'The backend is still loaded; restart the UI to get the interface back.'),
+              'aria-label': `${uiLabel}: ${title}`,
+              onClick: open ? confirmThen('close-ui', closeUi) : openPicker,
+            },
+            uiLabel,
+          ),
+        );
+        controls.push(
+          h(
+            'button',
+            {
+              key: 'backend',
+              type: 'button',
+              style: rowButtonStyle,
+              'aria-label': `${tr('managerCloseBackend', 'Close backend task')}: ${title}`,
+              onClick: confirmThen('close-backend', closeBackend),
+            },
+            armed === 'close-backend' ? armedLabel : tr('managerCloseBackend', 'Close backend task'),
+          ),
+        );
+      } else {
+        // No process to keep alive: closing the interface and closing the session record are one act.
+        controls.push(
+          h(
+            'button',
+            {
+              key: 'session',
+              type: 'button',
+              style: rowButtonStyle,
+              'aria-label': `${tr('managerCloseSession', 'Close session')}: ${title}`,
+              onClick: confirmThen('close-session', closeUi),
+            },
+            armed === 'close-session' ? armedLabel : tr('managerCloseSession', 'Close session'),
+          ),
+        );
+      }
+
+      return h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            // 手机优先 / 手机: a little more air per program, and a light rule under it so rows that
+            // wrap to three lines do not read as one block.
+            padding: '10px 12px',
+            borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
+          },
+        },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) }, title),
+          // The state marks: what this program is (带后台 and its residency), what the process is
+          // doing (已加载/未加载), and whether an interface is open at all. All of them come from
+          // the catalogue's `backend` field — nothing here invents a state of its own.
+          hasBackend ? chip(tr('backendBadge', 'Backend'), 'badge') : null,
+          hasBackend ? chip(tr('backendAllowed', 'Allowed'), 'allowed') : null,
+          ...(backend === undefined ? [] : backendChips(backend, false)),
+          open
+            ? null
+            : h(
+                'span',
+                {
+                  key: 'closed',
+                  style: chipStyle,
+                  title: tr('managerUiClosedHint', 'The backend is still loaded; restart the UI to get the interface back.'),
+                },
+                tr('managerUiClosed', 'UI closed'),
+              ),
+          records.length > 1 ? chip(`×${records.length}`, 'count') : null,
+        ),
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+          h(
+            'span',
+            { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
+            open ? records.map((record) => record.placement).join(' · ') : '—',
+          ),
+          h(
+            'span',
+            { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
+            hidden ? tr('managerHidden', 'hidden') : '',
+          ),
+          h('span', { style: { flex: '1 1 auto' } }),
+          ...controls,
+        ),
+        // 重启UI界面 asks where before it re-renders: the same choices, and the same words, the
+        // create dialog offers — a reader who picked 全屏 once should not have to learn a second
+        // vocabulary to get it back.
+        placementPicking
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' } },
+              h('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerPlacementTitle', 'Show it again as')),
+              h(
+                'div',
+                { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } },
+                ...CREATE_PLACEMENTS.map((entry) =>
+                  h(
+                    'button',
+                    {
+                      key: entry.value,
+                      type: 'button',
+                      style: Object.assign({}, rowButtonStyle, entry.value === (placementPicked ?? managerPlacementFor(template, hider)) ? rowButtonActiveStyle : null),
+                      onClick: () => renderAgain(entry.value),
+                    },
+                    tr(entry.key, entry.fallback),
+                  ),
+                ),
+                h('button', { key: 'cancel', type: 'button', style: rowButtonStyle, onClick: () => setPlacementPicking(false) }, tr('cancel', 'Cancel')),
+              ),
+            )
+          : null,
+      );
+    }
+
+    /**
+     * The session's HTML programs, listed where the reader already is.
+     *
+     * One row per program — interface open or not — because the process behind it is what outlives
+     * every panel, and the row is the only place left that can end it. `background` is
+     * click-through by design and `inline` is seamless, so without this page a user has no way to
+     * remove what a model attached; `conversation.view` is the shipped seat for a session-scoped
+     * page like this one, and its label is the row it appears in.
      */
     function HtmlUiManager(props) {
       useStore();
@@ -2569,7 +2996,8 @@ window.__ModuleLoader__.load({
       // only place left that can end it — and "is it loaded" is a fact only the host has. The
       // catalogue is therefore re-read while this page is open, not once per mount: a panel that
       // started a second ago loaded its backend without telling anyone here, and a control disabled
-      // by a stale reading is worse than no control at all.
+      // by a stale reading is worse than no control at all. A hidden page asks for nothing: nobody
+      // is reading the answer.
       useEffect(() => {
         if (backendCatalogueStale()) loadTemplates();
         const timer = setInterval(() => {
@@ -2577,103 +3005,15 @@ window.__ModuleLoader__.load({
         }, 5000);
         return () => clearInterval(timer);
       }, []);
-      const records = sessionId === undefined ? [] : recordsFor(sessionId);
-      // The backend a row belongs to: a record built from a path or the blank canvas names no
-      // project, and one whose project declares no backend has nothing to say — both draw none
-      // of the marks below rather than a row of empty chips.
-      const backendOfRecord = (record) => {
-        const backend = record.template === undefined ? undefined : backendInfoOf(templateBySlug(record.template));
-        return backend !== undefined && backend.declared === true ? backend : undefined;
-      };
-      const anyBackend = records.some((record) => backendOfRecord(record) !== undefined);
-      const rows = records.map((record) => {
-        const backend = backendOfRecord(record);
-        return h(
-          'div',
-          {
-            key: record.uiId,
-            style: {
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '4px',
-              // 手机优先 / 三行一条: a little more air than before, and a light line under each
-              // process, so rows that now take three lines do not read as one block.
-              padding: '10px 12px',
-              borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
-            },
-          },
-          // 1 · What it is.
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
-            h(
-              'span',
-              { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) },
-              // 计算器(jsq): the title a reader recognises, then the project it came from, so
-              // two interfaces built from the same project are told apart at a glance.
-              `${record.title.length > 0 ? record.title : record.uiId}${record.template !== undefined ? `(${record.template})` : ''}`,
-            ),
-            state.hidden.has(record.uiId)
-              ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
-              : null,
-          ),
-          // 2 · The process itself — where it sits, which revision, which interface — and then its
-          // state pushed to the right edge, where the three marks read as one answer.
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
-            h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.placement),
-            h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `r${record.revision}`),
-            h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, record.uiId),
-            h('span', { style: { flex: '1 1 auto' } }),
-            // The project's backend: the state a reader cannot see unless it is said. 常驻 is the
-            // whole reason the control below exists — that state outlives the panel.
-            backend === undefined
-              ? null
-              : h(
-                  'span',
-                  { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
-                  chip(tr('backendBadge', 'Backend'), 'badge'),
-                  ...backendChips(backend, false),
-                ),
-          ),
-          // 3 · The controls.
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
-            backend === undefined
-              ? null
-              : stopBackendButton(record.template, backend, (result) => setStatus(result.message)),
-            // Every form that can be out of sight gets the same control, with the same words.
-            // Two forms have none: a background layer is always on screen, and an inline
-            // surface lives in the conversation and is never hidden — offering "Show" for it
-            // was a button that could not do anything. Both are removed with the control
-            // beside this one.
-            record.placement === 'background' || record.placement === 'inline'
-              ? null
-              : h(
-                  'button',
-                  { type: 'button', style: buttonStyle, onClick: () => restoreRecord(record, props) },
-                  tr('managerRestore', 'Show'),
-                ),
-            h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
-          ),
-        );
-      });
-      // Loaded backends this page has no interface for. They are what makes 停止后台 a control that
-      // must not be attached to a record: the record can be removed while the process keeps running.
-      const orphans = (state.templates.items ?? []).filter((template) => {
-        const info = backendInfoOf(template);
-        if (info === undefined || info.loaded !== true) return false;
-        return records.some((record) => record.template === template.slug) !== true;
-      });
+      const rows = managerRowsFor(sessionId);
+      const interfaceCount = rows.reduce((total, row) => total + row.records.length, 0);
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', padding: '10px 12px' } },
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' } },
-          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML interfaces in this session')} (${records.length})`),
+          { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' } },
+          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML programs in this session')} (${rows.length})`),
           // The same create flow the composer control opens. A reader who cannot find a
           // small control beside the composer should not have to hunt for the way in.
           h(
@@ -2691,99 +3031,22 @@ window.__ModuleLoader__.load({
             },
             tr('managerNew', 'New HTML project'),
           ),
-          records.length > 0
-            ? h(
-                'button',
-                {
-                  type: 'button',
-                  style: buttonStyle,
-                  onClick: () => {
-                    for (const record of records) dismissRecord(record.uiId);
-                  },
-                },
-                tr('managerCloseAll', 'Remove all'),
-              )
-            : null,
         ),
+        // Said in the header, not on a row: a stop that worked needs no sentence (the row
+        // disappearing is the whole answer) and the two cases where nothing visibly happened —
+        // nothing was running, or the stop failed — have to speak up somewhere the reader looks.
         status === null
           ? null
           : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, String(status)),
-        records.length === 0
-          ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML interface.'))
-          : h('div', null, ...rows),
-        // A resident backend outlives the interface that started it, so the interface's row cannot be
-        // the only place the reader can stop it: removing a panel here — or closing it from anywhere
-        // else — would take the one control with it. Projects whose backend is loaded are therefore
-        // listed on their own, whether or not this session still has an interface of theirs.
-        orphans.length === 0
+        rows.length === 0
+          ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML program.'))
+          : h('div', null, ...rows.map((row) => h(HtmlUiManagerRow, { key: row.key, row, sessionId, props, onStatus: setStatus }))),
+        interfaceCount === 0
           ? null
           : h(
               'div',
-              { style: { marginTop: '12px' } },
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' } },
-                h('span', { style: titleStyle }, tr('managerBackends', 'Backend processes')),
-                h(
-                  'span',
-                  { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
-                  tr('managerBackendHint', 'Hiding or removing an interface does not stop its backend. A resident one keeps running until you press Stop backend.'),
-                ),
-              ),
-              h(
-                'div',
-                null,
-                ...orphans.map((template) => {
-                  const info = backendInfoOf(template);
-                  return h(
-                    'div',
-                    {
-                      key: `backend-${template.slug}`,
-                      style: {
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '4px',
-                        padding: '10px 12px',
-                        borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
-                      },
-                    },
-                    h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
-                      h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) }, templateListItem(template)),
-                      h('span', { style: { flex: '1 1 auto' } }),
-                      chip(tr('backendBadge', 'Backend'), 'badge'),
-                      ...backendChips(info, false),
-                    ),
-                    h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
-                      stopBackendButton(template.slug, info, (result) => setStatus(result.message)),
-                      // The other half of "closing an interface does not stop its backend": the process
-                      // is still there, so its interface can be brought back from here instead of being
-                      // hunted down in the drawer. The project's own declared placement is used, which
-                      // is what the reader chose when they imported it.
-                      h(
-                        'button',
-                        {
-                          type: 'button',
-                          style: buttonStyle,
-                          title: tr('managerRestoreUiHint', 'Open this project again in this session'),
-                          onClick: () => {
-                            // Reopened the way it was: the catalogue carries the placement this
-                            // project was last opened with, and the manager is where a reader
-                            // restores an interface whose record is already gone.
-                            applyTemplate(template.slug, sessionId, template.placementLast).then((ok) => {
-                              setStatus(ok ? tr('managerRestoreUiDone', 'Interface restored.') : tr('managerRestoreUiFailed', 'Could not restore that interface.'));
-                            });
-                          },
-                        },
-                        tr('managerRestoreUi', 'Restore interface'),
-                      ),
-                    ),
-                  );
-                }),
-              ),
+              { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginTop: '8px' } },
+              `${tr('managerMinimize', 'Minimize')} / ${tr('managerMaximize', 'Maximize')} ${tr('managerHintHide', 'is the same hide the interface’s own control does.')} ${tr('managerHintRest', 'Closing the interface throws it away and keeps its process; ending the process takes the interfaces with it.')}`,
             ),
       );
     }
@@ -4055,13 +4318,10 @@ window.__ModuleLoader__.load({
                   ? h(
                       'div',
                       { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '3px' } },
-                      // This list is the authoritative way to stop a backend: it lists the projects
-                      // themselves, so it is still here after the panel — and the manager row — are gone.
-                      // The indent lines the button up under the project name rather than under the radio.
-                      stopBackendButton(template.slug, backend, (result) => {
-                        state.templates.notice = result.message;
-                        bump();
-                      }, { marginLeft: '10px' }),
+                      // 项目管理 only: this drawer is where a project is created, picked and edited.
+                      // Ending a process belongs to the manager row — one place, next to the
+                      // interface it belongs to — so the drawer keeps the marks and the pencil and
+                      // nothing that acts on a running backend.
                       h('span', { style: { flex: '1 1 auto' } }),
                       ...backendChips(backend, true),
                     )
@@ -4069,14 +4329,6 @@ window.__ModuleLoader__.load({
               );
             }),
           ),
-          // Said once under the list rather than on every row: there is exactly one thing to
-          // understand here, and it is that 停止后台 is not 取消授权.
-          items.some((template) => {
-            const info = backendInfoOf(template);
-            return info !== undefined && info.declared === true;
-          })
-            ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } }, tr('stopBackendHint', 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.'))
-            : null,
           h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createPlacement', 'Where')),
           h(
             'div',
@@ -4390,7 +4642,7 @@ window.__ModuleLoader__.load({
                                   // its own. Stopping it is still said where the button is.
                                   title: tr(
                                     'residentHint',
-                                    'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
+                                    'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close backend task in its manager row, or uncheck this switch — either unloads it right away.',
                                   ),
                                 },
                                 tr('residentSwitch', 'Resident'),
@@ -4962,6 +5214,15 @@ window.__ModuleLoader__.load({
         HtmlUiTemplateDrawer,
         HtmlUiCreateDialog,
         HtmlUiManager,
+        // The row is the unit the manager is built from — one program, its marks and its
+        // controls — so it is exported on its own: a test can render one row for each state
+        // (interface open, closed, hidden) instead of inferring those states from the page.
+        HtmlUiManagerRow,
+        managerRowsFor,
+        managerTitleOf,
+        managerPlacementFor,
+        recordHidden,
+        toggleRecord,
         HtmlUiTemplateButton,
         HtmlUiInlineTail,
         InlineSeat,
