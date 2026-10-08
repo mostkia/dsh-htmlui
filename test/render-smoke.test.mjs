@@ -1033,3 +1033,204 @@ test('a floating window is fitted to the viewport it is drawn in', () => {
 
   viewport(1280, 800);
 });
+
+// ------------------------------------------------------- project backends (keepAlive)
+
+/**
+ * One catalogue row for a project that ships a backend, as the host reports it: declared,
+ * allowed, resident and running. The marks the UI draws all hang off these four booleans.
+ */
+const backendProject = (overrides = {}) => ({
+  slug: 'heimiao',
+  name: '黑喵',
+  description: '',
+  bytes: 1,
+  backend: Object.assign({ declared: true, allowed: true, resident: true, loaded: true }, overrides),
+});
+
+/** The catalogue is shared state; every test that needs one sets the whole shape. */
+function setCatalogue(items) {
+  state.templates = {
+    open: true,
+    loaded: true,
+    loadedAt: Date.now(),
+    items,
+    candidates: [],
+    error: null,
+    dir: '/opt/html-templates',
+    configured: true,
+    asked: true,
+    savingDir: false,
+    adopting: '',
+    notice: null,
+  };
+}
+
+/**
+ * Render with our own Chinese table active. These assertions are about the words a reader
+ * reads, and the default in this harness is English — the table has to be the one in play.
+ */
+function withChinese(fn) {
+  const previous = document.documentElement.lang;
+  document.documentElement.lang = 'zh';
+  try {
+    return fn();
+  } finally {
+    document.documentElement.lang = previous;
+  }
+}
+
+const buttonsLabelled = (tree, label) =>
+  tree.elements.filter((element) => element.type === 'button' && Array.isArray(element.children) && element.children[0] === label);
+
+const checkboxes = (tree) => tree.elements.filter((element) => element.type === 'input' && element.props?.type === 'checkbox');
+
+test('a resident backend is marked on the project row and in the manager, and can be stopped from both', () => {
+  resetStore();
+  resetCreate();
+  const declared = backendProject();
+  const undeclared = { slug: 'plain', name: '平静', description: '', bytes: 1, backend: { declared: false, allowed: false, resident: false, loaded: false } };
+  const silent = { slug: 'bare', name: 'bare', description: '', bytes: 1 };
+  setCatalogue([declared, undeclared, silent]);
+  state.create.open = true;
+
+  withChinese(() => {
+    // The drawer's project list is the authoritative way to end a backend: it lists projects,
+    // not interfaces, so it is still here after every panel — and every manager row — is gone.
+    const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+    for (const text of ['常驻', '已加载', '已授权', '关掉面板也不会停']) {
+      assert.ok(dialog.text.includes(text), `the project row says ${text}`);
+    }
+    const stops = buttonsLabelled(dialog, '停止后台');
+    assert.equal(stops.length, 1, 'one stop control, for the only project that has a backend');
+    assert.equal(stops[0].props.disabled, false, 'a loaded backend can be stopped');
+    assert.ok(dialog.text.includes('只结束这个进程，不撤销授权'), 'and the list says what stopping does not do');
+
+    // A project that declares no backend, and one whose row says nothing about backends at all,
+    // get no marks: an empty chip would read as a state nobody can act on.
+    setCatalogue([undeclared, silent]);
+    const without = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+    for (const mark of ['常驻', '跟随面板', '已加载', '未加载', '已授权', '未授权', '停止后台']) {
+      assert.ok(!without.text.includes(mark), `a project with no backend shows no ${mark}`);
+    }
+    setCatalogue([declared, undeclared, silent]);
+
+    // The manager lists interfaces, so the backend has to be named there too — and the row is
+    // where 隐藏/移除 sits, which is exactly the control a reader mistakes for stopping it.
+    resetStore([
+      __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+      __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000002', sessionId: 'session-1', title: '手写', placement: 'float', template: 'plain', revision: 1, bytes: 5 }, undefined),
+      __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000003', sessionId: 'session-1', title: '空', placement: 'float', revision: 1, bytes: 5 }, undefined),
+    ]);
+    const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    assert.ok(manager.text.includes('带后台'), 'the row says the project has a backend');
+    assert.ok(manager.text.includes('常驻') && manager.text.includes('已加载'), 'and what state that backend is in');
+    assert.ok(manager.text.includes('隐藏或移除界面不等于停止后台'), 'hiding is not stopping, said where both controls are');
+    assert.equal(buttonsLabelled(manager, '停止后台').length, 1, 'and the one control that does stop it');
+    for (const mark of ['未加载', '跟随面板', '已授权', '未授权']) {
+      assert.ok(!manager.text.includes(mark), `the manager shows no backend mark for a project that declares none (${mark})`);
+    }
+    resetStore();
+  });
+  resetCreate();
+});
+
+test('the resident switch is offered only for a declared backend that may run', () => {
+  resetStore();
+  resetCreate();
+  // The project's effective answer is 跟随面板: an edit must open showing that, or the next
+  // save would turn 常驻 back on for a reader who had already turned it off.
+  setCatalogue([backendProject({ resident: false, loaded: false })]);
+  state.create.open = true;
+  const form = (adopt) => {
+    state.adopt = Object.assign(
+      { open: true, existing: true, source: 'heimiao', slug: 'heimiao', name: '黑喵', description: '', placement: 'dock-right', security: 'strict', busy: false },
+      adopt,
+    );
+    return render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  };
+
+  withChinese(() => {
+    // Nothing to run: no switches at all, and nothing said about 常驻.
+    const undeclared = form({ backendDeclared: false, backend: false, resident: false });
+    assert.equal(checkboxes(undeclared).length, 0, 'no backend, no switches');
+    assert.ok(!undeclared.text.includes('常驻'), 'and nothing about 常驻');
+
+    // Declared but not yet allowed: the allowance is the only question on the table, because
+    // a process that may not run has nothing to keep resident.
+    const notAllowed = form({ backendDeclared: true, backend: false, resident: true });
+    assert.equal(checkboxes(notAllowed).length, 1, 'only the allowance switch');
+    assert.ok(!notAllowed.text.includes('常驻（关掉面板也继续跑）'), 'and no resident switch before the backend may run');
+
+    // Allowed: both switches, the second starting from the host's effective value.
+    const allowed = form({ backendDeclared: true, backend: true, resident: true });
+    const boxes = checkboxes(allowed);
+    assert.equal(boxes.length, 2, 'the allowance and the resident switch');
+    assert.equal(boxes[1].props.checked, true, 'an edit starts from what the host reports');
+    assert.ok(allowed.text.includes('常驻（关掉面板也继续跑）'), 'the switch says what it does');
+    assert.ok(allowed.text.includes('关掉面板也会继续跑'), 'the hint repeats what checked means');
+    assert.ok(allowed.text.includes('停止后台'), 'and names the controls that stop it');
+    // Unchecking it is one of those ways: the box is the value the form carries to the host.
+    boxes[1].props.onChange({ target: { checked: false } });
+    assert.equal(state.adopt.resident, false, 'the box is the value the form submits');
+
+    // The pencil reopens the form on an existing project: it must start from that project's
+    // effective answer, which the host reports as 跟随面板.
+    state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
+    const pencil = buttonsLabelled(render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' }), '✎');
+    assert.equal(pencil.length, 1, 'the project row keeps its pencil');
+    pencil[0].props.onClick();
+    assert.equal(state.adopt.resident, false, 'the form starts from the project\u2019s effective answer');
+    assert.equal(checkboxes(render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' }))[1].props.checked, false, 'and so does its switch');
+
+    // Adopting a folder that ships a server.js: its metadata is not read yet, and what it
+    // declares is 常驻, so the default follows the declaration.
+    resetCreate();
+    state.create.open = true;
+    state.templates.candidates = [{ kind: 'dir', name: 'with-server', html: 1, server: true }];
+    const adopt = buttonsLabelled(render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' }), '设为项目');
+    assert.equal(adopt.length, 1, 'the copied-in folder is offered');
+    adopt[0].props.onClick();
+    assert.equal(state.adopt.backendDeclared, true, 'the folder declares a backend');
+    assert.equal(state.adopt.resident, true, 'and a new project defaults to what it declares');
+  });
+  state.templates.candidates = [];
+  resetCreate();
+});
+
+test('stopping a backend posts the stop route, and the row behind the message agrees with it', async () => {
+  // The route is the contract the host half implements: only the project id rides along, so a
+  // stop can never double as a permission change, and the catalogue is re-read afterwards —
+  // the message and the 已加载/未加载 mark come from different answers otherwise.
+  const realFetch = globalThis.fetch;
+  const saved = Object.assign({}, state.templates);
+  const calls = [];
+  let stopped = true;
+  globalThis.fetch = (url, options) => {
+    const text = String(url);
+    calls.push({ url: text, body: JSON.parse(options.body) });
+    const payload = text.endsWith('/templates/backend/stop')
+      ? { ok: true, slug: 'heimiao', stopped, allowed: true, declared: true, resident: true }
+      : { ok: true, templates: [backendProject({ loaded: !stopped })], candidates: [] };
+    return Promise.resolve({ json: () => Promise.resolve(payload) });
+  };
+  try {
+    const result = await __internals.stopBackend('heimiao');
+    assert.ok(calls[0].url.endsWith('/templates/backend/stop'), 'the stop route is the one that is called');
+    assert.deepEqual(calls[0].body, { slug: 'heimiao' }, 'and it carries the project id and nothing else');
+    assert.equal(result.ok, true);
+    assert.equal(result.stopped, true, 'the answer says a process really ended');
+    assert.match(result.message, /heimiao/u, 'and names the project it happened to');
+    assert.ok(calls.some((call) => call.url.endsWith('/templates')), 'the catalogue is re-read, so the row agrees with the message');
+
+    // A backend that was already gone is not a failure, and is not reported as one.
+    stopped = false;
+    const idle = await __internals.stopBackend('heimiao');
+    assert.equal(idle.ok, true, 'nothing to stop is not an error');
+    assert.match(idle.message, /not running/u, 'and it says so instead of claiming a stop');
+  } finally {
+    globalThis.fetch = realFetch;
+    state.templates = saved;
+  }
+});
+

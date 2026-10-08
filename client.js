@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
      * constant is the only place the client states its version, and `package.test.mjs` holds it
      * to the packaged one.
      */
-    const CLIENT_VERSION = '0.1.3';
+    const CLIENT_VERSION = '0.1.4';
     const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (${CLIENT_VERSION})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its
@@ -237,14 +237,14 @@ window.__ModuleLoader__.load({
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
-      templates: { open: false, loaded: false, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null },
+      templates: { open: false, loaded: false, loadedAt: 0, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null },
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       /**
        * The manifest form, shared by adopting a copied-in folder and editing an existing
        * project: `existing` decides whether it creates or saves over one.
        */
-      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, busy: false },
+      adopt: { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false },
       listeners: new Set(),
       revision: 0,
       theme: 'light',
@@ -860,6 +860,26 @@ window.__ModuleLoader__.load({
       adoptBackend: 'Run this project’s backend',
       adoptBackendHint: 'Its server.js runs inside the DSH process with this plugin’s privileges — as trusted as the plugin itself.',
       adoptBackendNone: 'No backend here: a server.js in the project folder, named by “backend” in meta.json, is what offers one.',
+      // 常驻 reads as a second decision about the same backend: first whether it may run at
+      // all, then whether it survives the panel. Both are about the same process, so both
+      // live in the same form, and the hint names every way to stop it.
+      residentSwitch: 'Resident (keeps running after the panel closes)',
+      residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
+      backendBadge: 'Backend',
+      backendResident: 'Resident',
+      backendFollow: 'Follows the panel',
+      backendResidentHint: 'Stays up after the panel closes',
+      backendFollowHint: 'Unloads a while after the panel closes',
+      backendLoaded: 'Loaded',
+      backendIdle: 'Not loaded',
+      backendAllowed: 'Allowed',
+      backendDenied: 'Not allowed',
+      stopBackend: 'Stop backend',
+      stopBackendHint: 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.',
+      managerBackendHint: 'Hiding or removing an interface does not stop its backend. A resident one keeps running until you press Stop backend.',
+      backendStopDone: 'Stopped the {slug} backend; opening that panel again loads it again.',
+      backendStopIdle: 'The {slug} backend was not running.',
+      backendStopFailed: 'The host did not stop it; the backend may still be running.',
         securityStrict: 'Strict (default)',
         securityLocal: 'Own files only',
         securityOpen: 'Own files + network',
@@ -956,6 +976,23 @@ window.__ModuleLoader__.load({
         adoptBackend: '允许该项目的后台代码运行',
         adoptBackendHint: '项目目录里的 server.js 会在 DSH 进程内运行，权限与本插件相同——等于完全信任它。',
         adoptBackendNone: '该项目没有后台：在项目目录放一个 server.js，并在 meta.json 里用 backend 字段指认它。',
+        residentSwitch: '常驻（关掉面板也继续跑）',
+        residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想停它：用管理器行或项目行里的「停止后台」，或取消勾选这个开关 —— 两者都会当场卸载。',
+        backendBadge: '带后台',
+        backendResident: '常驻',
+        backendFollow: '跟随面板',
+        backendResidentHint: '关掉面板也不会停',
+        backendFollowHint: '关掉面板一会儿后会自动卸载',
+        backendLoaded: '已加载',
+        backendIdle: '未加载',
+        backendAllowed: '已授权',
+        backendDenied: '未授权',
+        stopBackend: '停止后台',
+        stopBackendHint: '带后台的项目：「停止后台」只结束这个进程，不撤销授权；下次打开它的面板会重新加载。',
+        managerBackendHint: '隐藏或移除界面不等于停止后台：常驻的后台要按「停止后台」才会停。',
+        backendStopDone: '已停止 {slug} 的后台；再打开该面板会重新加载它。',
+        backendStopIdle: '{slug} 的后台没有在跑。',
+        backendStopFailed: '宿主没有停止它，后台可能还在跑。',
         securityStrict: '严格（默认）',
         securityLocal: '允许自身文件',
         securityOpen: '自身文件 + 允许联网',
@@ -1092,8 +1129,81 @@ window.__ModuleLoader__.load({
           state.templates.error = (value !== null && value.error) || 'unavailable';
         }
         state.templates.loaded = true;
+        // Stamped for the one reader that has to know how old this is: the manager asks for a
+        // fresh catalogue when this reading is too old to say whether a backend is still running.
+        state.templates.loadedAt = Date.now();
         bump();
         return state.templates.items;
+      });
+    }
+
+    /**
+     * The backend facts one catalogue row carries, in the shape the UI reads.
+     *
+     * A host that predates the field simply has none, and a project that declares no backend
+     * gets `undefined`: every mark keys off `declared`, so an old payload draws nothing rather
+     * than claiming a backend that is not there.
+     */
+    function backendInfoOf(template) {
+      const backend = template === null || template === undefined ? undefined : template.backend;
+      if (backend === null || backend === undefined || typeof backend !== 'object') return undefined;
+      return {
+        declared: backend.declared === true,
+        allowed: backend.allowed === true,
+        resident: backend.resident === true,
+        loaded: backend.loaded === true,
+      };
+    }
+
+    /** One project by slug: what a session record's `template` field points at. */
+    function templateBySlug(slug) {
+      if (typeof slug !== 'string' || slug.length === 0) return undefined;
+      const items = Array.isArray(state.templates.items) ? state.templates.items : [];
+      for (const item of items) {
+        if (item !== null && item !== undefined && item.slug === slug) return item;
+      }
+      return undefined;
+    }
+
+    /** The age past which the catalogue in hand is not trusted about a running process. */
+    const BACKEND_CATALOGUE_FRESH_MS = 30000;
+
+    /**
+     * Whether the catalogue in hand can answer the backend questions on the manager page.
+     *
+     * Two ways it cannot: a host that answered before the field existed, and a reading old
+     * enough that a backend stopped since then would still be drawn as running. The result is
+     * asked for once per mount — a request per render would ask the host on every keystroke.
+     */
+    function backendCatalogueStale() {
+      if (state.templates.loaded !== true) return true;
+      const at = state.templates.loadedAt;
+      if (typeof at !== 'number' || !Number.isFinite(at) || Date.now() - at > BACKEND_CATALOGUE_FRESH_MS) return true;
+      const items = Array.isArray(state.templates.items) ? state.templates.items : [];
+      return items.length > 0 && !items.some((item) => item !== null && item !== undefined && item.backend !== undefined);
+    }
+
+    /**
+     * Stop one project's backend process.
+     *
+     * Only the process: the permission and the project's own rules are untouched, which is why
+     * this sits beside the switches instead of replacing them — a reader who wants it gone for
+     * good turns the permission off, and the host unloads on the spot for that too. Returns the
+     * line to show, so both callers say the same thing about the same act.
+     */
+    function stopBackend(slug) {
+      if (typeof slug !== 'string' || slug.length === 0) return Promise.resolve(null);
+      return postJson('/templates/backend/stop', { slug }).then((value) => {
+        if (value === null || value.ok !== true) {
+          return { ok: false, slug, message: tr('backendStopFailed', 'The host did not stop it; the backend may still be running.') };
+        }
+        const message =
+          value.stopped === true
+            ? tr('backendStopDone', 'Stopped the {slug} backend; opening that panel again loads it again.', { slug })
+            : tr('backendStopIdle', 'The {slug} backend was not running.', { slug });
+        // The catalogue is the only thing on this page that says "loaded", so it is re-read
+        // before the answer is shown: the row behind the message has to agree with it.
+        return loadTemplates().then(() => ({ ok: true, slug, stopped: value.stopped === true, message }));
       });
     }
 
@@ -1142,7 +1252,7 @@ window.__ModuleLoader__.load({
      * the reader filled in: this function is the only place it is sent, so a dropped
      * argument here means the form was written for nothing.
      */
-    function adoptTemplate(name, manifest, allowBackend) {
+    function adoptTemplate(name, manifest, allowBackend, resident) {
       state.adopt.busy = true;
       state.templates.adopting = typeof name === 'string' ? name : '';
       bump();
@@ -1160,12 +1270,20 @@ window.__ModuleLoader__.load({
           state.templates.notice =
             state.adopt.existing === true ? tr('edited', 'Saved.') : tr('adopted', 'It is a project now.');
           // The allowance is stored against the project id — which for something just adopted is
-          // the id the form wrote, not the folder name it was adopted from. Only sent when the form
-          // actually offered the choice, so a project without a backend is never approved by
-          // accident. A refusal here is not fatal to the manifest that was just written.
+          // the id the form wrote, not the folder name it was adopted from. A refusal here is
+          // not fatal to the manifest that was just written.
           const slug = typeof value.slug === 'string' && value.slug.length > 0 ? value.slug : state.adopt.slug;
-          const asked = allowBackend === undefined ? Promise.resolve(true) : postJson('/templates/backend', { slug, allowed: allowBackend === true }).then(() => true, () => false);
-          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, busy: false };
+          // `resident` travels only when the form actually offered it: a project whose backend is
+          // not declared has nothing to keep resident, and sending a setting for it would leave a
+          // rule in the host that no declaration backs. `allowed` keeps its old rule — sent only
+          // when the choice was on screen, so a project without a backend is never approved by
+          // accident — and it is left out entirely when the caller chose nothing, because an
+          // absent field is not a refusal and must not become one.
+          const settings = { slug };
+          if (allowBackend !== undefined) settings.allowed = allowBackend === true;
+          if (resident !== undefined) settings.resident = resident === true;
+          const asked = allowBackend === undefined && resident === undefined ? Promise.resolve(true) : postJson('/templates/backend', settings).then(() => true, () => false);
+          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
           return asked.then(() => loadTemplates()).then(() => true);
         })
         .catch(() => {
@@ -1283,6 +1401,77 @@ window.__ModuleLoader__.load({
       lineHeight: '1',
       cursor: 'pointer',
     };
+
+    /**
+     * A chip: the small rounded mark a status reads as. Always a `span` and never a control —
+     * a mark that looks like a button is one readers try to press, and the one pressable thing
+     * in this family has a label that says what it does.
+     */
+    const chipStyle = {
+      flex: '0 0 auto',
+      display: 'inline-flex',
+      alignItems: 'center',
+      height: '16px',
+      padding: '0 6px',
+      borderRadius: '999px',
+      border: '1px solid var(--dsw-alias-border-l1, #ddd)',
+      background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.06))',
+      color: 'var(--dsw-alias-label-secondary, #888)',
+      fontSize: '10px',
+      lineHeight: '1',
+      whiteSpace: 'nowrap',
+    };
+
+    /** One chip, so a status reads the same wherever it is shown. */
+    function chip(text, key) {
+      return h('span', { key, style: chipStyle }, text);
+    }
+
+    /** A mark's small print: the sentence a chip alone cannot carry. */
+    const chipNoteStyle = { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' };
+
+    /** A control that cannot do anything right now: dimmed, and not a pointer. */
+    const disabledStyle = { opacity: 0.5, cursor: 'default' };
+
+    /**
+     * The backend status of one project, as chips plus the sentence that says what the state
+     * means. `withPermission` is the drawer's extra: the permission is a per-project decision
+     * the reader made, and the project list is where they go to revisit it.
+     */
+    function backendChips(backend, withPermission) {
+      const marks = [];
+      // Keys, because these are handed to React as an array: an unkeyed one is a console warning
+      // on every render of every row that has a backend.
+      if (withPermission === true) {
+        marks.push(chip(backend.allowed ? tr('backendAllowed', 'Allowed') : tr('backendDenied', 'Not allowed'), 'allowed'));
+      }
+      marks.push(
+        chip(backend.resident ? tr('backendResident', 'Resident') : tr('backendFollow', 'Follows the panel'), 'resident'),
+        h('span', { key: 'note', style: chipNoteStyle }, backend.resident ? tr('backendResidentHint', 'Stays up after the panel closes') : tr('backendFollowHint', 'Unloads a while after the panel closes')),
+        chip(backend.loaded ? tr('backendLoaded', 'Loaded') : tr('backendIdle', 'Not loaded'), 'loaded'),
+      );
+      return marks;
+    }
+
+    /** The one control that ends a running backend process. Never a permission change. */
+    function stopBackendButton(slug, backend, onDone, extraStyle) {
+      return h(
+        'button',
+        {
+          type: 'button',
+          style: Object.assign({}, buttonStyle, extraStyle ?? {}, backend.loaded === true ? {} : disabledStyle),
+          disabled: backend.loaded !== true,
+          title: tr('stopBackendHint', 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.'),
+          'aria-label': `${tr('stopBackend', 'Stop backend')}: ${slug}`,
+          onClick: () => {
+            stopBackend(slug).then((result) => {
+              if (result !== null) onDone(result);
+            });
+          },
+        },
+        tr('stopBackend', 'Stop backend'),
+      );
+    }
 
     const frameStyle = {
       display: 'block',
@@ -2339,15 +2528,37 @@ window.__ModuleLoader__.load({
       useStore();
       const sessionId = resolveSessionId(props);
       useSessionSync(sessionId);
+      // Stopping a backend answers here, not in the drawer: this page is where the reader
+      // pressed the button, and a message anywhere else reads as nothing having happened.
+      const [status, setStatus] = useState(null);
+      // A project with a resident backend keeps running after its panel is gone, so this page
+      // is the only place left that can end it. It can only say whether one is loaded if the
+      // catalogue it holds has the backend field and is recent enough, so the one reading this
+      // page needs is asked for once per mount. Per render would be a request per keystroke.
+      useEffect(() => {
+        if (backendCatalogueStale()) loadTemplates();
+      }, []);
       const records = sessionId === undefined ? [] : recordsFor(sessionId);
-      const rows = records.map((record) =>
-        h(
+      // The backend a row belongs to: a record built from a path or the blank canvas names no
+      // project, and one whose project declares no backend has nothing to say — both draw none
+      // of the marks below rather than a row of empty chips.
+      const backendOfRecord = (record) => {
+        const backend = record.template === undefined ? undefined : backendInfoOf(templateBySlug(record.template));
+        return backend !== undefined && backend.declared === true ? backend : undefined;
+      };
+      const anyBackend = records.some((record) => backendOfRecord(record) !== undefined);
+      const rows = records.map((record) => {
+        const backend = backendOfRecord(record);
+        return h(
           'div',
           {
             key: record.uiId,
             style: {
               display: 'flex',
               alignItems: 'center',
+              // 手机优先: a row carries a title, four marks, a sentence and up to three controls, so
+              // it wraps instead of pushing the controls past the edge where nothing can reach them.
+              flexWrap: 'wrap',
               gap: '10px',
               padding: '7px 10px',
               borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
@@ -2366,6 +2577,20 @@ window.__ModuleLoader__.load({
           state.hidden.has(record.uiId)
             ? h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerHidden', 'hidden'))
             : null,
+          // The project's backend, where its interface is listed: the state a reader cannot see
+          // unless it is said, and the one control that can end it. 常驻 is the whole reason the
+          // control is here — that state outlives the panel, so removing the interface does not end it.
+          backend === undefined
+            ? null
+            : h(
+                'span',
+                { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
+                chip(tr('backendBadge', 'Backend'), 'badge'),
+                ...backendChips(backend, false),
+              ),
+          backend === undefined
+            ? null
+            : stopBackendButton(record.template, backend, (result) => setStatus(result.message)),
           // Every form that can be out of sight gets the same control, with the same words.
           // Two forms have none: a background layer is always on screen, and an inline
           // surface lives in the conversation and is never hidden — offering "Show" for it
@@ -2379,8 +2604,8 @@ window.__ModuleLoader__.load({
                 tr('managerRestore', 'Show'),
               ),
           h('button', { type: 'button', style: buttonStyle, onClick: () => dismissRecord(record.uiId) }, tr('managerClose', 'Remove')),
-        ),
-      );
+        );
+      });
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', padding: '10px 12px' } },
@@ -2419,6 +2644,16 @@ window.__ModuleLoader__.load({
               )
             : null,
         ),
+        // The distinction this page exists to make, said once where the two controls sit side by
+        // side: 隐藏/移除 acts on an interface, 停止后台 acts on a process, and a resident backend
+        // is not touched by the first. Shown only when a listed project actually has a backend —
+        // a reader with none has nothing to be warned about.
+        anyBackend
+          ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, tr('managerBackendHint', 'Hiding or removing an interface does not stop its backend. A resident one keeps running until you press Stop backend.'))
+          : null,
+        status === null
+          ? null
+          : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, String(status)),
         records.length === 0
           ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML interface.'))
           : h('div', null, ...rows),
@@ -3374,6 +3609,9 @@ window.__ModuleLoader__.load({
         // checkbox only for the first, and starts from the second.
         backend: template.backend !== undefined && template.backend.allowed === true,
         backendDeclared: template.backend !== undefined && template.backend.declared === true,
+        // The project's effective answer, not the declaration: a reader who already turned 常驻
+        // off must not be shown it on again, or the next save would silently turn it back on.
+        resident: template.backend !== undefined && template.backend.resident === true,
         busy: false,
       };
       bump();
@@ -3612,10 +3850,17 @@ window.__ModuleLoader__.load({
               state.create.source = 'blank';
               bump();
             }),
-            ...items.map((template) =>
-              h(
+            ...items.map((template) => {
+              const backend = backendInfoOf(template);
+              const declared = backend !== undefined && backend.declared === true;
+              return h(
                 'div',
-                { key: template.slug, style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+                {
+                  key: template.slug,
+                  // 手机优先: a declared backend adds three marks and a control to this row, so it
+                  // wraps; the radio stays on its own line rather than being squeezed to nothing.
+                  style: { display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' },
+                },
                 h(
                   'div',
                   { style: { flex: '1 1 auto', minWidth: '0' } },
@@ -3642,6 +3887,16 @@ window.__ModuleLoader__.load({
                     },
                   ),
                 ),
+                // The project's backend, stated where the reader picks the project. The permission
+                // leads because it is the decision they made; the two marks after it are what the
+                // host is doing with that decision right now.
+                declared ? backendChips(backend, true) : null,
+                // This list is the authoritative way to stop a backend: it lists the projects
+                // themselves, so it is still here after the panel — and the manager row — are gone.
+                declared ? stopBackendButton(template.slug, backend, (result) => {
+                  state.templates.notice = result.message;
+                  bump();
+                }) : null,
                 // A pencil on every project: the manifest stays editable, with the same
                 // form that created it, prefilled with what is on disk.
                 h(
@@ -3657,9 +3912,17 @@ window.__ModuleLoader__.load({
                   },
                   '✎',
                 ),
-              ),
-            ),
+              );
+            }),
           ),
+          // Said once under the list rather than on every row: there is exactly one thing to
+          // understand here, and it is that 停止后台 is not 取消授权.
+          items.some((template) => {
+            const info = backendInfoOf(template);
+            return info !== undefined && info.declared === true;
+          })
+            ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } }, tr('stopBackendHint', 'Projects with a backend: Stop backend ends the process only — it does not withdraw permission, and opening its panel again loads it again.'))
+            : null,
           h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createPlacement', 'Where')),
           h(
             'div',
@@ -3751,6 +4014,9 @@ window.__ModuleLoader__.load({
                             // folder that was copied in actually ships a backend.
                             backend: false,
                             backendDeclared: candidate.server === true,
+                            // 采纳新项目时默认常驻：我们手上还没有它的元数据，而这个目录里声明的正是
+                            // "我要常驻"，所以先跟着声明走；开关只在勾了后台之后才有意义。
+                            resident: true,
                             busy: false,
                           };
                           bump();
@@ -3941,6 +4207,50 @@ window.__ModuleLoader__.load({
                           ),
                         ),
                       ),
+                      // 常驻: a second decision about the same process, so it lives under the first
+                      // and appears only once the first is answered. A project with no backend — or
+                      // one that has not been allowed to run — has nothing to keep resident, and a
+                      // switch here would promise a process that is never going to start.
+                      state.adopt.backendDeclared === true && state.adopt.backend === true
+                        ? h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' } },
+                            h('input', {
+                              type: 'checkbox',
+                              checked: state.adopt.resident === true,
+                              onChange: (event) => {
+                                state.adopt.resident = event.target.checked;
+                                bump();
+                              },
+                              style: { marginTop: '2px', flex: '0 0 auto' },
+                            }),
+                            h(
+                              'div',
+                              { style: { minWidth: '0' } },
+                              h(
+                                'div',
+                                { style: { fontSize: '12px', fontWeight: state.adopt.resident === true ? 600 : 400 } },
+                                tr('residentSwitch', 'Resident (keeps running after the panel closes)'),
+                              ),
+                              h(
+                                'div',
+                                {
+                                  style: {
+                                    fontSize: '11px',
+                                    color:
+                                      state.adopt.resident === true
+                                        ? 'var(--dsw-alias-label-primary, #333)'
+                                        : 'var(--dsw-alias-label-secondary, #888)',
+                                  },
+                                },
+                                tr(
+                                  'residentHint',
+                                  'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To stop it, use Stop backend in its manager row or its project row, or uncheck this switch — either unloads it right away.',
+                                ),
+                              ),
+                            ),
+                          )
+                        : null,
                       h(
                         'div',
                         { style: { display: 'flex', justifyContent: 'flex-end', gap: narrow ? MOBILE.footerGap : '6px' } },
@@ -3953,7 +4263,7 @@ window.__ModuleLoader__.load({
                             // the desktop button next to a thumb-sized confirm.
                             style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}),
                             onClick: () => {
-                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, busy: false };
+                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
                               bump();
                             },
                           },
@@ -3987,6 +4297,12 @@ window.__ModuleLoader__.load({
                                 // Only sent when the form offered the choice, so a project with no
                                 // backend can never end up allowed by accident.
                                 state.adopt.backendDeclared === true ? state.adopt.backend === true : undefined,
+                                // 常驻 follows the same rule, and one more: it only means anything for a
+                                // backend that may actually run, so a project whose backend is not
+                                // declared — the usual case when a folder is adopted before its
+                                // server.js is written — sends nothing at all rather than a setting
+                                // with nothing behind it.
+                                state.adopt.backendDeclared === true && state.adopt.backend === true ? state.adopt.resident === true : undefined,
                               );
                             },
                           },
@@ -4484,6 +4800,9 @@ window.__ModuleLoader__.load({
         loadTemplates,
         saveTemplatesDir,
         adoptTemplate,
+        stopBackend,
+        backendInfoOf,
+        backendCatalogueStale,
         markTemplatesAsked,
         toggleTemplates,
         applyTemplate,

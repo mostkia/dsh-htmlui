@@ -297,3 +297,108 @@ test('a backend may answer text, and a POST body arrives as it was sent', async 
     harness.dispose();
   }
 });
+
+/**
+ * A resident backend says "keep me loaded even when nothing calls me" — which is what a watcher
+ * needs and exactly what the idle rule would otherwise take away. The counter fixture is the proof
+ * either way: a module that survived keeps counting, one that was dropped starts again at 1.
+ */
+const RESIDENT_COUNTER = ['let calls = 0;', 'module.exports = {', '  resident: true,', '  handle: async () => {', '    calls += 1;', '    return { calls };', '  },', '};'].join('\n');
+/** The same, without the residency line: the control group for every residency assertion. */
+const PLAIN_COUNTER = ['let calls = 0;', 'module.exports = {', '  handle: async () => {', '    calls += 1;', '    return { calls };', '  },', '};'].join('\n');
+const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+
+test('a resident backend survives being idle, and the reader can still turn residency off', async () => {
+  const { harness } = await activation({
+    config: { backendIdleMs: 1_000 },
+    projects: {
+      watcher: { meta: { slug: 'watcher', name: 'watcher', backend: true }, files: { 'server.js': RESIDENT_COUNTER } },
+      tool: { meta: { slug: 'tool', name: 'tool', backend: true }, files: { 'server.js': PLAIN_COUNTER } },
+    },
+    allowed: ['watcher', 'tool'],
+  });
+  try {
+    const watched = await render(harness, 'watcher', 'session-watch');
+    const watchedToken = await ticketFor(harness, watched.uiId);
+    const plain = await render(harness, 'tool', 'session-tool');
+    const plainToken = await ticketFor(harness, plain.uiId);
+
+    assert.deepEqual(JSON.parse((await call(harness, watched.uiId, 'status', { token: watchedToken })).text), { calls: 1 });
+    assert.deepEqual(JSON.parse((await call(harness, plain.uiId, 'status', { token: plainToken })).text), { calls: 1 });
+
+    await sleep(1_600);
+
+    // The resident one was never reaped: it is still the module that answered first.
+    assert.deepEqual(JSON.parse((await call(harness, watched.uiId, 'status', { token: watchedToken })).text), { calls: 2 }, 'a resident backend is kept');
+    // The plain one was: the reload starts its counter over, which is how an unload shows up.
+    assert.deepEqual(JSON.parse((await call(harness, plain.uiId, 'status', { token: plainToken })).text), { calls: 1 }, 'a plain backend is still reaped');
+
+    // The reader's answer outranks the declaration, and turning residency off unloads right away.
+    const off = await harness.call({ method: 'POST', url: `${PREFIX}/templates/backend`, headers: PAGE_HEADERS, body: JSON.stringify({ slug: 'watcher', resident: false }) });
+    assert.equal(JSON.parse(off.text).resident, false);
+    assert.deepEqual(JSON.parse((await call(harness, watched.uiId, 'status', { token: watchedToken })).text), { calls: 1 }, 'turning residency off drops the module now, not later');
+
+    await sleep(1_600);
+    assert.deepEqual(JSON.parse((await call(harness, watched.uiId, 'status', { token: watchedToken })).text), { calls: 1 }, 'and it is reaped like any other backend from then on');
+  } finally {
+    harness.dispose();
+  }
+});
+
+test('stopping a backend ends this run without touching the allowance', async () => {
+  const { harness } = await activation({
+    config: { backendIdleMs: 60_000 },
+    projects: { watcher: { meta: { slug: 'watcher', name: 'watcher', backend: true }, files: { 'server.js': RESIDENT_COUNTER } } },
+    allowed: ['watcher'],
+  });
+  try {
+    const rendered = await render(harness, 'watcher');
+    const token = await ticketFor(harness, rendered.uiId);
+    assert.deepEqual(JSON.parse((await call(harness, rendered.uiId, 'status', { token })).text), { calls: 1 });
+
+    const stopped = await harness.call({ method: 'POST', url: `${PREFIX}/templates/backend/stop`, headers: PAGE_HEADERS, body: JSON.stringify({ slug: 'watcher' }) });
+    const answer = JSON.parse(stopped.text);
+    assert.equal(answer.ok, true);
+    assert.equal(answer.stopped, true, 'a loaded backend is unloaded');
+    assert.equal(answer.allowed, true, 'stopping is not revoking');
+    assert.equal(answer.resident, true, 'and it is not a residency change either');
+
+    const catalogue = JSON.parse((await harness.call({ method: 'POST', url: `${PREFIX}/templates`, headers: PAGE_HEADERS, body: '{}' })).text);
+    const entry = catalogue.templates.find((template) => template.slug === 'watcher');
+    assert.equal(entry.backend.allowed, true, 'the permission is still there');
+    assert.equal(entry.backend.loaded, false, 'but nothing is loaded');
+
+    // Asking again is harmless, and a call from the document brings it back.
+    const again = JSON.parse((await harness.call({ method: 'POST', url: `${PREFIX}/templates/backend/stop`, headers: PAGE_HEADERS, body: JSON.stringify({ slug: 'watcher' }) })).text);
+    assert.equal(again.stopped, false, 'stopping something that is not loaded is not an error');
+    assert.deepEqual(JSON.parse((await call(harness, rendered.uiId, 'status', { token })).text), { calls: 1 }, 'the next call loads a fresh module');
+  } finally {
+    harness.dispose();
+  }
+});
+
+test('the catalogue and health both report how long a backend may live', async () => {
+  const { harness } = await activation({
+    config: { backendIdleMs: 60_000 },
+    projects: { watcher: { meta: { slug: 'watcher', name: 'watcher', backend: true }, files: { 'server.js': RESIDENT_COUNTER } } },
+    allowed: ['watcher'],
+  });
+  try {
+    const rendered = await render(harness, 'watcher');
+    const token = await ticketFor(harness, rendered.uiId);
+
+    const before = JSON.parse((await harness.call({ method: 'POST', url: `${PREFIX}/templates`, headers: PAGE_HEADERS, body: '{}' })).text).templates.find((template) => template.slug === 'watcher');
+    assert.deepEqual(before.backend, { declared: true, allowed: true, resident: true, loaded: false });
+
+    await call(harness, rendered.uiId, 'status', { token });
+
+    const health = JSON.parse((await harness.call({ url: `${PREFIX}/health`, headers: PAGE_HEADERS })).text);
+    const entry = health.backends.find((backend) => backend.slug === 'watcher');
+    assert.equal(entry.resident, true, 'the effective answer');
+    assert.equal(entry.declaredResident, true, 'and what the project asked for');
+    const after = JSON.parse((await harness.call({ method: 'POST', url: `${PREFIX}/templates`, headers: PAGE_HEADERS, body: '{}' })).text).templates.find((template) => template.slug === 'watcher');
+    assert.equal(after.backend.loaded, true, 'and the page can see that it is running');
+  } finally {
+    harness.dispose();
+  }
+});

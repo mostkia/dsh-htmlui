@@ -184,6 +184,15 @@ What to expect:
   `504` after `appTimeoutMs` (ten seconds by default) — the panel is told, not left waiting.
 - A document from another project cannot reach it: the route is keyed by the calling document's own
   id, so the project comes from the record, never from the request.
+- **Residency.** Set `backendIdleMs` to `20000` in the plugin settings, give a project's `server.js`
+  `resident: true`, and call it once: `/health` shows it with `resident: true` and `declaredResident:
+  true`, and the catalogue row reads `backend: { declared: true, allowed: true, resident: true,
+  loaded: true }`. Close its panel, wait past the idle delay, and it is **still** listed and still
+  doing its work (its own timer keeps firing). Tick residency off in the form, or press **Stop
+  backend** in the manager (or in the drawer row), and it is gone from `/health` immediately while
+  `allowed` stays true — opening the project again loads it again. Restore `backendIdleMs` after.
+- Residency is per project and belongs to the reader: a project that declares it can still be held to
+  the idle rule by turning the switch off, and the answer survives a restart in `settings.json`.
 
 ## 7. Triage
 
@@ -199,3 +208,6 @@ What to expect:
 | `dshHTML.app` answers 403 | The project ships a backend but the reader has not allowed it | The project's pencil → the backend switch; `/templates` reports `backend.declared` / `.allowed` |
 | `dshHTML.app` answers 404 | The manifest declares no backend, or the file it names is gone | `meta.json`'s `backend`, and the file it points at |
 | `dshHTML.app` answers 504 | The handler did not answer inside `appTimeoutMs` | The handler's own timing; raise `appTimeoutMs` for a slow API |
+| A backend keeps running after its panel is closed | It declared `resident: true` and the reader's answer allows it | Expected; press **Stop backend** in the manager or the drawer row, or switch residency off |
+| A resident backend never picks up an edit | A resident module is only reloaded when something calls it | Call it once (open the panel), or stop it and let the next call load the new file |
+| A stopped backend came back | Opening the project again loads it; a rule stored by the app may resume its work | `POST /templates/backend/stop`, and stop the work in the app itself |

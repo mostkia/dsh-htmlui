@@ -61,7 +61,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.3';
+const PLUGIN_VERSION = '0.1.4';
 
 /**
  * Placements this plugin offers.
@@ -516,6 +516,14 @@ function createStore(root) {
       backendProjects: Array.isArray(value.backendProjects)
         ? value.backendProjects.filter((slug) => typeof slug === 'string' && TEMPLATE_SLUG_RE.test(slug))
         : [],
+      // Whether a resident backend really stays loaded here, per project. A project declares what it
+      // wants (`resident: true`); this is the reader's answer, and it is a map rather than a list
+      // because "I said no" has to be distinguishable from "I have not said anything".
+      backendResident: value.backendResident !== null && typeof value.backendResident === 'object' && Array.isArray(value.backendResident) !== true
+        ? Object.fromEntries(
+            Object.entries(value.backendResident).filter(([slug, on]) => TEMPLATE_SLUG_RE.test(slug) && typeof on === 'boolean'),
+          )
+        : {},
     };
   }
 
@@ -574,6 +582,32 @@ function createStore(root) {
     else current.delete(slug);
     writeSettings(Object.assign({}, settings, { backendProjects: [...current] }));
     return { ok: true, slug, allowed: current.has(slug) };
+  }
+
+  /**
+   * The reader's answer to "may this project keep running after its panel is gone?".
+   *
+   * A project that declares `resident: true` is asking to stay loaded — a watcher has to keep
+   * watching while nothing is on screen. That is a heavier promise than "run while I look at it",
+   * so the reader keeps the last word, and the two answers are stored separately: granting the
+   * allowance is about trust, this is about lifetime.
+   */
+  function setBackendResident(input, resident) {
+    const slug = typeof input === 'string' ? input.trim() : '';
+    if (!TEMPLATE_SLUG_RE.test(slug)) return { ok: false, error: 'a valid project id is required' };
+    const settings = readSettings();
+    const next = Object.assign({}, settings.backendResident);
+    if (typeof resident === 'boolean') next[slug] = resident;
+    else delete next[slug];
+    writeSettings(Object.assign({}, settings, { backendResident: next }));
+    return { ok: true, slug, resident: next[slug] };
+  }
+
+  /** The residency that is actually in force: the reader's answer if given, else the declaration. */
+  function residentFor(slug, declared) {
+    const override = readSettings().backendResident[slug];
+    if (typeof override === 'boolean') return override;
+    return declared === true;
   }
 
   function readUi(id) {
@@ -1192,6 +1226,8 @@ function createStore(root) {
     setTemplatesDir,
     markTemplatesAsked,
     setBackendAllowed,
+    setBackendResident,
+    residentFor,
     readSlot,
     writeSlot,
     removeSlot,
@@ -1240,7 +1276,7 @@ function createStore(root) {
  * purged for that directory first. That purge is also why the entry is CommonJS: an ES module
  * graph cannot be invalidated, so only the entry file would ever reload.
  */
-function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS }) {
+function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS, idleMs = APP_IDLE_MS, residentFor }) {
   const require = createRequire(import.meta.url);
   /** slug -> the loaded backend: its module, its call counters, and its idle timer. */
   const loaded = new Map();
@@ -1336,12 +1372,16 @@ function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS }) {
       handle,
       started: typeof module?.start === 'function' ? module.start.bind(module) : undefined,
       stopped: typeof module?.stop === 'function' ? module.stop.bind(module) : undefined,
+      // What the project asks for, before the reader's answer is applied.
+      declaredResident: module?.resident === true,
+      resident: false,
       loadedAt: Date.now(),
       calls: 0,
       failures: 0,
       lastError: undefined,
       idle: undefined,
     };
+    entry.resident = residentFor(target.slug, entry.declaredResident) === true;
     // `start()` may do the first fetch or set up a timer; awaiting it means the first request
     // already sees a warm backend instead of racing it.
     if (entry.started !== undefined) await entry.started({ slug: target.slug, dir: target.dir, pluginVersion: PLUGIN_VERSION });
@@ -1421,12 +1461,20 @@ function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS }) {
         return { status: 500, type: 'application/json', body: { ok: false, error: 'the backend failed to load', detail } };
       }
     }
+    // A resident backend is never reaped for being idle: that is the whole point of declaring
+    // residency — a watcher keeps watching with nothing on screen. Anything else keeps the idle
+    // rule, which remains the cheapest way to not hold a module (and its handles) forever.
+    entry.resident = residentFor(slug, entry.declaredResident) === true;
     if (entry.idle !== undefined) clearTimeout(entry.idle);
-    entry.idle = setTimeout(() => {
-      log(`backend ${slug} unloaded after ${Math.round(APP_IDLE_MS / 60_000)} idle minutes`);
-      forget(slug, 'idle');
-    }, APP_IDLE_MS);
-    if (typeof entry.idle.unref === 'function') entry.idle.unref();
+    if (entry.resident === true) {
+      entry.idle = undefined;
+    } else {
+      entry.idle = setTimeout(() => {
+        log(`backend ${slug} unloaded after ${Math.round(idleMs / 60_000)} idle minutes`);
+        forget(slug, 'idle');
+      }, idleMs);
+      if (typeof entry.idle.unref === 'function') entry.idle.unref();
+    }
     entry.calls += 1;
     try {
       const answer = await withTimeout(entry.handle(request), timeoutMs);
@@ -1452,6 +1500,10 @@ function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS }) {
       calls: entry.calls,
       failures: entry.failures,
       lastError: entry.lastError,
+      // Residency is why a loaded backend may have had no calls for a long time; without these two
+      // the only way to guess at a backend's lifetime would be "was it called recently".
+      resident: entry.resident === true,
+      declaredResident: entry.declaredResident === true,
     }));
   }
 
@@ -1697,6 +1749,10 @@ export function apply(ctx, config) {
   // one that reads a file, and the default has to be short enough that a hung one cannot look like
   // a frozen page.
   const appTimeoutMs = clampInt(settings.appTimeoutMs, 100, 120_000, APP_TIMEOUT_MS);
+  // How long a non-resident backend is kept after its last call. Configurable because "how long is
+  // an idle backend worth holding" is a property of the machine, and because the tests have to
+  // watch an unload happen without waiting ten minutes for it.
+  const backendIdleMs = clampInt(settings.backendIdleMs, 1_000, 3_600_000, APP_IDLE_MS);
   const allowedOrigins = normalizeOrigins(settings.allowedOrigins);
   const actionPrompt =
     typeof settings.actionPrompt === 'string' && settings.actionPrompt.trim().length > 0
@@ -1707,7 +1763,11 @@ export function apply(ctx, config) {
   const hub = createHub(ctx.logger);
   const logger = ctx.logger;
   /** The project backends this activation has loaded; see `createBackends`. */
-  const backends = createBackends({ store, logger, timeoutMs: appTimeoutMs });
+  const backends = createBackends({ store, logger, timeoutMs: appTimeoutMs, idleMs: backendIdleMs, residentFor: store.residentFor });
+  /** The slugs whose backend module is loaded right now (the map is small; this stays cheap). */
+  function loadedSlugs() {
+    return new Set(backends.status().map((entry) => entry.slug));
+  }
 
   /**
    * Per-UI token buckets keep a runaway document from flooding the model.
@@ -2495,11 +2555,14 @@ export function apply(ctx, config) {
             security: securityOf(template),
             bundled: template.bundled === true,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
-            // A backend is two facts, and the page shows both: whether the project ships one,
-            // and whether the reader has allowed it to run here.
+            // A backend is more than one fact, and the page shows them all: whether the project
+            // ships one, whether the reader allowed it to run here, whether it stays loaded after
+            // its panel is gone, and whether it is loaded at this moment.
             backend: {
               declared: backends.declarationOf(template) !== undefined,
               allowed: allowedBackends.has(String(template.slug ?? '')),
+              resident: store.residentFor(String(template.slug ?? ''), backends.declarationOf(template) !== undefined),
+              loaded: loadedSlugs().has(String(template.slug ?? '')),
             },
           })),
         });
@@ -2719,13 +2782,60 @@ export function apply(ctx, config) {
           return;
         }
         const declared = backends.declarationOf(template.meta) !== undefined;
-        const result = store.setBackendAllowed(slug, body.allowed === true);
-        if (result.ok !== true) {
-          sendJson(res, 400, { ok: false, error: result.error });
+        if (body.allowed !== undefined) {
+          const result = store.setBackendAllowed(slug, body.allowed === true);
+          if (result.ok !== true) {
+            sendJson(res, 400, { ok: false, error: result.error });
+            return;
+          }
+        }
+        if (body.resident !== undefined) {
+          const result = store.setBackendResident(slug, body.resident === true);
+          if (result.ok !== true) {
+            sendJson(res, 400, { ok: false, error: result.error });
+            return;
+          }
+        }
+        // Both answers are about lifetime as well as permission, so a reversed answer drops the
+        // module right here. Leaving it to "the next call" is the same as never for a backend that
+        // is resident precisely because nothing calls it.
+        const allowed = store.readSettings().backendProjects.includes(slug);
+        const resident = store.residentFor(slug, declared);
+        if (allowed !== true) backends.forget(slug, 'revoked');
+        else if (resident !== true) backends.forget(slug, 'residency off');
+        sendJson(res, 200, { ok: true, slug, declared, allowed, resident, loaded: loadedSlugs().has(slug) });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
+  /**
+   * Stop a project's backend without touching the reader's answer about it.
+   *
+   * This is the brake that residency makes necessary: a resident backend is, by definition, one
+   * that nothing calls, so "the next call will notice" can never stop it. Stopping is therefore its
+   * own act, separate from revoking the allowance — the reader may well want the project to keep
+   * its permission while this particular run ends. Opening the panel again loads it again.
+   */
+  function handleBackendStop(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
+        if (!TEMPLATE_SLUG_RE.test(slug)) {
+          sendJson(res, 400, { ok: false, error: 'a valid project id is required' });
           return;
         }
-        if (result.allowed !== true) backends.forget(slug, 'revoked');
-        sendJson(res, 200, { ok: true, slug, declared, allowed: result.allowed });
+        const template = store.readTemplate(slug);
+        const declared = template !== undefined && backends.declarationOf(template.meta) !== undefined;
+        const stopped = backends.forget(slug, 'stopped by the reader');
+        const settings = store.readSettings();
+        sendJson(res, 200, {
+          ok: true,
+          slug,
+          stopped,
+          declared,
+          allowed: settings.backendProjects.includes(slug),
+          resident: store.residentFor(slug, declared),
+        });
       })
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
@@ -3335,6 +3445,10 @@ export function apply(ctx, config) {
       if (path === `${ROUTE_PREFIX}/templates/backend`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTemplateBackend(req, res);
+      }
+      if (path === `${ROUTE_PREFIX}/templates/backend/stop`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleBackendStop(req, res);
       }
       if (path === `${ROUTE_PREFIX}/ui/ticket`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

@@ -182,8 +182,16 @@ reads a file, or keeps a cache in memory possible at all.
 ```js
 // server.js — CommonJS, beside index.html
 module.exports = {
+  // Optional. Declare this when the backend has work that must continue with no panel open —
+  // a watcher, a timer, an alert. The host then never drops it for being idle, so the reader
+  // has to stop it explicitly (the manager and the drawer both offer that). Leave it out and the
+  // module is dropped after ten idle minutes, which is the right default for everything else.
+  resident: true,
   // Optional. `start(info)` runs when the module is first loaded, `stop(reason)` when it is
-  // dropped; either may be async. Both are where a polling timer belongs.
+  // dropped; either may be async. Both are where a polling timer belongs — and with `resident`
+  // above, `stop()` is the only chance to release a file handle or clear a timer, so make it
+  // honest: it is what runs when the reader stops the backend, when the file changes, and when
+  // the allowance is taken away.
   handle: async (request) => {
     // request: { method, path, query, headers, body, json(), uiId, sessionId, slug, pluginVersion }
     return { ok: true, at: Date.now() };     // any JSON value becomes the answer
@@ -213,10 +221,18 @@ What to know before relying on it:
 - **It is reachable only from its own documents.** The host takes the project from the calling
   document's record, so a document reaches the backend of the project it came from and no other.
 - **One module per project, kept warm.** It stays loaded between calls, so a cache or a counter in
-  it survives — that is what makes polling cheap. It is dropped after ten idle minutes, and editing
-  `server.js` or anything it requires reloads it on the next call: no cold start, no refresh. That
-  reload is why the entry is CommonJS — an ES module graph cannot be invalidated, so an `.mjs`
-  backend would only ever reload its entry file.
+  it survives — that is what makes polling cheap. It is dropped after ten idle minutes
+  (`backendIdleMs` changes that), and editing `server.js` or anything it requires reloads it on the
+  next call: no cold start, no refresh. That reload is why the entry is CommonJS — an ES module graph
+  cannot be invalidated, so an `.mjs` backend would only ever reload its entry file.
+- **Resident backends outlive the panel.** With `resident: true` the module is never dropped for
+  being idle, which is the only way a watcher keeps watching with nothing on screen — and it is also
+  why everything about it is explicit: the reader can turn residency off per project, and stop a
+  running backend without touching the allowance (`POST /templates/backend/stop`), because "the next
+  call will notice" can never happen for a backend nothing calls. Two consequences worth designing
+  for: a resident module is **not** restarted when DSH restarts (there is no autostart), and a change
+  to its file is only noticed when something calls it, so give the reader a way to stop it and a
+  panel that calls it often enough to pick edits up.
 - **It cannot hang the page silently.** One call gets ten seconds (`appTimeoutMs` in the plugin
   config changes it), bodies and answers are capped at 1 MiB, calls are rate-limited like the rest
   of the carrier, and a throw or a timeout comes back as a `500`/`504` answer carrying the error.
