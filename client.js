@@ -831,7 +831,17 @@ window.__ModuleLoader__.load({
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
         managerView: 'HTML manager',
-        managerTitle: 'HTML programs in this session',
+        // 管理器现在分区显示：标题要同时罩住「跨会话的后台程序」和「本会话的界面」，
+        // 再叫「本会话的 HTML 程序」就名不副实了。
+        managerTitle: 'HTML programs',
+        // 分区一：后台活着的项目。host 只报告「加载了没有」，不报告属于哪个会话，
+        // 所以一个进程不属于本会话也可能出现在这里 —— 这正是「带后台能跨会话」。
+        managerGroupCross: 'Backend programs (cross-session)',
+        managerGroupCrossHint: 'Their process runs inside the DSH host, not in a conversation: it stays up after this session closes, which is why a program you never opened here can be listed.',
+        // 分区二：本会话的界面记录，纯前端页和有界面开着的项目都在这里。
+        managerGroupSession: 'Interfaces in this session',
+        managerGroupSessionHint: 'Every interface recorded in this session: plain front-end pages, and projects whose backend is running with an interface open.',
+        managerGroupSessionEmpty: 'This session has no interface open.',
         // 行的按钮：最小化/最大化是同一个按钮，文案跟着界面自己的隐藏状态走；其余两个
         // 各做一件不可逆的事（关界面 / 结束进程），所以第一次点击只变成一句确认。
         managerMinimize: 'Minimize',
@@ -850,6 +860,10 @@ window.__ModuleLoader__.load({
         managerPlacementTitle: 'Show it again as',
         managerHintHide: 'is the same hide the interface’s own control does.',
         managerHintRest: 'Closing the interface throws it away and keeps its process; ending the process takes the interfaces with it.',
+        // 界面自身的关闭按钮：和管理器行一样的两步确认。第一次点击只把按钮换成这句话，
+        // 第二次才真的执行 —— 关掉之后文档就被销毁了，没有任何办法恢复。
+        closeConfirmUi: 'Close it? The interface is destroyed and cannot be recovered',
+        closeConfirmUiHint: 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.',
       managerRestoreUi: 'Restore interface',
       managerRestoreUiHint: 'Render this project again in this session',
       managerRestoreUiDone: 'Interface restored.',
@@ -970,7 +984,17 @@ window.__ModuleLoader__.load({
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
         managerView: 'HTML管理器',
-        managerTitle: '本会话的 HTML 程序',
+        // 管理器现在分区显示：标题要同时罩住「跨会话的后台程序」和「本会话的界面」，
+        // 再叫「本会话的 HTML 程序」就名不副实了。
+        managerTitle: 'HTML 程序',
+        // 分区一：后台活着的项目。宿主只报告「加载了没有」，不报告它属于哪个会话，
+        // 所以一个进程没在本会话开界面也可能出现在这里 —— 这正是「带后台能跨会话」的来源。
+        managerGroupCross: '跨会话的后台程序',
+        managerGroupCrossHint: '它们跑在 DSH 宿主进程里，不属于任何会话：本会话关掉了它还在，所以这里可能出现你从没在本会话打开过的项目。',
+        // 分区二：本会话的界面记录，纯前端页和有界面开着的项目都在这里。
+        managerGroupSession: '本会话的界面',
+        managerGroupSessionHint: '本会话里记录着的每一个界面：无后台的纯前端页，以及后台在跑、界面也开着的项目。',
+        managerGroupSessionEmpty: '本会话没有开着的界面。',
         // 一行的按钮：最小化/最大化共用一个位置，文案跟着界面自身的隐藏状态走；另外两个
         // 各自做一件不可逆的事（关界面 / 结束进程），所以第一次点击只变成一句确认。
         managerMinimize: '最小化',
@@ -989,6 +1013,10 @@ window.__ModuleLoader__.load({
         managerPlacementTitle: '重新显示为',
         managerHintHide: '和界面自身那个隐藏按钮是同一个状态。',
         managerHintRest: '关闭界面丢掉界面、留下进程；结束进程会把界面一并带走。',
+        // 界面自身的关闭按钮：和管理器行一样的两步确认。第一次点击只把按钮换成这句话，
+        // 第二次才真的执行 —— 关掉之后文档就被销毁了，没有任何办法恢复。
+        closeConfirmUi: '确认关闭？界面会被销毁且无法恢复',
+        closeConfirmUiHint: '再点一次就会销毁这个界面：文档消失，没保存的运行期内容一并丢失。',
         managerRestoreUi: '恢复 UI 界面',
         managerRestoreUiHint: '在本会话里重新渲染这个项目',
         managerRestoreUiDone: '界面已恢复。',
@@ -1475,6 +1503,25 @@ window.__ModuleLoader__.load({
     };
 
     /**
+     * The style of a close button with its confirmation showing.
+     *
+     * The glyph button is 22px square, which a sentence cannot fit in; the confirmation is the
+     * *same button* wearing this instead — its label may wrap onto a second line (and does on a
+     * phone), and the accent border is the mark the manager's own confirmation-carrying button
+     * already wears, so the two-step reads the same wherever it appears.
+     */
+    const closeConfirmButtonStyle = Object.assign({}, buttonStyle, {
+      height: 'auto',
+      minHeight: '22px',
+      maxWidth: '100%',
+      padding: '3px 8px',
+      whiteSpace: 'normal',
+      textAlign: 'center',
+      borderColor: 'var(--dsw-alias-bg-accent, #247bbf)',
+      background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.08))',
+    });
+
+    /**
      * A chip: the small rounded mark a status reads as. Always a `span` and never a control —
      * a mark that looks like a button is one readers try to press, and the one pressable thing
      * in this family has a label that says what it does.
@@ -1799,6 +1846,42 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- surfaces
 
+    /**
+     * One close button's two-step confirmation, as component-local state.
+     *
+     * The manager row already asks before an irreversible act, and closing an interface is exactly
+     * that act: `dismissRecord` retires the record locally, tells the host to drop it, and destroys
+     * the document — there is no way back and nothing left to restore. So a close control that a
+     * thumb can land on while scrolling must ask first, in the same words and with the same timer
+     * the manager uses (第一次点击变成确认文案，约 3 秒无操作回退), rather than a second
+     * interaction invented here.
+     *
+     * `action` is deliberately re-read on every render instead of captured in a ref: these
+     * components render a *list* of records and React reuses the state across items unless a key
+     * changes, so a captured callback could be the neighbouring interface's by the time the second
+     * press lands.
+     */
+    function useCloseConfirm(action) {
+      const [armed, setArmed] = useState(false);
+      useEffect(() => {
+        if (armed !== true) return undefined;
+        // 3 seconds, then back to the plain ✕: a control left saying 「确认关闭…」 forever is the
+        // trap this interaction exists to avoid — and on a close button it is worse, because the
+        // next accidental press would then destroy the interface.
+        const timer = setTimeout(() => setArmed(false), 3000);
+        return () => clearTimeout(timer);
+      }, [armed]);
+      const ask = () => {
+        if (armed === true) {
+          setArmed(false);
+          action();
+          return;
+        }
+        setArmed(true);
+      };
+      return { armed: armed === true, ask };
+    }
+
     /** The frame plus, for every variant but `background`, a slim host chrome row. */
     function HtmlUiFrame(props) {
       const { record, theme, variant, bare } = props;
@@ -2045,6 +2128,12 @@ window.__ModuleLoader__.load({
         });
       }, [url, status, record.uiId, record.title, handshake, attempt]);
 
+      // The ✕ on the frame asks before it acts: this is the control the reader's thumb finds while
+      // scrolling, and what it does — `onDismiss` → `dismissRecord` — destroys the document and
+      // takes the record off the host, with nothing left to restore.
+      const closeConfirm = useCloseConfirm(() => props.onDismiss?.(record.uiId));
+      const dismissHint = closeConfirm.armed ? tr('closeConfirmUiHint', 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.') : tr('close', 'Close');
+
       if (variant === 'float') {
         const w = size.w ?? DEFAULT_FLOAT.w;
         const hh = size.h ?? DEFAULT_FLOAT.h;
@@ -2112,12 +2201,18 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
-                  style: buttonStyle,
-                  onClick: () => props.onDismiss(record.uiId),
-                  title: tr('close', 'Close'),
-                  'aria-label': tr('close', 'Close'),
+                  // The confirmation replaces the ✕ in the very same button (the manager's own
+                  // two-step does that too): a second control appearing beside it would be a
+                  // different question in a different place.
+                  style: closeConfirm.armed ? closeConfirmButtonStyle : buttonStyle,
+                  onClick: closeConfirm.ask,
+                  title: dismissHint,
+                  'aria-label': closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
+                  // Announced to assistive technology, and readable from the DOM while the
+                  // confirmation is showing.
+                  'aria-live': closeConfirm.armed ? 'assertive' : undefined,
                 },
-                '✕',
+                closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
               )
               : null,
           ),
@@ -2210,13 +2305,13 @@ window.__ModuleLoader__.load({
       // view, not a window inside it. No title row, no border, no opaque background —
       // but the collapse and close controls stay, as a faint cluster in the corner.
       if (variant === 'dock') {
-        const control = (label, hint, onClick, extra) =>
+        const control = (label, hint, onClick, extra, style) =>
           h(
             'button',
             Object.assign(
               {
                 type: 'button',
-                style: Object.assign({}, buttonStyle, { padding: '1px 6px', fontSize: '11px' }),
+                style: style ?? Object.assign({}, buttonStyle, { padding: '1px 6px', fontSize: '11px' }),
                 onClick,
                 title: hint,
                 'aria-label': hint,
@@ -2234,12 +2329,40 @@ window.__ModuleLoader__.load({
                 { 'aria-expanded': props.collapsed === true ? 'false' : 'true' },
               )
             : null,
-          props.onDismiss !== undefined ? control('✕', tr('close', 'Close'), () => props.onDismiss(record.uiId)) : null,
+          props.onDismiss !== undefined
+            ? control(
+                closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
+                dismissHint,
+                closeConfirm.ask,
+                {
+                  'aria-label': closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
+                },
+                closeConfirm.armed ? closeConfirmButtonStyle : Object.assign({}, buttonStyle, { padding: '1px 6px', fontSize: '11px' }),
+              )
+            : null,
         ];
+        // The document is hidden, never removed. Collapsing used to return the control row
+        // *instead of* this element, which took the `<iframe>` out of the tree: React unmounted
+        // it, the browser destroyed the document inside, and expanding mounted a fresh frame that
+        // reloaded the interface from scratch — every character typed into it, its scroll position
+        // and its whole runtime state gone. `display: none` keeps the same document alive at no
+        // cost, which is exactly how a minimized float and an inactive fullscreen layer are kept.
+        // Collapsed, the box also shrinks to the control row (`flex: 0 0 auto`): the height is
+        // still whatever the seat gives this element, so the row must not stretch to claim it.
+        const hiddenBody = h(
+          'div',
+          {
+            // Names the element a regression test asserts on: the point is that it is still
+            // *rendered* while collapsed, not that it looks right.
+            'data-htmlui-body': record.uiId,
+            style: { flex: props.collapsed === true ? '0 0 auto' : '1 1 auto', minHeight: '0', display: props.collapsed === true ? 'none' : 'flex', flexDirection: 'column' },
+          },
+          body,
+        );
         if (props.collapsed === true) {
-          // Collapsed: just the controls, on their own line, so the split gives the
-          // whole height back to the conversation.
-          return h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '2px', padding: '2px 4px' } }, ...controls);
+          // Collapsed: the controls on their own line, so the split gives the whole height back
+          // to the conversation. The hidden document above takes no space and stays alive.
+          return h('div', { style: { display: 'flex', flexDirection: 'column', width: '100%' } }, hiddenBody, h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '2px', padding: '2px 4px' } }, ...controls));
         }
         return h(
           'div',
@@ -2255,7 +2378,7 @@ window.__ModuleLoader__.load({
               background: 'transparent',
             },
           },
-          h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, body),
+          hiddenBody,
           h(
             'div',
             {
@@ -2265,6 +2388,11 @@ window.__ModuleLoader__.load({
                 right: '4px',
                 display: 'flex',
                 gap: '2px',
+                // The confirmation is a sentence, not a glyph, so the cluster must be allowed to
+                // be as wide as the surface and wrap inside it — a 22px square would clip it.
+                maxWidth: 'calc(100% - 8px)',
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap',
                 opacity: 0.35,
                 transition: 'opacity .15s ease',
               },
@@ -2323,18 +2451,25 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
-                  style: buttonStyle,
-                  onClick: () => props.onDismiss(record.uiId),
-                  title: tr('close', 'Close'),
-                  'aria-label': tr('close', 'Close'),
+                  style: closeConfirm.armed ? closeConfirmButtonStyle : buttonStyle,
+                  onClick: closeConfirm.ask,
+                  title: dismissHint,
+                  'aria-label': closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
                 },
-                '✕',
+                closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
               )
             : null,
         ),
-        props.collapsed === true
-          ? null
-          : h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, body),
+        // Collapsing hides the document instead of dropping it out of the tree: removing it
+        // unmounted the frame and destroyed what the interface held. Same reason as the dock above.
+        h(
+          'div',
+          {
+            'data-htmlui-body': record.uiId,
+            style: { flex: props.collapsed === true ? '0 0 auto' : '1 1 auto', minHeight: '0', display: props.collapsed === true ? 'none' : 'flex', flexDirection: 'column' },
+          },
+          body,
+        ),
       );
     }
 
@@ -2798,6 +2933,45 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Whether one row belongs to the 「跨会话的后台程序」 group rather than 「本会话的界面」.
+     *
+     * The host reports one session-independent fact about a process — `backend.loaded`, with no
+     * sessionId — while an interface record always carries the session it was opened in. A project
+     * whose process is loaded therefore *has* to be listable in a session that never opened it: that
+     * is the whole meaning of a backend that outlives its panel, and it is where 「关闭后台任务」
+     * lives for whoever wants to end it. A live process is the stronger fact, so a project that has
+     * one belongs to the cross-session group **even when this session also has its interface open**:
+     * it is one row, and the group it is under says what that row really is — a host process first,
+     * this session's panel second. That is also what keeps the two groups disjoint by construction.
+     *
+     * The `records.length` fallback covers the other half of the same fact: a row with no interface
+     * left exists only because the process is (or was a moment ago) alive, so it is a process row
+     * too. Without it a row the manager itself just closed would vanish from the page for one stale
+     * catalogue reading while still being counted in the header.
+     */
+    function managerRowIsCrossSession(row) {
+      const template = row === undefined ? undefined : row.template;
+      if (managerBackendLive(template === undefined ? undefined : backendInfoOf(template))) return true;
+      return Array.isArray(row?.records) && row.records.length === 0;
+    }
+
+    /**
+     * One session's manager page as two groups, and never a project in both.
+     *
+     * Kept beside `managerRowsFor` so the header count, the groups and any test all read one
+     * partition instead of three versions of the same rule. The row objects are handed through
+     * untouched: the groups decide *where* a row is drawn, never what its buttons do.
+     */
+    function managerGroupsFor(sessionId) {
+      const rows = managerRowsFor(sessionId);
+      // The cross-session group is decided first and wins: that is what makes a project with both
+      // a live process and an open interface appear exactly once.
+      const cross = rows.filter(managerRowIsCrossSession);
+      const local = rows.filter((row) => !managerRowIsCrossSession(row));
+      return { rows, cross, local, interfaces: local.reduce((total, row) => total + row.records.length, 0) };
+    }
+
+    /**
      * One row's two-step confirmation.
      *
      * No modal: the confirmation is the button itself, which is where the reader is already
@@ -3082,15 +3256,33 @@ window.__ModuleLoader__.load({
         }, 5000);
         return () => clearInterval(timer);
       }, []);
-      const rows = managerRowsFor(sessionId);
-      const interfaceCount = rows.reduce((total, row) => total + row.records.length, 0);
+      // Two groups, one partition: 跨会话的后台程序 first, 本会话的界面 second. A project appears in
+      // exactly one of them (see `managerRowIsCrossSession`), so nothing is listed twice.
+      const groups = managerGroupsFor(sessionId);
+      const rows = groups.rows;
+      // A section is drawn only when it has something in it: an empty group with a heading and a
+      // sentence under it is noise, and the header still counts everything on the page.
+      const section = (title, hint, list) =>
+        list.length === 0
+          ? null
+          : h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', minWidth: '0' } },
+              h(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: '1px', padding: '2px 2px 6px' } },
+                h('span', { style: Object.assign({}, titleStyle, { whiteSpace: 'normal' }) }, `${title} (${list.length})`),
+                h('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', lineHeight: '15px' } }, hint),
+              ),
+              ...list.map((row) => h(HtmlUiManagerRow, { key: row.key, row, sessionId, props, onStatus: setStatus })),
+            );
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', padding: '10px 12px' } },
         h(
           'div',
           { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' } },
-          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML programs in this session')} (${rows.length})`),
+          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML programs')} (${rows.length})`),
           // The same create flow the composer control opens. A reader who cannot find a
           // small control beside the composer should not have to hunt for the way in.
           h(
@@ -3117,8 +3309,26 @@ window.__ModuleLoader__.load({
           : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, String(status)),
         rows.length === 0
           ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML program.'))
-          : h('div', null, ...rows.map((row) => h(HtmlUiManagerRow, { key: row.key, row, sessionId, props, onStatus: setStatus }))),
-        interfaceCount === 0
+          : h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', minHeight: '0', overflowY: 'auto' } },
+              section(
+                tr('managerGroupCross', 'Backend programs (cross-session)'),
+                tr('managerGroupCrossHint', 'Their process runs inside the DSH host, not in a conversation: it stays up after this session closes, which is why a program you never opened here can be listed.'),
+                groups.cross,
+              ),
+              // 本会话这一区为空、但后台区不为空时要说一句：否则读者只会看到一页「别的会话的程序」，
+              // 却不知道本会话为什么什么都没有。
+              groups.cross.length > 0 && groups.local.length === 0
+                ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', padding: '2px 2px 6px' } }, tr('managerGroupSessionEmpty', 'This session has no interface open.'))
+                : null,
+              section(
+                tr('managerGroupSession', 'Interfaces in this session'),
+                tr('managerGroupSessionHint', 'Every interface recorded in this session: plain front-end pages, and projects whose backend is running with an interface open.'),
+                groups.local,
+              ),
+            ),
+        groups.interfaces === 0
           ? null
           : h(
               'div',
@@ -3698,6 +3908,40 @@ window.__ModuleLoader__.load({
     // ------------------------------------------------------------------ overlay
 
     /**
+     * The fullscreen layer's own title row.
+     *
+     * It is a component rather than a few elements built inline in `overlayLayers` because the ✕
+     * here needs the same two-step confirmation as every other close control, and a two-step is
+     * state: one instance per record (the layer array is keyed by `uiId`) keeps every interface's
+     * question its own instead of sharing one flag across the session's fullscreen surfaces.
+     *
+     * 切回聊天 is not confirmed: it hides the layer (`state.fullscreenDismissed`) and leaves the
+     * record and its document alone, so it is the safe way out — and the one a reader should take.
+     */
+    function HtmlUiFullscreenChrome(props) {
+      const { record, onLeave, onDismiss } = props;
+      const closeConfirm = useCloseConfirm(onDismiss);
+      const title = record.title !== undefined && record.title.length > 0 ? record.title : record.uiId;
+      return h(
+        'div',
+        { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
+        h('span', { style: titleStyle }, `${title} ${tr('fullscreenSuffix', '· fullscreen')}`),
+        h('button', { type: 'button', style: buttonStyle, onClick: onLeave }, tr('backToChat', 'Back to chat')),
+        h(
+          'button',
+          {
+            type: 'button',
+            style: closeConfirm.armed ? closeConfirmButtonStyle : buttonStyle,
+            onClick: closeConfirm.ask,
+            title: closeConfirm.armed ? tr('closeConfirmUiHint', 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.') : tr('close', 'Close'),
+            'aria-label': closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
+          },
+          closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
+        ),
+      );
+    }
+
+    /**
      * Every overlay surface of one session, in stacking order.
      *
      * The float, background and fullscreen forms live in the frame-wide overlay seat, and so does
@@ -3827,21 +4071,7 @@ window.__ModuleLoader__.load({
               'aria-modal': 'true',
               'aria-label': surface.title.length > 0 ? surface.title : surface.uiId,
             },
-            h(
-              'div',
-              { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
-              h('span', { style: titleStyle }, `${surface.title.length > 0 ? surface.title : surface.uiId} ${tr('fullscreenSuffix', '· fullscreen')}`),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  style: buttonStyle,
-                  onClick: () => leaveFullscreen(surface.uiId),
-                },
-                tr('backToChat', 'Back to chat'),
-              ),
-              h('button', { type: 'button', style: buttonStyle, onClick: () => dismiss(surface.uiId) }, tr('close', 'Close')),
-            ),
+            h(HtmlUiFullscreenChrome, { record: surface, onLeave: () => leaveFullscreen(surface.uiId), onDismiss: () => dismiss(surface.uiId) }),
             h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: surface, theme: state.theme, variant: 'dock', bare: true })),
           ),
         );
@@ -5299,6 +5529,11 @@ window.__ModuleLoader__.load({
         // (interface open, closed, hidden) instead of inferring those states from the page.
         HtmlUiManagerRow,
         managerRowsFor,
+        // The manager's two groups are the page's structure now, so they are exported the same way
+        // the flat row list is: a test can assert the partition (and that no project lands in both)
+        // without inferring it from the rendered headings.
+        managerGroupsFor,
+        managerRowIsCrossSession,
         managerTitleOf,
         managerPlacementFor,
         recordHidden,
@@ -5326,6 +5561,11 @@ window.__ModuleLoader__.load({
         raiseFloat,
         HtmlUiRightPane,
         HtmlUiFrame,
+        // The two-step close and the fullscreen chrome that carries it are exported for the same
+        // reason as the rest: the confirmation is the only thing standing between a mis-tap and a
+        // destroyed document, so a test has to be able to render it.
+        useCloseConfirm,
+        HtmlUiFullscreenChrome,
         HtmlUiToolView,
         HtmlUiDock,
         HtmlUiOverlay,

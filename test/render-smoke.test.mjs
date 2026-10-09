@@ -18,6 +18,18 @@ import { test } from 'node:test';
 
 // ------------------------------------------------------------------ fake React
 
+/**
+ * The `useState` the client will actually call.
+ *
+ * `client.js` does `const { useState } = require('react')` once, at load, so the hook it calls is
+ * the function handed over at that moment — reassigning a property on the stub afterwards would
+ * change nothing. This indirection is what lets `renderStateful` swap in a state-carrying version
+ * for the two tests that read a two-step confirmation, while every other test keeps the
+ * "every render starts clean" behaviour the rest of this file is written against.
+ */
+const statelessUseState = (initial) => [typeof initial === 'function' ? initial() : initial, () => {}];
+let activeUseState = statelessUseState;
+
 /** Deterministic hooks: enough to execute a branch, never to run an effect. */
 function stubReact() {
   const note = (name) => {
@@ -30,9 +42,11 @@ function stubReact() {
       }
     },
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+    // Deliberately not `activeUseState` itself: the client captures this arrow, and the arrow
+    // reads whichever implementation is current when it is called.
     useState: (initial) => {
       note('useState');
-      return [typeof initial === 'function' ? initial() : initial, () => {}];
+      return activeUseState(initial);
     },
     useEffect: () => {
       note('useEffect');
@@ -91,8 +105,9 @@ globalThis.document = {
 };
 
 await import('../client.js');
+const ReactStub = stubReact();
 const exported = loaded[0].factory((id) => {
-  if (id === 'react') return stubReact();
+  if (id === 'react') return ReactStub;
   throw new Error(`unexpected require(${id})`);
 });
 const { __internals } = exported;
@@ -128,6 +143,63 @@ const render = (component, props) => {
   const tree = walk(component(props ?? {}));
   return { tree, text: tree.text.join(' '), elements: tree.elements };
 };
+
+/**
+ * Render one function component so its hook state survives across renders.
+ *
+ * The stub above hands every render a brand-new state (`useState` returns its initial value and a
+ * no-op setter), which is what makes the plain `render` a *shallow* render. A two-step
+ * confirmation cannot be read that way: whether the second press acts depends on what the first
+ * press stored, so the interaction would be untestable. This models the one thing React does here
+ * — a state update is visible to the next render — without pulling in a renderer.
+ *
+ * The cells live in `__internals.state.hookState`, not in module scope, so the reset every test
+ * already calls (`resetStore`) clears them too, and they never leak between suites.
+ *
+ * @returns the walked tree, plus `press(label)` — which clicks the button carrying that label and
+ *          re-renders — and the elements/text of the last render.
+ */
+let statefulKey = 0;
+function renderStateful(component, props) {
+  const store = __internals.state;
+  if (store.hookState === undefined) store.hookState = new Map();
+  const key = `stateful-${++statefulKey}`;
+  const renderOnce = (nextProps) => {
+    const cells = [];
+    activeUseState = (initial) => {
+      const index = cells.length;
+      const cell = `${key}:${index}`;
+      const seed = () => (typeof initial === 'function' ? initial() : initial);
+      const value = store.hookState.has(cell) ? store.hookState.get(cell) : seed();
+      // Written straight through rather than queued: this helper models "a state update is visible
+      // to the next render", and the next render is the one `rerender` runs on demand.
+      const set = (next) => store.hookState.set(cell, typeof next === 'function' ? next(value) : next);
+      cells.push(value);
+      return [value, set];
+    };
+    let tree;
+    try {
+      tree = walk(component(nextProps));
+    } finally {
+      cells.forEach((value, index) => {
+        const cell = `${key}:${index}`;
+        if (!store.hookState.has(cell)) store.hookState.set(cell, value);
+      });
+      activeUseState = statelessUseState;
+    }
+    return { tree, text: tree.text.join(' '), elements: tree.elements };
+  };
+  const api = { rerender: (nextProps) => Object.assign(api, renderOnce(nextProps ?? props)) };
+  Object.assign(api, renderOnce(props));
+  /** Click the one button carrying this label, then re-render — the second press of a two-step. */
+  api.press = (label) => {
+    const target = buttonsLabelled({ elements: api.elements }, label)[0];
+    assert.ok(target !== undefined, `a button labelled ${label} is on screen`);
+    target.props.onClick();
+    api.rerender(props);
+  };
+  return api;
+}
 
 const recordFor = (placement, overrides = {}) => ({
   uiId: 'ui-1a2b3c4d',
@@ -1470,5 +1542,198 @@ test('stopping a backend posts the stop route, and the row behind the message ag
     globalThis.fetch = realFetch;
     state.templates = saved;
   }
+});
+
+// ------------------------------------------------- the collapse must not destroy
+
+/** The document element of one frame: `display: none` while collapsed, never absent. */
+const bodyOf = (elements, uiId) => elements.find((element) => element.props?.['data-htmlui-body'] === uiId);
+
+test('collapsing a docked interface hides its document and never removes it from the tree', () => {
+  // The regression this guards: collapsing used to return the control row *instead of* the body,
+  // so React unmounted the frame, the browser destroyed the document, and expanding reloaded a
+  // blank interface — typed input and all runtime state gone. The assertion has to be about the
+  // element still being *rendered*: a test that only checked the copy would pass on the broken
+  // build, because the collapsed control row looks exactly the same.
+  resetStore();
+  const record = recordFor('dock-right');
+  const open = render(__internals.HtmlUiFrame, { record, theme: 'light', variant: 'dock', collapsed: false, onToggleCollapse: () => {}, onDismiss: () => {} });
+  const openBody = bodyOf(open.elements, record.uiId);
+  assert.ok(openBody !== undefined, 'an expanded dock renders its document');
+  assert.equal(openBody.props.style.display, 'flex', 'and shows it');
+
+  const collapsed = render(__internals.HtmlUiFrame, { record, theme: 'light', variant: 'dock', collapsed: true, onToggleCollapse: () => {}, onDismiss: () => {} });
+  const collapsedBody = bodyOf(collapsed.elements, record.uiId);
+  assert.ok(collapsedBody !== undefined, 'a collapsed dock STILL renders its document element');
+  assert.equal(collapsedBody.props.style.display, 'none', 'hidden by style, not by removal');
+  assert.equal(collapsedBody.props.style.flex, '0 0 auto', 'and it takes no height from the conversation');
+  assert.match(collapsed.text, /Preparing interface/u, 'the frame itself is still mounted inside it');
+  // The controls stay reachable: the reader must be able to expand it again.
+  assert.match(collapsed.text, /▸/u, 'the expand control is on the collapsed row');
+  resetStore();
+});
+
+test('the right column collapses its children in place, so their documents survive', () => {
+  // The same loss, reached the way a reader reaches it: the ▾ on the surface inside the column.
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-c0100001', sessionId: 'session-1', title: '右栏', placement: 'dock-right', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const pane = (collapsed) => {
+    if (collapsed) state.collapsed.set('ui-c0100001', true);
+    else state.collapsed.delete('ui-c0100001');
+    return render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
+  };
+  const open = pane(false);
+  assert.ok(bodyOf(open.elements, 'ui-c0100001') !== undefined, 'the column renders the interface');
+  const collapsed = pane(true);
+  const body = bodyOf(collapsed.elements, 'ui-c0100001');
+  assert.ok(body !== undefined, 'a collapsed child of the column is still rendered');
+  assert.equal(body.props.style.display, 'none', 'and is only hidden');
+  assert.match(collapsed.text, /Preparing interface/u, 'so its document was never unmounted');
+  resetStore();
+});
+
+// ---------------------------------------------------- the close buttons must ask
+
+test('every close control that destroys an interface asks first, and acts on the second press', () => {
+  withChinese(() => {
+    // All three forms end in the same place: `dismissRecord` retires the record locally and tells
+    // the host to drop it, destroying the document. So all three ask, in the manager's own words
+    // and with the manager's own two-step — a first press arms, a second press acts.
+    const confirmLabel = '确认关闭？界面会被销毁且无法恢复';
+
+    // dock-right (the right column). The ✕ is a glyph button; the confirmation replaces its label.
+    resetStore();
+    let dockDismissed = [];
+    const dockProps = {
+      record: recordFor('dock-right'),
+      theme: 'light',
+      variant: 'dock',
+      collapsed: false,
+      onToggleCollapse: () => {},
+      onDismiss: (uiId) => dockDismissed.push(uiId),
+    };
+    const dock = renderStateful(__internals.HtmlUiFrame, dockProps);
+    assert.ok(dock.text.includes('✕'), 'the close starts as a plain ✕');
+    dock.press('✕');
+    assert.ok(dock.text.includes(confirmLabel), 'the first press turns the ✕ into the question');
+    assert.deepEqual(dockDismissed, [], 'and destroys nothing');
+    dock.press(confirmLabel);
+    assert.deepEqual(dockDismissed, ['ui-1a2b3c4d'], 'the second press is what closes it');
+
+    // float. It carries a minimize as well, which is *not* confirmed: putting a window away is
+    // recoverable (the record stays, the document stays), so asking there would be friction.
+    resetStore();
+    let floatDismissed = [];
+    const floatProps = {
+      record: recordFor('float'),
+      theme: 'light',
+      variant: 'float',
+      onMinimize: () => {},
+      onDismiss: (uiId) => floatDismissed.push(uiId),
+    };
+    const float = renderStateful(__internals.HtmlUiFrame, floatProps);
+    float.press('✕');
+    assert.ok(float.text.includes(confirmLabel), 'a float asks too');
+    assert.deepEqual(floatDismissed, [], 'and closes nothing on the first press');
+    float.press(confirmLabel);
+    assert.deepEqual(floatDismissed, ['ui-1a2b3c4d'], 'and closes on the second');
+
+    // fullscreen. 切回聊天 is the safe way out — it only hides the layer — so it is offered first
+    // and is not confirmed, which is what keeps the confirmation meaningful.
+    resetStore();
+    const fsLeaves = [];
+    const fsDismissed = [];
+    const chrome = renderStateful(__internals.HtmlUiFullscreenChrome, {
+      record: recordFor('fullscreen'),
+      onLeave: () => fsLeaves.push('left'),
+      onDismiss: () => fsDismissed.push('dismissed'),
+    });
+    chrome.press('切回聊天');
+    assert.deepEqual(fsLeaves, ['left'], 'leaving the layer acts at once');
+    assert.deepEqual(fsDismissed, [], 'and is not what closes the interface');
+    chrome.press('关闭');
+    assert.deepEqual(fsDismissed, [], 'the fullscreen close asks as well');
+    assert.ok(chrome.text.includes(confirmLabel), 'with the same words as the other two');
+    chrome.press(confirmLabel);
+    assert.deepEqual(fsDismissed, ['dismissed'], 'and only the second press destroys it');
+    resetStore();
+  });
+});
+
+// ------------------------------------------------ the manager's two groups
+
+test('the manager splits cross-session processes from this session’s interfaces, with no row in both', () => {
+  resetStore();
+  resetCreate();
+  // Two projects whose process is loaded, and one that declares a backend but is not running.
+  const other = { slug: 'other', name: '别的', description: '', bytes: 1, backend: { declared: true, allowed: true, resident: true, loaded: true } };
+  const idle = { slug: 'idle', name: '闲着', description: '', bytes: 1, backend: { declared: true, allowed: true, resident: false, loaded: false } };
+  setCatalogue([backendProject(), other, idle]);
+  resetStore([
+    // This session's own interface of heimiao: the project has a live process *and* an interface
+    // here, and it must still be listed exactly once.
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-g1000001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+    // A plain front-end page: no project, no process, strictly this session's.
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-g2000001', sessionId: 'session-1', title: '纯页面', placement: 'float', revision: 1, bytes: 5 }, undefined),
+  ]);
+
+  const groups = __internals.managerGroupsFor('session-1');
+  // The two live processes are the cross-session group — heimiao included, even though this session
+  // has its interface open: what that row stands for is a process in the host, which is the
+  // stronger fact and the one the section's own explanation is about.
+  assert.deepEqual(groups.cross.map((row) => row.key), ['heimiao', 'other'], 'every loaded process is a cross-session program, interfaces or not');
+  assert.deepEqual(groups.local.map((row) => row.key), ['ui:ui-g2000001'], 'and this session’s own interfaces are the plain pages');
+  assert.equal(groups.interfaces, 1, 'which is what the interface count counts');
+  // The invariant, stated directly: no project key is in both groups, and the groups together are
+  // exactly the rows the header counts.
+  const overlap = groups.cross.filter((row) => groups.local.some((entry) => entry.key === row.key));
+  assert.deepEqual(overlap, [], 'no project appears in both groups');
+  assert.deepEqual(
+    [...groups.cross, ...groups.local].map((row) => row.key).sort(),
+    groups.rows.map((row) => row.key).sort(),
+    'and the two groups are the whole list, not a filtered view of it',
+  );
+  // The idle project is neither: it is declared, nothing is loaded, and this session never opened
+  // it, so it is somebody else's process and the manager has no row to offer.
+  assert.ok(!groups.rows.some((row) => row.key === 'idle'), 'a declared backend that is not loaded is not a row');
+
+  withChinese(() => {
+    const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    assert.ok(manager.text.includes('跨会话的后台程序 (2)'), 'the cross-session group says what it is, and how many');
+    assert.ok(manager.text.includes('跑在 DSH 宿主进程里'), 'and explains that it belongs to no session');
+    assert.ok(manager.text.includes('本会话的界面 (1)'), 'the session group is named and counted too');
+    // One row per program in the rendering as well, not only in the partition: heimiao is drawn
+    // once, under the cross-session heading.
+    assert.equal(buttonsLabelled(manager, '关闭后台任务').length, 2, 'one process control per process row');
+    assert.equal(buttonsLabelled(manager, '关闭会话').length, 1, 'and the plain page closes itself');
+    // Its interface is still operable from there: the group moved the row, not its controls.
+    assert.equal(buttonsLabelled(manager, '关闭UI界面').length, 1, 'a process row keeps its interface control');
+  });
+
+  // A session with nothing of its own shows the cross-session group and says why the other half is
+  // empty, instead of leaving the reader to guess whether the page is broken.
+  assert.equal(render(__internals.HtmlUiManager, { sessionId: 'session-2' }).text.includes('Backend programs (cross-session)'), true, 'the English fallback names the group too');
+  withChinese(() => {
+    const text = render(__internals.HtmlUiManager, { sessionId: 'session-2' }).text;
+    assert.ok(text.includes('跨会话的后台程序'), 'another session sees the live processes');
+    assert.ok(!text.includes('本会话的界面 ('), 'and no session group, because it has none');
+    assert.ok(text.includes('本会话没有开着的界面'), 'with a line saying so');
+  });
+
+  // When the process is gone there is nothing cross-session left, so that heading goes with it.
+  setCatalogue([{ slug: 'other', name: '别的', description: '', bytes: 1, backend: { declared: true, allowed: true, resident: false, loaded: false } }]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-g3000001', sessionId: 'session-1', title: '纯页面', placement: 'float', revision: 1, bytes: 5 }, undefined),
+  ]);
+  assert.deepEqual(__internals.managerGroupsFor('session-1').cross, [], 'nothing loaded, nothing cross-session');
+  withChinese(() => {
+    const only = render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text;
+    assert.ok(only.includes('本会话的界面 (1)'), 'only the session group is drawn');
+    assert.ok(!only.includes('跨会话的后台程序'), 'and the empty group leaves no heading behind');
+  });
+  resetStore();
+  state.templates.items = [];
+  resetCreate();
 });
 
