@@ -437,7 +437,7 @@ test('the fallback dock draws nothing without a record, but still measures the c
   resetStore([__internals.recordFromMeta(meta('ui-44440000', 'dock-right'), undefined)]);
   const claimed = render(__internals.HtmlUiDock, { session: { id: 'session-1' }, placements: ['dock-right'] });
   assert.match(claimed.text, /Preparing interface/u);
-  assert.ok(!claimed.text.includes('ui-44440000'), 'a docked split draws no title row');
+  assert.ok(!claimed.text.includes('ui-44440000'), 'a docked surface draws no title row');
   assert.match(claimed.text, /✕/u);
 });
 
@@ -515,7 +515,7 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   assert.match(overlay.text, /fullscreen/u);
   // The layer's own bar: the way out is the float's minimize — the same '—', from the same
   // factory — rather than a differently-worded control of its own.
-  assert.match(overlay.text, /—/u, 'the switch back is the window minimize the float draws');
+  assert.match(overlay.text, /—/u, 'the way out is the window minimize the float draws');
   assert.ok(!overlay.text.includes('Back to chat'), 'and it is no longer a control with its own name');
   // The layer draws the chrome, so the frame inside must not draw a second one.
   assert.equal(overlay.text.match(/fullscreen/gu).length, 1, 'exactly one title row');
@@ -1810,12 +1810,12 @@ test('restarting a project into the right column opens the column, exactly as th
 // ------------------------------------------------ one set of window controls, everywhere
 
 test('the fullscreen bar wears the float’s window controls, not a pair of its own', () => {
-  // The regression this guards: the fullscreen layer spelled its own two controls out — 「切回聊天」
-  // in words and a labelled 「关闭」— so the same two acts wore a different shape from the float's
-  // '—' and '✕', and the safe way out of a fullscreen surface did not look like the safe way out
-  // of a window. Style is asserted by *identity*, not by copy: the same style constants and the
-  // same glyphs are what make them the same control, and a copy assertion would pass on two
-  // lookalikes that drift apart again tomorrow.
+  // The regression this guards: the fullscreen layer spelled its own two controls out — a
+  // worded dismiss and a labelled 「关闭」— so the same two acts wore a different shape from the
+  // float's '—' and '✕', and the safe way out of a fullscreen surface did not look like the safe
+  // way out of a window. Style is asserted by *identity*, not by copy: the same style constants
+  // and the same glyphs are what make them the same control, and a copy assertion would pass on
+  // two lookalikes that drift apart again tomorrow.
   //
   // The *shape* of the row is asserted just as hard, in the other direction: the two controls are
   // written into the chrome row itself, so the fullscreen bar must contain no wrapper node of its

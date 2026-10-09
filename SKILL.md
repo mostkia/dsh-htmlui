@@ -1,6 +1,6 @@
 ---
 name: dsh-htmlui
-description: Author an HTML/CSS/JS interface and attach it to the DSH conversation with the html_ui tool — inline in the transcript, docked around the composer, floating, fullscreen, or as a resident panel — and talk to the model from inside it through window.dshHTML.
+description: Author an HTML/CSS/JS interface and attach it to the DSH conversation with the html_ui tool — inline in the transcript, in the session's right column, floating, fullscreen, or as a click-through background layer — and talk to the model from inside it through window.dshHTML.
 whenToUse: Use when a request needs a real interactive surface (dashboard, form, editor, multi-step tool, app-like flow) rather than prose, a code block, or a fixed component vocabulary.
 ---
 
@@ -21,7 +21,7 @@ in a sandboxed iframe; the document talks back through `window.dshHTML`.
 Large documents belong in a file, not in the conversation:
 
 1. Write the document with the file tools (`write`).
-2. Attach it to the session's right column, where it gets the most room:
+2. Attach it to the session's right column:
    `html_ui { "op": "render", "path": "ui/dashboard.html", "title": "订单看板", "placement": "dock-right" }`.
    With `inline` (the default) the document appears at the end of the turn that
    attached it, seamlessly, in the conversation flow.
@@ -60,7 +60,7 @@ folder picker). Nothing else is listed — no bundled samples, no hidden store �
 
 The vertical docks (`dock-top` / `dock-bottom`) and `panel` were removed: a surface that
 only squeezes the session view reads as a window parked inside the conversation, and
-`dock-right` already gives a real split.
+`dock-right` is simply the session's right column.
 
 Give `size` as `"WxH"` or `"WxH+X+Y"`.
 
@@ -184,8 +184,9 @@ reads a file, or keeps a cache in memory possible at all.
 module.exports = {
   // Optional. Declare this when the backend has work that must continue with no panel open —
   // a watcher, a timer, an alert. The host then never drops it for being idle, so the reader
-  // has to stop it explicitly (the manager and the drawer both offer that). Leave it out and the
-  // module is dropped after ten idle minutes, which is the right default for everything else.
+  // has to stop it explicitly: the manager row's Close backend task does it, and so does
+  // turning this switch off. Leave it out and the module is dropped after ten idle minutes,
+  // which is the right default for everything else.
   resident: true,
   // Optional. `start(info)` runs when the module is first loaded, `stop(reason)` when it is
   // dropped; either may be async. Both are where a polling timer belongs — and with `resident`
@@ -278,7 +279,7 @@ user may already have an interface in front of them that you never created: read
 as the thing to `update` rather than something to replace with a second copy.
 
 The right column's tab is registered only while a `dock-right` interface exists, so a
-session with none has no HTML UI page in that column at all.
+session with none has no `HTML UI` tab in that column at all.
 
 ## Reading results
 

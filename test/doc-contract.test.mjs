@@ -46,7 +46,7 @@ test('every placement is documented for the model and for the user', () => {
     assert.ok(skill.includes(`\`${placement}\``), `SKILL.md must document ${placement}`);
   }
   for (const file of ['README.md', 'README.zh.md']) {
-    // A placement may share a row with another (`dock-top` / `dock-bottom`).
+    // Any table row that names the placement counts, so two may share one row.
     const rows = list.filter((placement) =>
       read(file)
         .split('\n')

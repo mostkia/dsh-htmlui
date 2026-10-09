@@ -51,10 +51,10 @@ Attach one of each and confirm it appears where its placement promises:
 | Placement | What to look for |
 |---|---|
 | `inline` | The document renders at the end of the turn that attached it, seamlessly: no chrome, no border, no background, height taken from the document (680×383 measured). It scrolls only past the height cap. A template applied from the drawer was attached by no call, so it lands at the end of the last turn that had *closed* when it was applied — and, like a tool-created one, it stays there |
-| `dock-right` | The session's right column opens a tab hosting it (851×830 measured): no title row of its own, and **each object keeps a faint ▾ collapse and ✕ close** in the corner — the column can hold several independent surfaces, so one of them being in the way must not close the tab for all of them. Closing the tab itself retires the session's right-column interfaces (after a delay that a mere column hide or session switch survives), so the session page cannot list surfaces nothing can show. The tab is registered only while something needs it: with no `dock-right` record the column holds **no HTML UI page at all**. While that column cannot open a tab (no controller bound) it falls back to the wide dock above the composer, never to both |
+| `dock-right` | The session's right column opens a tab hosting it (851×830 measured): no title row of its own, and **each object keeps a faint ▾ collapse and ✕ close** in the corner — the column can hold several independent surfaces, so one of them being in the way must not close the tab for all of them. Closing the tab itself retires the session's right-column interfaces (a plain column hide or a Session switch never unmounts that body — it is registered `keepMounted` — so only a real tab close does this), so the manager page cannot list surfaces nothing can show. The tab is registered only while something needs it: with no `dock-right` record the column holds **no HTML UI tab at all**. While that column cannot open a tab (no controller bound) it falls back to the wide dock above the composer, never to both |
 | `float` | A window that drags by its **title text** and resizes from the corner (arrows work on the focused handle); `size` sets where it starts. The ✕ closes it for good: the record leaves the host store |
 | `fullscreen` | The surface covers the **conversation column**, not the frame: the left sidebar keeps its width and stays usable (measured from our own seat inside the column, so no other plugin's DOM is read). Its two controls are the float's: "Minimize" gives the chat back while **keeping** the record, and ✕ asks once before deleting it |
-| Session page | The conversation's view row carries an `HTML programs` page listing one row per programme — resident processes in one group, this session's interfaces in another — with per-row `Minimize`, `Close UI` (which becomes `Restart UI`, asking where to put it) and `Close backend`; both destructive controls ask once, in place |
+| HTML manager | The conversation's view row carries an `HTML manager` page listing **one row per program**, in two groups: backend programs that live across sessions (`Backend programs (cross-session)`), then this session's interfaces (`Interfaces in this session`), with no program in both. A row with a backend carries `Minimize`/`Maximize`, `Close UI` (which becomes `Restart UI` and asks where to put it) and `Close backend task`; a row without one carries `Minimize`/`Maximize` and `Close session` instead. Both destructive controls ask once, in place, and revert after about three seconds |
 | `background` | A click-through layer over the frame (1920×919 measured, the whole frame because it has no chrome): the page under it still receives clicks |
 
 Two constraints of the host layout, worth knowing before judging a failure:
@@ -121,10 +121,10 @@ Two constraints of the host layout, worth knowing before judging a failure:
 
 ## 3. The template drawer
 
-The composer carries a `⟨/⟩ 模板` control. Open it and check:
+The composer carries a `⟨+⟩ New HTML` (中文 `⟨+⟩ 新建 HTML`) control. Open it and check:
 
-- The catalogue lists the packaged `starter` template (marked 自带) plus anything
-  you saved.
+- The catalogue lists the blank canvas (marked bundled / 自带) plus whatever is in the
+  templates directory you pointed the plugin at, and nothing else.
 - **套用** puts a surface in the session immediately — no model turn, no message
   in the transcript. Ask the model for `html_ui op=list` and it should name the
   new id.
@@ -188,8 +188,8 @@ What to expect:
   `resident: true`, and call it once: `/health` shows it with `resident: true` and `declaredResident:
   true`, and the catalogue row reads `backend: { declared: true, allowed: true, resident: true,
   loaded: true }`. Close its panel, wait past the idle delay, and it is **still** listed and still
-  doing its work (its own timer keeps firing). Tick residency off in the form, or press **Stop
-  backend** in the manager (or in the drawer row), and it is gone from `/health` immediately while
+  doing its work (its own timer keeps firing). Tick residency off in the form, or press **Close
+  backend task** in its manager row, and it is gone from `/health` immediately while
   `allowed` stays true — opening the project again loads it again. Restore `backendIdleMs` after.
 - Residency is per project and belongs to the reader: a project that declares it can still be held to
   the idle rule by turning the switch off, and the answer survives a restart in `settings.json`.
@@ -208,6 +208,6 @@ What to expect:
 | `dshHTML.app` answers 403 | The project ships a backend but the reader has not allowed it | The project's pencil → the backend switch; `/templates` reports `backend.declared` / `.allowed` |
 | `dshHTML.app` answers 404 | The manifest declares no backend, or the file it names is gone | `meta.json`'s `backend`, and the file it points at |
 | `dshHTML.app` answers 504 | The handler did not answer inside `appTimeoutMs` | The handler's own timing; raise `appTimeoutMs` for a slow API |
-| A backend keeps running after its panel is closed | It declared `resident: true` and the reader's answer allows it | Expected; press **Stop backend** in the manager or the drawer row, or switch residency off |
+| A backend keeps running after its panel is closed | It declared `resident: true` and the reader's answer allows it | Expected; press **Close backend task** in its manager row, or switch residency off |
 | A resident backend never picks up an edit | A resident module is only reloaded when something calls it | Call it once (open the panel), or stop it and let the next call load the new file |
 | A stopped backend came back | Opening the project again loads it; a rule stored by the app may resume its work | `POST /templates/backend/stop`, and stop the work in the app itself |

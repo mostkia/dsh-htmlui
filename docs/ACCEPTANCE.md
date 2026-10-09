@@ -41,7 +41,7 @@ attributed to the wrong surface.
 | `dock-top` | `1633×321, visible` | works, **since removed** |
 | `dock-bottom` | `325×321, visible` (a narrower seat, as measured) | works, **since removed** |
 | `dock-right` | `851×830, visible`; the tab opens itself | works |
-| `panel` | `1633×321, visible` | works |
+| `panel` | `1633×321, visible` | works, **since removed** |
 | `float` | `520×343, visible` for a requested `520x380+140+140` (343 = 380 minus its chrome); its ✕ drops the record from the host (`/ui/list` count 1 → 0) | works |
 | `fullscreen` | `1920×882, visible`; "Minimize" leaves the layer and keeps the record (host count stays 1); ✕ asks once and then deletes it | works |
 | `background` | `1920×919, visible` — the whole frame, because this layer has no chrome | works |
@@ -55,19 +55,19 @@ now renders in the turn that owns it and stays there as the conversation grows;
 
 Sizes depend on the window; the pairs are what matter. `dock-top`/`panel` were the
 same seat (1633 px wide here) and `dock-bottom` was a different and narrower one
+(325 px), and the two overlay layers differ by exactly one chrome row: `background`
+fills all 919 px, `fullscreen` gives up 37 px to its title bar. That last number is
+also the evidence for the single-title-bar fix: the same layer measured 845 px
+before it, i.e. one extra row.
 
 ## Removed after acceptance
 
 `dock-top`, `dock-bottom` and `panel` are gone. They worked, and the user judged them
 unsuitable: a surface that only takes height from the session view reads as a window
 parked inside the conversation rather than part of it, and the same content is better
-placed in the right column, which is a real left/right split. `inline` was reworked
-instead — seamless, content-sized, rendered at the end of its turn — and `dock-right`
-was made seamless too, since its tab already carries the title.
-(325 px), and the two overlay layers differ by exactly one chrome row: `background`
-fills all 919 px, `fullscreen` gives up 37 px to its title bar. That last number is
-also the evidence for the single-title-bar fix: the same layer measured 845 px
-before it, i.e. one extra row.
+placed in the session's right column. `inline` was reworked instead — seamless,
+content-sized, rendered at the end of its turn — and `dock-right` was made seamless
+too, since its tab already carries the title.
 
 The nine self-checks that passed inside a live document: `window.dshHTML` exists,
 version, `uiId`, `sessionId`, theme, `parent.document` access refused,

@@ -197,7 +197,7 @@ test('registers the tool card, the fallback dock, the drawer, the overlay and th
   assert.ok(byId().includes(`sidebar.right.pane.tab#${__internals.TAB_ID}`));
   __internals.retire('ui-aa770000', 'session-lazy');
   // The registration is gone from the registry, which is what keeps an empty session's
-  // column free of an HTML UI page.
+  // column free of an HTML UI tab.
   assert.equal(
     context.registrations.some((entry) => entry.options.name === 'sidebar.right.pane.tab'),
     false,
@@ -1149,7 +1149,7 @@ test('a superseded card stops claiming the interface', () => {
   assert.equal(__internals.isCurrentRevision('ui-55550000', 3), true);
 });
 
-test('the fullscreen layer opens by itself and honours switching back', () => {
+test('the fullscreen layer opens by itself and honours minimizing it', () => {
   const fullscreenRecord = (uiId) => ({ uiId, placement: 'fullscreen', sessionId: 'session-1' });
   __internals.state.fullscreen = null;
   __internals.state.fullscreenDismissed.clear();
@@ -1158,7 +1158,7 @@ test('the fullscreen layer opens by itself and honours switching back', () => {
   const first = fullscreenRecord('ui-aaaa0001');
   assert.equal(__internals.activeFullscreen([first]).uiId, 'ui-aaaa0001');
 
-  // "Switch back to chat" must keep it closed. The old selection logic re-picked
+  // Minimizing the fullscreen layer must keep it put away. The old selection logic re-picked
   // the same record on the next render, so the button looked broken.
   __internals.state.fullscreen = null;
   __internals.state.fullscreenDismissed.add('ui-aaaa0001');

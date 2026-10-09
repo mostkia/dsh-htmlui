@@ -5,12 +5,10 @@
  * its record says it belongs:
  *
  *   inline                 the tool card that carried it, inside the transcript
- *   dock-right      the session side panel
- *   panel                  the same dock, refreshed in place
+ *   dock-right             the session's right column, as a tab
  *   float                  a draggable, resizable window over the frame
  *   background             a click-through layer over the frame
- *   fullscreen             covers the session, with a built-in switch back to chat
- *   dock-right             the session's right column, as a tab
+ *   fullscreen             covers the session; minimize hides it, close asks first
  *
  * The frame talks back through the host HTTP carrier, never through host DOM
  * access: `window.dshHTML` is injected by the host half.
@@ -452,9 +450,9 @@ window.__ModuleLoader__.load({
 
     /**
      * Which record owns the fullscreen layer. An explicit choice wins; otherwise
-     * the session's first fullscreen-placed record the user has not switched away
-     * from, so a newly attached interface opens by itself while "switch back to
-     * chat" keeps the one it just closed closed.
+     * the session's first fullscreen-placed record the user has not minimized away
+     * from, so a newly attached interface opens by itself while minimizing the
+     * layer keeps the one it just put away put away.
      */
     function activeFullscreen(records) {
       if (typeof state.fullscreen === 'string') {
@@ -919,11 +917,12 @@ window.__ModuleLoader__.load({
       backendIdle: 'Not loaded',
       backendAllowed: 'Allowed',
       backendDenied: 'Not allowed',
-      // 「停止后台」不再有独立按钮：它现在是管理器行上的「关闭后台任务」，并且会连带关掉该项目的界面。
+      // Ending a backend speaks only when nothing visibly happened: a stop that worked needs no
+      // sentence — the row disappearing is the whole answer — while a stop that failed, or found
+      // nothing running, has to say so. The control itself is the manager row's `Close backend
+      // task`; the drawer keeps the marks and the pencil, and nothing that acts on a process.
       backendStopIdle: 'The {slug} backend was not running.',
       backendStopFailed: 'The host did not stop it; the backend may still be running.',
-      stopBackend: 'Stop backend',
-      stopBackendHint: 'Ends the process only, without withdrawing permission; opening its panel again loads it again.',
         securityStrict: 'Strict (default)',
         securityLocal: 'Own files only',
         securityOpen: 'Own files + network',
@@ -1068,9 +1067,9 @@ window.__ModuleLoader__.load({
         backendIdle: '未加载',
         backendAllowed: '已授权',
         backendDenied: '未授权',
-        // 「停止后台」不再有自己的按钮：它现在是管理器行上的「关闭后台任务」，并且会连带关掉该项目的界面。
-        stopBackend: '停止后台',
-        stopBackendHint: '只结束这个进程，不撤销授权；下次打开它的面板会重新加载。',
+        // 结束后台只在「看不出发生了什么」时才说话：停成功了不需要句子——行消失就是全部回答；
+        // 失败、或者本来就没在跑，才必须说出来。控件本身是管理器行上的「关闭后台任务」，
+        // 抽屉只留标记和铅笔，不放任何作用于进程的按钮。
         backendStopIdle: '{slug} 的后台没有在跑。',
         backendStopFailed: '宿主没有停止它，后台可能还在跑。',
         securityStrict: '严格（默认）',
@@ -2397,9 +2396,10 @@ window.__ModuleLoader__.load({
           h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, body),
         );
       }
-      // A docked split is seamless: the surface is meant to be one half of the session
-      // view, not a window inside it. No title row, no border, no opaque background —
-      // but the collapse and close controls stay, as a faint cluster in the corner.
+      // A docked surface is seamless: it belongs to the session's right column rather
+      // than floating as a window inside the conversation. No title row, no border, no
+      // opaque background — but the collapse and close controls stay, as a faint cluster
+      // in the corner.
       if (variant === 'dock') {
         const control = (label, hint, onClick, extra, style) =>
           h(
@@ -2456,7 +2456,7 @@ window.__ModuleLoader__.load({
           body,
         );
         if (props.collapsed === true) {
-          // Collapsed: the controls on their own line, so the split gives the whole height back
+          // Collapsed: the controls on their own line, so the column gives the whole height back
           // to the conversation. The hidden document above takes no space and stays alive.
           return h('div', { style: { display: 'flex', flexDirection: 'column', width: '100%' } }, hiddenBody, h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '2px', padding: '2px 4px' } }, ...controls));
         }
@@ -2866,9 +2866,10 @@ window.__ModuleLoader__.load({
      * Whether one interface is currently hidden — the *same* state its own hide control writes.
      *
      * Three forms, three stores, one question: a float is minimized through `state.hidden`, a
-     * fullscreen one through `state.fullscreenDismissed` ("back to chat") and a right-column one
-     * through `state.collapsed` (the frame's own collapse). Reading all three here is what makes
-     * the manager's label follow the surface instead of a copy of it that drifts.
+     * fullscreen one through `state.fullscreenDismissed` (the layer's own minimize) and a
+     * right-column one through `state.collapsed` (the frame's own collapse). Reading all three
+     * here is what makes the manager's label follow the surface instead of a copy of it that
+     * drifts.
      */
     function recordHidden(record) {
       if (record.placement === 'float') return state.hidden.has(record.uiId);
@@ -3921,7 +3922,7 @@ window.__ModuleLoader__.load({
       const disposes = [];
       // The registration's own disposer is the one that takes it out of the slot tree:
       // keeping only the injection's disposer left the tab registered forever, which is
-      // why an empty session still had an HTML UI page in its column.
+      // why an empty session still had an HTML UI tab in its column.
       disposes.push(
         ctx.slots.inject('sidebar.right.pane.tab', () => {
           // The injection can resolve after a release has already run. Registering then
@@ -4019,9 +4020,9 @@ window.__ModuleLoader__.load({
      * state: one instance per record (the layer array is keyed by `uiId`) keeps every interface's
      * question its own instead of sharing one flag across the session's fullscreen surfaces.
      *
-     * The bar used to spell its own two controls out — 「切回聊天」 in words and a labelled
-     * 「关闭」— and that was the last place where the same two acts wore a different shape from
-     * the float's '—' and '✕'. Both now come from the factories above — `windowMinimizeButton`
+     * The bar used to spell its own two controls out — a worded dismiss and a labelled
+     * 「关闭」— and that was the last place where the same two acts wore a different shape
+     * from the float's '—' and '✕'. Both now come from the factories above — `windowMinimizeButton`
      * and `windowCloseButton` — so the 22px size, the 6px radius, the '—' and '✕', and the words
      * 最小化/关闭 are the float's own. The *tree* did not move with them: this row still writes
      * exactly two buttons after the title, as it always has, because a wrapper here once cost the
@@ -4037,9 +4038,9 @@ window.__ModuleLoader__.load({
         'div',
         { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
         h('span', { style: titleStyle }, `${title} ${tr('fullscreenSuffix', '· fullscreen')}`),
-        // 切回聊天是这一形态的「最小化」：它只隐藏图层（`state.fullscreenDismissed`），记录和
-        // 文档都原样留着，因此它渲染的就是浮动窗口那个最小化 —— 同样的字形、同样的尺寸、同样的
-        // 说法，只是它渲染在这一行里，而不再经过任何包装节点。
+        // 全屏的最小化就是浮动窗那个最小化：它只隐藏图层（`state.fullscreenDismissed`），记录和
+        // 文档都原样留着，因此它渲染的是同一套样式常量 —— 同样的字形、同样的尺寸、同样的说法，
+        // 只是它渲染在这一行里，而不再经过任何包装节点。
         windowMinimizeButton(onLeave, tr('minimize', 'Minimize')),
         windowCloseButton(closeConfirm),
       );
@@ -4243,7 +4244,7 @@ window.__ModuleLoader__.load({
         if (fullscreenId === undefined) return undefined;
         const onKeyDown = (event) => {
           if (event.key !== 'Escape') return;
-          // Switch back to the chat and keep this interface closed until the user
+          // Minimize the layer and keep this interface put away until the user
           // asks for it again; a newly attached one still opens.
           state.fullscreen = null;
           state.fullscreenDismissed.add(fullscreenId);

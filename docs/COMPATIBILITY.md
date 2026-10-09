@@ -18,7 +18,7 @@ dependency, checked at build-and-review time rather than linked at load time.
 | Host | `dsh-agent` | the `agent/assistant-stream` event |
 | Host | `dsh-session` | the `session/event` event |
 | Client | `dsh-client-ui-tool` | the `tool.call.toolview` slot, keyed by tool name |
-| Client | `dsh-client-ui-conversation` | `conversation.input.dock`, `conversation.composer.dock`, `conversation.input.right` |
+| Client | `dsh-client-ui-conversation` | `conversation.input.dock`, `conversation.input.right` |
 | Client | `dsh-client-ui-layout` | `shell.overlay` |
 | Client | `dsh-client-ui-sidebar-right` | `sidebar.right.pane.tab`, and the `sidebarRightTabs` / `sidebarRight` services |
 | Client | react | the component runtime the loader provides |
@@ -29,9 +29,9 @@ The published packages were fetched from the registry and their declarations
 read directly (`npm pack @deepseek-ai/<package>@0.2.0-rc.2`, then the `.d.ts`
 files). Every contract above was found unchanged:
 
-- `tool.call.toolview`, `conversation.input.dock`, `conversation.composer.dock`,
-  `conversation.input.right`, `shell.overlay`, and `sidebar.right.pane.tab` all still
-  exist, with the same kinds, scopes, and registration fields.
+- `tool.call.toolview`, `conversation.input.dock`, `conversation.input.right`,
+  `shell.overlay`, and `sidebar.right.pane.tab` all still exist, with the same kinds,
+  scopes, and registration fields.
 - `ctx.sidebarRightTabs.register({ id, kind, multiple?, title, … })` is unchanged,
   and the two services are still provided as `sidebarRightTabs` and
   `sidebarRight`.

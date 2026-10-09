@@ -25,7 +25,7 @@ needs it, with reusable templates.
   `html_ui_template` (`save` / `list` / `show` / `remove`).
 - Five placements, each live-verified by a document that measured itself: `inline`
   (seamless, in the conversation flow, height taken from the document), `dock-right`
-  (a real left/right split, and the widest surface), `float`, `background` and
+  (the session's right column), `float`, `background` and
   `fullscreen`. The vertical docks were removed after acceptance: a surface that only
   squeezes the session view reads as a window parked inside the conversation.
 - An injected `window.dshHTML` bridge: `send`, `state`, `resize`, `close`,
@@ -64,8 +64,9 @@ Things worth stating rather than leaving to be discovered:
 
 ### Verification
 
-`npm test` runs nine suites (118 assertions) with no harness and no browser: package
+`npm test` runs ten suites (188 assertions) with no harness and no browser: package
 integrity and a scan that refuses machine-specific strings, the documentation
-contract against the code, the host half, the browser half, the document bridge,
-and a shallow render of every component branch. CI runs them on Ubuntu and
+contract against the code, the host half, a project's own backend, the browser half,
+the document bridge, a shallow render of every component branch, adversarial input,
+the packed artefact, and the harness schema. CI runs them on Ubuntu and
 Windows across Node 22 and 24. `docs/VERIFY.md` is the live acceptance checklist.

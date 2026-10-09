@@ -48,7 +48,7 @@ round trip shows up, and how to read a symptom). A release that has not been
 looked at in a browser is not ready, however green the suites are.
 
 ```sh
-npm run check     # syntax + all nine suites
+npm run check     # syntax + all ten suites
 npm pack --dry-run  # read the actual tarball contents before publishing
 ```
 

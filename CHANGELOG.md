@@ -54,14 +54,51 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 - The idle-unload delay is the `backendIdleMs` setting (default ten minutes, clamped to between one
   second and one hour). It is the same rule as before, made visible: how long an idle backend is
   worth holding is a property of the machine, not of the plugin.
+- The session's right column is called the right column. It had been described as "a real left/right
+  split" and "the widest surface" — in the placement label the create dialog shows and in the places
+  the model reads (the `html_ui` tool description, the prompt contract, and `SKILL.md`) — which
+  describes an implementation rather than what the reader gets.
+- **A fullscreen surface's way out is the float's minimize.** The layer had two controls of its own:
+  a worded dismiss and a labelled close, so the same two acts wore a different shape on the one
+  surface that covers the whole session view. Both now come from the two style factories every
+  window uses (`windowMinimizeButton` / `windowCloseButton`) — the same 22 px size, the same radius,
+  the same '—' and '✕', the same words. Only the buttons are shared; the row's own node structure is
+  unchanged, because a shared node here once cost the layer its coverage.
+- **The manager is one row per program, in two groups.** The conversation's `HTML manager` page lists
+  what is alive: backend programs first — their process runs in the host and belongs to no session,
+  which is why a program this session never opened can appear — then this session's interfaces, with
+  no program in both. The row *is* the program: minimize or maximize its interface, close that
+  interface (the button becomes `Restart UI` while the process is still loaded, and asks where to put
+  the new one) or `Close session` when there is no process at all, and `Close backend task` to end
+  the process itself. The old `Remove` / `Remove all` vocabulary and the separate "backend processes"
+  section are gone.
+- Every close control asks once, in place. All three ✕ — the right column's, the float's and the
+  fullscreen bar's — put their question on the button itself and revert after about three seconds.
+  The plain hides keep no confirmation: the fullscreen layer's minimize, a float's minimize and a
+  right-column collapse all preserve everything, and friction on a reversible act teaches nothing.
+- The drawer no longer ends a backend. That control lives on the manager's row, next to the interface
+  the process serves, in one place instead of two; the drawer keeps the pill, the marks and the
+  pencil, and says nothing about a control it no longer has.
 - The manager rows and the drawer's project rows are laid out for a narrow screen: the manager row is
-  three lines (what it is; the process — placement, revision, id — with its backend's marks pushed to
-  the right; then the controls), and a drawer row is two (the choice and its pencil, then
-  `Stop backend` on the left with the marks on the right). What residency means lives in a tooltip
-  rather than in a line of small print, which is what had been wrapping rows onto a second line.
+  three lines (what it is; the process — where the interface is, or `—` when none is open — with its
+  backend's marks pushed to the right; then the controls), and a drawer row is two (the choice and
+  its pencil, then the running/not-running pill and the marks, right-aligned). What residency means
+  lives in a tooltip rather than in a line of small print, which is what had been wrapping rows onto
+  a second line.
 
 ### Fixed
 
+- **Collapsing a right-column interface no longer destroys its document.** The collapsed branch
+  returned the control row *instead of* the body, so the `<iframe>` left React's tree, the browser
+  dropped the document, and expanding mounted an empty frame that fetched a fresh ticket — every
+  character typed into the interface, its scroll position and its whole runtime state gone. The body
+  is now always rendered and merely hidden, exactly the way a minimized float and an inactive
+  fullscreen layer were already kept.
+- **Restarting an interface into the right column actually opens the column.** Rendering and
+  revealing were two acts and the restart path only performed the first, so an interface that really
+  existed looked like nothing happening. Both now go through `applyTemplateInto`, which renders *and*
+  asks the column's tab service to show the result — with retries, because the tab type registers
+  asynchronously and the first ask can arrive too early.
 - **Editing a project no longer deletes the parts of its manifest the form does not manage.** The
   form is a partial view of `meta.json` — it knows the name, the placement and whether the project's
   backend may run — and saving it rewrote the file from those fields alone. An ordinary edit

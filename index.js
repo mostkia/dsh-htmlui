@@ -68,8 +68,9 @@ const PLUGIN_VERSION = '0.1.3';
  *
  * `dock-top`, `dock-bottom` and `panel` were removed after a live acceptance pass:
  * a surface that only squeezes the session view reads as a window parked inside the
- * conversation, and the right column already provides a real split. What remains is
- * one real split (`dock-right`), one in-flow form (`inline`), and three overlays.
+ * conversation, and the session's right column is where that content belongs. What
+ * remains is one docked form (`dock-right`), one in-flow form (`inline`), and three
+ * overlays.
  */
 const PLACEMENTS = [
   'inline',
@@ -2214,7 +2215,7 @@ export function apply(ctx, config) {
   const htmlUiTool = {
     name: 'html_ui',
     description:
-      'Render, update, or close an HTML interface attached to this conversation. The HTML is authored by you and runs in a sandboxed iframe: it can call DSH through the injected window.dshHTML bridge (actions, state, events). Placement decides where it lives: inline (in the transcript), dock-top/dock-bottom (full-width above/below the composer), dock-right (session side panel), float (draggable window), background (click-through layer), fullscreen (takes the session view, with a built-in switch back to the chat), panel (resident dock that updates in place). A document that has to keep data beyond its own panel declares named slots in its head — <meta name="dsh-htmlui" content="store=notes"> — and then uses dshHTML.store: the value layer (small, synchronous, inlined) for settings, and dshHTML.store.rows (keys/get/set/remove/search over SQLite, up to 16 MiB a row) for bulk data; both outlive the panel, the session, and a host restart. Prefer writing large documents to a file and passing path; inline html is capped.',
+      'Render, update, or close an HTML interface attached to this conversation. The HTML is authored by you and runs in a sandboxed iframe: it can call DSH through the injected window.dshHTML bridge (actions, state, events). Placement decides where it lives: inline (in the transcript), dock-right (the session\'s right column), float (draggable window), background (click-through layer), fullscreen (takes the session view; its own two controls minimize it, or close it after a confirmation). A document that has to keep data beyond its own panel declares named slots in its head — <meta name="dsh-htmlui" content="store=notes"> — and then uses dshHTML.store: the value layer (small, synchronous, inlined) for settings, and dshHTML.store.rows (keys/get/set/remove/search over SQLite, up to 16 MiB a row) for bulk data; both outlive the panel, the session, and a host restart. Prefer writing large documents to a file and passing path; inline html is capped.',
     parameters: {
       type: 'object',
       properties: {
@@ -3572,7 +3573,7 @@ export function apply(ctx, config) {
             'When a request needs a real interactive surface — a dashboard, a form, a tool with its own layout, an app-like flow — author HTML/CSS/JS and attach it with the `html_ui` tool instead of describing it in prose.',
             'Rules:',
             '- Prefer `path`: write the document with the file tools, then attach it with `html_ui op=render path=...`. Inline `html` is capped and stays in the conversation context.',
-            '- Pick placement deliberately: `inline` (part of the transcript, seamless and content-sized), `dock-right` (the session side panel), `float` (draggable window; give `size`), `fullscreen` (the interface takes the session view and offers a switch back to chat), `background` (click-through layer).',
+            '- Pick placement deliberately: `inline` (part of the transcript, seamless and content-sized), `dock-right` (the session\'s right column), `float` (draggable window; give `size`), `fullscreen` (the interface takes the session view; its own minimize hides it and its close asks first), `background` (click-through layer).',
             '- Inside the document, `window.dshHTML` is available: `send(action, data)`, `state.get()/set(value)`, `close()`, `on("assistant"|"session"|"action"|"theme", handler)`. Only interactions that truly need the model should call `send`; keep selection, validation, filtering, and scoring local.',
             '- Re-read `html_ui` results: `ui_id` identifies the interface, and `html_ui op=update id=<ui_id>` replaces it in place. Each `send` arrives as a user message carrying `[html-ui:action]`.',
             '- Never ask for passwords, API keys, tokens, or recovery codes inside an interface, and never render secrets into it.',
