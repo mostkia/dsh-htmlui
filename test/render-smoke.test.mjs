@@ -513,8 +513,8 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   const ctx = { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } };
   const overlay = render(__internals.HtmlUiOverlay, { ctx });
   assert.match(overlay.text, /fullscreen/u);
-  // The layer's own bar: the switch back is the float's minimize — the same component, the same
-  // '—' — rather than a differently-worded control of its own.
+  // The layer's own bar: the way out is the float's minimize — the same '—', from the same
+  // factory — rather than a differently-worded control of its own.
   assert.match(overlay.text, /—/u, 'the switch back is the window minimize the float draws');
   assert.ok(!overlay.text.includes('Back to chat'), 'and it is no longer a control with its own name');
   // The layer draws the chrome, so the frame inside must not draw a second one.
@@ -1644,8 +1644,8 @@ test('every close control that destroys an interface asks first, and acts on the
 
     // fullscreen. Its minimize is the safe way out — it only hides the layer — so it is offered
     // first and is not confirmed, which is what keeps the confirmation meaningful. It is the
-    // float's own minimize now, glyph and all, so the safe control is the one a reader already
-    // knows from a floating window.
+    // float's own minimize, glyph and words and all, so the safe control is the one a reader
+    // already knows from a floating window.
     resetStore();
     const fsLeaves = [];
     const fsDismissed = [];
@@ -1813,12 +1813,17 @@ test('the fullscreen bar wears the float’s window controls, not a pair of its 
   // The regression this guards: the fullscreen layer spelled its own two controls out — 「切回聊天」
   // in words and a labelled 「关闭」— so the same two acts wore a different shape from the float's
   // '—' and '✕', and the safe way out of a fullscreen surface did not look like the safe way out
-  // of a window. Style is asserted by *identity*, not by copy: the same component and the same
-  // style objects are what make them the same control, and a copy assertion would pass on two
+  // of a window. Style is asserted by *identity*, not by copy: the same style constants and the
+  // same glyphs are what make them the same control, and a copy assertion would pass on two
   // lookalikes that drift apart again tomorrow.
+  //
+  // The *shape* of the row is asserted just as hard, in the other direction: the two controls are
+  // written into the chrome row itself, so the fullscreen bar must contain no wrapper node of its
+  // own. Rendering them through one shared component once made the layer draw through a `display:
+  // contents` div it never had, and the layer stopped covering the frame — the look is what should
+  // be shared, never the tree.
   resetStore();
   const buttonsOf = (tree) => tree.elements.filter((element) => element.type === 'button');
-  const controlsOf = (tree) => tree.elements.filter((element) => element.type === __internals.HtmlUiWindowControls);
   const lastButton = (tree) => buttonsOf(tree).slice(-1)[0];
 
   const float = render(__internals.HtmlUiFrame, {
@@ -1829,8 +1834,8 @@ test('the fullscreen bar wears the float’s window controls, not a pair of its 
     onDismiss: () => {},
   });
   const chrome = render(__internals.HtmlUiFullscreenChrome, { record: recordFor('fullscreen'), onLeave: () => {}, onDismiss: () => {} });
-  assert.equal(controlsOf(float).length, 1, 'the float draws the shared window controls');
-  assert.equal(controlsOf(chrome).length, 1, 'and so does the fullscreen bar: the same component');
+  assert.equal(buttonsOf(float).length, 2, 'the float draws exactly its minimize and its close');
+  assert.equal(buttonsOf(chrome).length, 2, 'and so does the fullscreen bar — the same two buttons');
 
   const [floatMin, floatClose] = buttonsOf(float);
   const [fsMin, fsClose] = buttonsOf(chrome);
@@ -1846,6 +1851,30 @@ test('the fullscreen bar wears the float’s window controls, not a pair of its 
   assert.equal(fsMin.props['aria-label'], 'Minimize', 'and the glyph button says so to assistive technology');
   assert.equal(fsClose.props.title, 'Close', 'closing is called what it is');
   assert.equal(floatClose.props.title, 'Close', 'on the float too');
+  // The bar itself is the row it always was: one title span and then the two buttons, with no
+  // node between them and the row. `walk` is a pre-order flattening, so the parent is read by
+  // walking the children back: a wrapper — the `display: contents` div this used to grow — would
+  // show up here as the buttons' parent instead of the chrome row.
+  const parentOf = (element) => {
+    for (const candidate of chrome.elements) {
+      if ((candidate.children ?? []).includes(element)) return candidate;
+    }
+    return undefined;
+  };
+  const chromeRow = parentOf(fsMin);
+  assert.equal(chromeRow, parentOf(fsClose), 'both controls hang off the one row');
+  assert.equal(chromeRow.type, 'div', 'which is the chrome row div');
+  assert.equal(chromeRow.props.style.minHeight, '36px', 'the fullscreen bar’s own row, not some wrapper');
+  assert.deepEqual(
+    (chromeRow.children ?? []).map((child) => child.type),
+    ['span', 'button', 'button'],
+    'a title and the two controls — exactly the tree 40d6c75 had',
+  );
+  assert.equal(
+    chrome.elements.filter((element) => element.props !== undefined && element.props.style !== undefined && element.props.style.display === 'contents').length,
+    0,
+    'nothing in the fullscreen bar is routed through a `display: contents` wrapper',
+  );
   // The semantics did not move with the looks: minimizing is still the unconfirmed safe way out,
   // and closing still asks.
   const floatLeaves = [];
@@ -1885,33 +1914,5 @@ test('the fullscreen bar wears the float’s window controls, not a pair of its 
   assert.equal(lastButton(armedChrome).props['aria-live'], 'assertive', 'a fullscreen confirmation announces itself');
   assert.equal(lastButton(armedFloat).props['aria-live'], 'assertive', 'exactly as a float’s does');
   resetStore();
-});
-
-// ------------------------------------- what the host’s tab ✕ costs, said while it can be read
-
-test('the right column says what closing its tab costs, with the count', () => {
-  // The ✕ on the HTML UI tab is the host's own control and offers no callback (the tab-type
-  // contract is static — `SidebarRightTabDefinition` has no close hook — and the dock's close is
-  // planned before any plugin hears about it), so the plugin cannot ask before it acts. What it
-  // *can* do is say what that ✕ costs while the reader can still read it, and what it costs is
-  // every interface in this pane: the body's own teardown takes them with it. This asserts the
-  // line exists, carries the number, and leaves with the last interface.
-  const dockRight = (uiId) =>
-    __internals.recordFromMeta(
-      { htmlui: true, op: 'render', uiId, sessionId: 'session-1', title: 'R', placement: 'dock-right', revision: 1, bytes: 5 },
-      undefined,
-    );
-  resetStore([dockRight('ui-nb000001'), dockRight('ui-nb000002')]);
-  const pane = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
-  assert.match(pane.text, /Closing the tab above closes all 2 interfaces below/u, 'the line names how many go with it');
-  assert.match(pane.text, /Preparing interface/u, 'and the surfaces are still drawn under it');
-  withChinese(() => {
-    const chinese = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
-    assert.ok(chinese.text.includes('会一起关掉下面 2 个界面'), `the Chinese line says the same: ${chinese.text}`);
-  });
-  resetStore([dockRight('ui-nb000001')]);
-  assert.match(render(__internals.HtmlUiRightPane, { sessionId: 'session-1' }).text, /closes all 1 interfaces below/u, 'one interface, one number');
-  resetStore();
-  assert.equal(render(__internals.HtmlUiRightPane, { sessionId: 'session-1' }).text, '', 'nothing hosted, nothing to warn about');
 });
 

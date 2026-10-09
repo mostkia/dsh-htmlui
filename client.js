@@ -869,12 +869,7 @@ window.__ModuleLoader__.load({
       managerRestoreUiFailed: 'Could not restore that interface.',
         closeFailed: 'The host refused to remove it; it is still attached.',
         managerHidden: 'hidden',
-        // 最小化就读作「最小化」：浮动窗口和全屏图层用的是同一个控件，管理器的按钮也这么说，
-        // 三处一个词。
         minimize: 'Minimize',
-        // 右侧栏标签上那个 ✕ 是宿主的，插件拦不住：这条提示是插件能做的全部 —— 在误触之前把
-        // 后果写清楚。数字是这一栏里会被一起销毁的界面数。
-        rightPaneCloseTabNotice: 'Closing the tab above closes all {count} interfaces below (their documents are destroyed; the manager can open them again)',
         managerEmpty: 'This session has no HTML program.',
         managerNew: 'New HTML project',
         create: 'Create',
@@ -1027,8 +1022,6 @@ window.__ModuleLoader__.load({
         closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
         managerHidden: '已隐藏',
         minimize: '最小化',
-        // 同上：宿主标签上的 ✕ 没有钩子可拦，只能把「会一起关掉几个」写在界面里。
-        rightPaneCloseTabNotice: '关掉上面这个标签会一起关掉下面 {count} 个界面（文档会被销毁，需要时可以在管理器里重新打开）',
         managerEmpty: '本会话没有 HTML 程序。',
         managerNew: '新建 HTML 项目',
         create: '创建',
@@ -1586,6 +1579,70 @@ window.__ModuleLoader__.load({
     });
 
     /**
+     * The two window controls a floating form wears: 最小化 and 关闭.
+     *
+     * These are the *styles and words* shared between a float and a fullscreen layer, and nothing
+     * else: each caller writes the button into its own chrome row, so both rows keep the DOM they
+     * always had — the same elements, in the same order, inside the same div. That is deliberate.
+     * Wrapping them in one component and rendering that wrapper into the row made the fullscreen
+     * layer draw through a node it never had, and the layer stopped covering the frame. The look
+     * is what should be identical, not the tree: `buttonStyle` above, `closeConfirmButtonStyle`
+     * above, the '—' and '✕' glyphs, and the words 最小化/Minimize, 关闭/Close.
+     *
+     * 最小化 is never confirmed: it hides — the record stays, the document stays mounted, and the
+     * surface can be brought back. 关闭 asks first, in the manager's own two-step, because it
+     * destroys the document and nothing brings it back.
+     *
+     * @param onClick - what minimizing does for this surface (hiding a float, leaving a layer).
+     * @param hint - the words the control carries, already resolved through `tr`.
+     */
+    function windowMinimizeButton(onClick, hint) {
+      return h(
+        'button',
+        {
+          type: 'button',
+          style: buttonStyle,
+          onClick,
+          title: hint,
+          'aria-label': hint,
+        },
+        // The glyph, where a 22px button has room for it; the word lives in the title and the
+        // accessible name, which is where it was already being read from.
+        '—',
+      );
+    }
+
+    /**
+     * The close control, in both of its steps, as the float has always drawn it.
+     *
+     * @param closeConfirm - the `useCloseConfirm` result: `armed` and `ask`.
+     */
+    function windowCloseButton(closeConfirm) {
+      const armed = closeConfirm.armed === true;
+      return h(
+        'button',
+        {
+          type: 'button',
+          // The confirmation replaces the ✕ in the very same button (the manager's own two-step
+          // does that too): a second control appearing beside it would be a different question in
+          // a different place.
+          style: armed ? closeConfirmButtonStyle : buttonStyle,
+          onClick: closeConfirm.ask,
+          title: armed
+            ? tr('closeConfirmUiHint', 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.')
+            : tr('close', 'Close'),
+          'aria-label': armed
+            ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered')
+            : tr('close', 'Close'),
+          // Announced to assistive technology, and readable from the DOM while the confirmation
+          // is showing.
+          'aria-live': armed ? 'assertive' : undefined,
+        },
+        armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
+      );
+    }
+
+    /**
      * A chip: the small rounded mark a status reads as. Always a `span` and never a control —
      * a mark that looks like a button is one readers try to press, and the one pressable thing
      * in this family has a label that says what it does.
@@ -1946,74 +2003,6 @@ window.__ModuleLoader__.load({
       return { armed: armed === true, ask };
     }
 
-    /**
-     * The two controls a floating surface wears: 最小化 and 关闭.
-     *
-     * One component, not one copy per form, because a float and a fullscreen layer are the same
-     * kind of surface — a window over the conversation that can be put away or destroyed — and
-     * they used to disagree about it: the fullscreen bar wrote 「切回聊天」 where the float drew a
-     * '—', so the same act had two names and the safe way out of one surface did not look like the
-     * safe way out of the other. Both now render this, which pins the *type*, the 22px size, the
-     * glyphs and the words to the float's implementation. What still differs is only the effect,
-     * and that arrives as the callbacks below.
-     *
-     * 最小化 is never confirmed: it hides — the record stays, the document stays mounted, and the
-     * surface can be brought back — so asking there would be friction on the one control a reader
-     * should be free to press. 关闭 asks first, in the manager's own words and with the manager's
-     * own two-step, because it destroys the document and nothing brings it back.
-     */
-    function HtmlUiWindowControls(props) {
-      const { uiId, onMinimize, onDismiss, closeConfirm } = props;
-      const armed = closeConfirm !== undefined && closeConfirm.armed === true;
-      return h(
-        'div',
-        // The buttons belong to the chrome row's flex layout, not to this wrapper, so the wrapper
-        // is `display: contents`: same layout as when they were written out inline, one component
-        // in the tree for the tests and for the next form to reuse.
-        { style: { display: 'contents' } },
-        onMinimize === undefined
-          ? null
-          : h(
-              'button',
-              {
-                key: 'minimize',
-                type: 'button',
-                style: buttonStyle,
-                onClick: () => onMinimize(uiId),
-                title: tr('minimize', 'Minimize'),
-                'aria-label': tr('minimize', 'Minimize'),
-              },
-              // The glyph, as the float has always drawn it; the word lives in the title and the
-              // accessible name, where a 22px button has room for it.
-              '—',
-            ),
-        onDismiss === undefined
-          ? null
-          : h(
-              'button',
-              {
-                key: 'close',
-                type: 'button',
-                // The confirmation replaces the ✕ in the very same button (the manager's own
-                // two-step does that too): a second control appearing beside it would be a
-                // different question in a different place.
-                style: armed ? closeConfirmButtonStyle : buttonStyle,
-                onClick: closeConfirm.ask,
-                title: armed
-                  ? tr('closeConfirmUiHint', 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.')
-                  : tr('close', 'Close'),
-                'aria-label': armed
-                  ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered')
-                  : tr('close', 'Close'),
-                // Announced to assistive technology, and readable from the DOM while the
-                // confirmation is showing.
-                'aria-live': armed ? 'assertive' : undefined,
-              },
-              armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
-            ),
-      );
-    }
-
     /** The frame plus, for every variant but `background`, a slim host chrome row. */
     function HtmlUiFrame(props) {
       const { record, theme, variant, bare } = props;
@@ -2314,14 +2303,14 @@ window.__ModuleLoader__.load({
               `${record.title !== undefined && record.title.length > 0 ? record.title : record.uiId} · float`,
             ),
             // Minimizing hides the window without deleting it: the session page can bring
-            // it back, which is the difference between "out of the way" and "gone".
-            // Both controls come from the one component every floating form shares.
-            h(HtmlUiWindowControls, {
-              uiId: record.uiId,
-              onMinimize: props.onMinimize,
-              onDismiss: props.onDismiss,
-              closeConfirm,
-            }),
+            // it back, which is the difference between "out of the way" and "gone". Both
+            // controls are written out here — as they always were — from the one pair of
+            // style/word factories above, so this row and the fullscreen bar wear the same
+            // control without either growing a node the other does not have.
+            props.onMinimize !== undefined
+              ? windowMinimizeButton(() => props.onMinimize(record.uiId), tr('minimize', 'Minimize'))
+              : null,
+            props.onDismiss !== undefined ? windowCloseButton(closeConfirm) : null,
           ),
           h('div', { style: { position: 'relative', flex: '1 1 auto', minHeight: '0', background: 'var(--dsw-alias-bg-base, #fff)' } }, body),
           h('div', {
@@ -3842,8 +3831,7 @@ window.__ModuleLoader__.load({
       //
       // 那个 ✕ 拦不住：它是宿主的组件（`DockLayout` 的 tab chip），登记的 tab 类型里没有任何
       // 关闭前的钩子（见 `SidebarRightTabDefinition`：全是静态字段），所以误触一次就是上面这条
-      // 卸载路径 —— 本会话全部 dock-right 界面一起被销毁。宿主没给拦截点，插件能做的只有
-      // 「让后果在误触之前就看得见」：下面第一行就是这句话。
+      // 卸载路径 —— 本会话全部 dock-right 界面一起被销毁。这是宿主的行为，插件不解释、不提示。
       useEffect(
         () => () => {
           if (pageUnloading || rightPaneWiring.released) return;
@@ -3857,40 +3845,9 @@ window.__ModuleLoader__.load({
       // occupies it without something to put there.
       const records = sessionId === undefined ? [] : recordsIn(sessionId, ['dock-right']);
       if (records.length === 0) return null;
-      const notice = tr(
-        'rightPaneCloseTabNotice',
-        'Closing the tab above closes all {count} interfaces below (their documents are destroyed; the manager can open them again)',
-        { count: records.length },
-      );
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: '8px', height: '100%', minHeight: '0', padding: '6px' } },
-        // The one thing this plugin cannot do is ask before the host's ✕ acts, so it says what
-        // that ✕ costs while the reader can still read it: one line, above the surfaces, with the
-        // count of what goes. 手机: it wraps instead of clipping, and takes no share of the height.
-        h(
-          'div',
-          {
-            style: {
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '6px',
-              // `flexShrink`, not a `flex` shorthand: the surface rows below are the ones that
-              // share the column's height, and this line takes none of it.
-              flexShrink: 0,
-              padding: '4px 6px',
-              borderRadius: '6px',
-              border: '1px solid var(--dsw-alias-border-l1, #e2e2e2)',
-              background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.02))',
-              fontSize: '11px',
-              lineHeight: '15px',
-              color: 'var(--dsw-alias-label-secondary, #888)',
-            },
-            title: notice,
-          },
-          h('span', { 'aria-hidden': 'true' }, 'ⓘ'),
-          h('span', { style: { minWidth: '0' } }, notice),
-        ),
         ...records.map((record) =>
           h(
             'div',
@@ -4064,8 +4021,11 @@ window.__ModuleLoader__.load({
      *
      * The bar used to spell its own two controls out — 「切回聊天」 in words and a labelled
      * 「关闭」— and that was the last place where the same two acts wore a different shape from
-     * the float's '—' and '✕'. Both now come from `HtmlUiWindowControls`, and the words with them
-     * (最小化/关闭). The semantics are unchanged: minimizing hides the layer
+     * the float's '—' and '✕'. Both now come from the factories above — `windowMinimizeButton`
+     * and `windowCloseButton` — so the 22px size, the 6px radius, the '—' and '✕', and the words
+     * 最小化/关闭 are the float's own. The *tree* did not move with them: this row still writes
+     * exactly two buttons after the title, as it always has, because a wrapper here once cost the
+     * layer its coverage. The semantics are unchanged: minimizing hides the layer
      * (`state.fullscreenDismissed`) and leaves the record and its document alone, so it stays
      * unconfirmed and stays the safe way out; the ✕ still asks first.
      */
@@ -4078,9 +4038,10 @@ window.__ModuleLoader__.load({
         { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
         h('span', { style: titleStyle }, `${title} ${tr('fullscreenSuffix', '· fullscreen')}`),
         // 切回聊天是这一形态的「最小化」：它只隐藏图层（`state.fullscreenDismissed`），记录和
-        // 文档都原样留着，因此它渲染的正是浮动窗口那一对控件 —— 同一个组件，所以两种形态的
-        // 「安全出口」长得一样、读起来也一样，只有一个 ✕ 和一个最小化，不再各有一套说法。
-        h(HtmlUiWindowControls, { uiId: record.uiId, onMinimize: onLeave, onDismiss, closeConfirm }),
+        // 文档都原样留着，因此它渲染的就是浮动窗口那个最小化 —— 同样的字形、同样的尺寸、同样的
+        // 说法，只是它渲染在这一行里，而不再经过任何包装节点。
+        windowMinimizeButton(onLeave, tr('minimize', 'Minimize')),
+        windowCloseButton(closeConfirm),
       );
     }
 
@@ -5703,10 +5664,6 @@ window.__ModuleLoader__.load({
         // reason as the rest: the confirmation is the only thing standing between a mis-tap and a
         // destroyed document, so a test has to be able to render it.
         useCloseConfirm,
-        // The two window controls every floating form wears. Exported because the point of it is
-        // that the float and the fullscreen bar render the *same* component, and a test can only
-        // assert that by finding it in both trees.
-        HtmlUiWindowControls,
         HtmlUiFullscreenChrome,
         HtmlUiToolView,
         HtmlUiDock,
