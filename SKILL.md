@@ -56,7 +56,7 @@ folder picker). Nothing else is listed — no bundled samples, no hidden store �
 | `dock-right` | The session's right column: a real left/right split, and the widest surface. Falls back to the wide dock above the composer when the column is unavailable |
 | `float` | A draggable, resizable window; give `size`, e.g. `"520x360+80+60"` |
 | `background` | A click-through layer over the frame (decorative) |
-| `fullscreen` | Covers the session and offers a built-in "切回聊天" switch |
+| `fullscreen` | Covers the session; its window controls are the float's — minimize hides the layer, close asks first |
 
 The vertical docks (`dock-top` / `dock-bottom`) and `panel` were removed: a surface that
 only squeezes the session view reads as a window parked inside the conversation, and

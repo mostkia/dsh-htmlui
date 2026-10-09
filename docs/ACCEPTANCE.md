@@ -43,7 +43,7 @@ attributed to the wrong surface.
 | `dock-right` | `851×830, visible`; the tab opens itself | works |
 | `panel` | `1633×321, visible` | works |
 | `float` | `520×343, visible` for a requested `520x380+140+140` (343 = 380 minus its chrome); its ✕ drops the record from the host (`/ui/list` count 1 → 0) | works |
-| `fullscreen` | `1920×882, visible`; "Back to chat" leaves the layer and keeps the record (host count stays 1); ✕ deletes it | works |
+| `fullscreen` | `1920×882, visible`; "Minimize" leaves the layer and keeps the record (host count stays 1); ✕ asks once and then deletes it | works |
 | `background` | `1920×919, visible` — the whole frame, because this layer has no chrome | works |
 | `inline` | `680×383, visible`, rendered at the end of a turn | works |
 
