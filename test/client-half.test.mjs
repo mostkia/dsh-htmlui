@@ -318,7 +318,7 @@ test('visible text comes from the locale service when there is one', () => {
   });
   apply(chinese);
   assert.equal(__internals.tr('createTitle', 'New HTML interface'), '新建 HTML 界面');
-  assert.equal(__internals.tr('placementDockRight', 'Right column'), '右侧栏（真正的左右分屏）');
+  assert.equal(__internals.tr('placementDockRight', 'Right column'), '右侧栏');
   assert.equal(__internals.tr('notAKey', 'literal'), 'literal', 'a key no table has keeps the literal');
 
   dispose();

@@ -1364,7 +1364,7 @@ test('the manager row is a two-button program or a three-button one, and its lab
     .filter((element) => element.type === 'button')
     .map((element) => element.children[0])
     .filter((label) => typeof label === 'string' && !['Minimize', 'Maximize', 'Restart UI', 'Close backend task', 'Cancel'].includes(label));
-  assert.deepEqual(placementChoices, ['Right column (a real split)', 'In the conversation', 'Floating window', 'Fullscreen', 'Background layer'], 'one choice per placement, in the create dialog’s order and words');
+  assert.deepEqual(placementChoices, ['Right column', 'In the conversation', 'Floating window', 'Fullscreen', 'Background layer'], 'one choice per placement, in the create dialog’s order and words');
   assert.equal(buttonsLabelled(picker, 'Cancel').length, 1, 'and the question can be declined');
   assert.equal(
     picker.elements.filter((element) => element.type === 'button').some((element) => element.props.style?.borderColor === 'var(--dsw-alias-bg-accent, #247bbf)'),
@@ -1779,7 +1779,7 @@ test('restarting a project into the right column opens the column, exactly as th
       placementPicking: true,
       props: {},
     });
-    const chooseRight = buttonsLabelled(picking, 'Right column (a real split)')[0];
+    const chooseRight = buttonsLabelled(picking, 'Right column')[0];
     assert.ok(chooseRight !== undefined, 'the restart picker offers the right column');
     chooseRight.props.onClick();
     // The render waits 120ms for the host to tear the old records down, so the assertion waits

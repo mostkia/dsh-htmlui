@@ -53,7 +53,7 @@ folder picker). Nothing else is listed — no bundled samples, no hidden store �
 | `placement` | Where it lives |
 |---|---|
 | `inline` (default) | In the transcript, at the end of the turn that attached it. Seamless: no chrome, no border, no background, and the height comes from the document — do not paint a page background |
-| `dock-right` | The session's right column: a real left/right split, and the widest surface. Falls back to the wide dock above the composer when the column is unavailable |
+| `dock-right` | The session's right column. Falls back to the wide dock above the composer when the column is unavailable |
 | `float` | A draggable, resizable window; give `size`, e.g. `"520x360+80+60"` |
 | `background` | A click-through layer over the frame (decorative) |
 | `fullscreen` | Covers the session; its window controls are the float's — minimize hides the layer, close asks first |

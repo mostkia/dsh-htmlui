@@ -5,7 +5,7 @@
  * its record says it belongs:
  *
  *   inline                 the tool card that carried it, inside the transcript
- *   dock-right      the session side panel (a real left/right split)
+ *   dock-right      the session side panel
  *   panel                  the same dock, refreshed in place
  *   float                  a draggable, resizable window over the frame
  *   background             a click-through layer over the frame
@@ -941,7 +941,7 @@ window.__ModuleLoader__.load({
         adopted: 'It is a project now.',
         edited: 'Saved.',
         createPlacement: 'Where',
-        placementDockRight: 'Right column (a real split)',
+        placementDockRight: 'Right column',
         placementInline: 'In the conversation',
         placementFloat: 'Floating window',
         placementFullscreen: 'Fullscreen',
@@ -1090,7 +1090,7 @@ window.__ModuleLoader__.load({
         adopted: '已成为项目。',
         edited: '已保存。',
         createPlacement: '生成位置',
-        placementDockRight: '右侧栏（真正的左右分屏）',
+        placementDockRight: '右侧栏',
         placementInline: '对话流内',
         placementFloat: '浮动窗',
         placementFullscreen: '全屏',
@@ -4336,7 +4336,7 @@ window.__ModuleLoader__.load({
 
     /** The placements the create dialog offers, with the label each one shows. */
     const CREATE_PLACEMENTS = [
-      { value: 'dock-right', key: 'placementDockRight', fallback: 'Right column (a real split)' },
+      { value: 'dock-right', key: 'placementDockRight', fallback: 'Right column' },
       { value: 'inline', key: 'placementInline', fallback: 'In the conversation' },
       { value: 'float', key: 'placementFloat', fallback: 'Floating window' },
       { value: 'fullscreen', key: 'placementFullscreen', fallback: 'Fullscreen' },
