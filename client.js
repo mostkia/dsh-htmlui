@@ -820,7 +820,6 @@ window.__ModuleLoader__.load({
         superseded: '· this revision was replaced; the interface is in the newest card below',
         placed: 'placed: ',
         fullscreenSuffix: '· fullscreen',
-        backToChat: 'Back to chat',
         inlineAtTail: 'inline · shown at the end of this turn',
         templatesButton: '⟨+⟩ New HTML',
         templatesTooltip: 'New HTML interface, or reuse a saved template',
@@ -870,7 +869,12 @@ window.__ModuleLoader__.load({
       managerRestoreUiFailed: 'Could not restore that interface.',
         closeFailed: 'The host refused to remove it; it is still attached.',
         managerHidden: 'hidden',
-        minimize: 'Hide the window',
+        // 最小化就读作「最小化」：浮动窗口和全屏图层用的是同一个控件，管理器的按钮也这么说，
+        // 三处一个词。
+        minimize: 'Minimize',
+        // 右侧栏标签上那个 ✕ 是宿主的，插件拦不住：这条提示是插件能做的全部 —— 在误触之前把
+        // 后果写清楚。数字是这一栏里会被一起销毁的界面数。
+        rightPaneCloseTabNotice: 'Closing the tab above closes all {count} interfaces below (their documents are destroyed; the manager can open them again)',
         managerEmpty: 'This session has no HTML program.',
         managerNew: 'New HTML project',
         create: 'Create',
@@ -973,7 +977,6 @@ window.__ModuleLoader__.load({
         superseded: '· 这一版已被更新，界面在下方最新卡片里',
         placed: '已投放到 ',
         fullscreenSuffix: '· 全覆盖模式',
-        backToChat: '切回聊天',
         inlineAtTail: '内联 · 显示在本轮末尾',
         templatesButton: '⟨+⟩ 新建 HTML',
         templatesTooltip: '新建 HTML 界面，或复用已保存的模板',
@@ -1023,7 +1026,9 @@ window.__ModuleLoader__.load({
         managerRestoreUiFailed: '界面恢复失败。',
         closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
         managerHidden: '已隐藏',
-        minimize: '隐藏窗口',
+        minimize: '最小化',
+        // 同上：宿主标签上的 ✕ 没有钩子可拦，只能把「会一起关掉几个」写在界面里。
+        rightPaneCloseTabNotice: '关掉上面这个标签会一起关掉下面 {count} 个界面（文档会被销毁，需要时可以在管理器里重新打开）',
         managerEmpty: '本会话没有 HTML 程序。',
         managerNew: '新建 HTML 项目',
         create: '创建',
@@ -1416,6 +1421,65 @@ window.__ModuleLoader__.load({
         state.templates.error = (value !== null && value.error) || 'failed';
         bump();
         return false;
+      });
+    }
+
+    /**
+     * The delays a reveal is repeated over.
+     *
+     * The tab type is registered by the first record of its kind (`syncRightPane`) and that
+     * registration lands asynchronously, so the *first* ask can arrive before the column knows
+     * the type and be dropped in silence. These later asks are the ones that land on a column
+     * that has never held this tab before.
+     */
+    const DOCK_REVEAL_RETRY_MS = [150, 500, 1200];
+
+    /**
+     * Bring the surface a render just made into view, when it is a `dock-right` one.
+     *
+     * Rendering and revealing are two acts, and the host only performs the first: a record placed
+     * in the right column *is* drawn there, but the column stays collapsed until somebody opens
+     * its tab — so an interface nobody reveals is an interface nobody can see.
+     *
+     * This is that reveal, and it is deliberately one function rather than a step every caller
+     * remembers, because the manager's 重启UI界面 rendered its project and then stopped: the
+     * interface really existed and really was invisible, which read as "nothing happened", and
+     * the only way back to it was to press some other control until the column came up.
+     *
+     * @param slug - the project that was rendered. The newest `dock-right` record of that project
+     *   is the one revealed, so a restart cannot reveal the surface it just replaced.
+     * @param sessionId - the session the render went into.
+     * @returns whether there was a dock-right record to reveal.
+     */
+    function revealDockRight(slug, sessionId) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return false;
+      const docked = recordsFor(sessionId).filter((record) => record.placement === 'dock-right');
+      if (docked.length === 0) return false;
+      // Prefer this project's own surface, but never turn a missing `template` field into "no
+      // reveal at all": without a name to match, the newest docked record is the one just made.
+      const named =
+        typeof slug === 'string' && slug.length > 0 ? docked.filter((record) => record.template === slug) : [];
+      const pool = named.length > 0 ? named : docked;
+      const mine = pool[pool.length - 1];
+      openRightPane(mine.uiId);
+      for (const delay of DOCK_REVEAL_RETRY_MS) {
+        setTimeout(() => openRightPane(mine.uiId), delay);
+      }
+      return true;
+    }
+
+    /**
+     * Render one project into a session *and* reveal the result — the whole of "open this".
+     *
+     * Every path that puts an interface into a session goes through here: the create dialog, the
+     * drawer's direct 应用/空白 buttons, and the manager's 重启UI界面. Keeping the render and its
+     * reveal in one function is what stops the two from drifting apart again — which is exactly
+     * how the restart path lost the reveal and shipped a button that looked broken.
+     */
+    function applyTemplateInto(slug, sessionId, placement) {
+      return applyTemplate(slug, sessionId, placement).then((ok) => {
+        if (ok === true) revealDockRight(slug, sessionId);
+        return ok;
       });
     }
 
@@ -1882,6 +1946,74 @@ window.__ModuleLoader__.load({
       return { armed: armed === true, ask };
     }
 
+    /**
+     * The two controls a floating surface wears: 最小化 and 关闭.
+     *
+     * One component, not one copy per form, because a float and a fullscreen layer are the same
+     * kind of surface — a window over the conversation that can be put away or destroyed — and
+     * they used to disagree about it: the fullscreen bar wrote 「切回聊天」 where the float drew a
+     * '—', so the same act had two names and the safe way out of one surface did not look like the
+     * safe way out of the other. Both now render this, which pins the *type*, the 22px size, the
+     * glyphs and the words to the float's implementation. What still differs is only the effect,
+     * and that arrives as the callbacks below.
+     *
+     * 最小化 is never confirmed: it hides — the record stays, the document stays mounted, and the
+     * surface can be brought back — so asking there would be friction on the one control a reader
+     * should be free to press. 关闭 asks first, in the manager's own words and with the manager's
+     * own two-step, because it destroys the document and nothing brings it back.
+     */
+    function HtmlUiWindowControls(props) {
+      const { uiId, onMinimize, onDismiss, closeConfirm } = props;
+      const armed = closeConfirm !== undefined && closeConfirm.armed === true;
+      return h(
+        'div',
+        // The buttons belong to the chrome row's flex layout, not to this wrapper, so the wrapper
+        // is `display: contents`: same layout as when they were written out inline, one component
+        // in the tree for the tests and for the next form to reuse.
+        { style: { display: 'contents' } },
+        onMinimize === undefined
+          ? null
+          : h(
+              'button',
+              {
+                key: 'minimize',
+                type: 'button',
+                style: buttonStyle,
+                onClick: () => onMinimize(uiId),
+                title: tr('minimize', 'Minimize'),
+                'aria-label': tr('minimize', 'Minimize'),
+              },
+              // The glyph, as the float has always drawn it; the word lives in the title and the
+              // accessible name, where a 22px button has room for it.
+              '—',
+            ),
+        onDismiss === undefined
+          ? null
+          : h(
+              'button',
+              {
+                key: 'close',
+                type: 'button',
+                // The confirmation replaces the ✕ in the very same button (the manager's own
+                // two-step does that too): a second control appearing beside it would be a
+                // different question in a different place.
+                style: armed ? closeConfirmButtonStyle : buttonStyle,
+                onClick: closeConfirm.ask,
+                title: armed
+                  ? tr('closeConfirmUiHint', 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.')
+                  : tr('close', 'Close'),
+                'aria-label': armed
+                  ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered')
+                  : tr('close', 'Close'),
+                // Announced to assistive technology, and readable from the DOM while the
+                // confirmation is showing.
+                'aria-live': armed ? 'assertive' : undefined,
+              },
+              armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
+            ),
+      );
+    }
+
     /** The frame plus, for every variant but `background`, a slim host chrome row. */
     function HtmlUiFrame(props) {
       const { record, theme, variant, bare } = props;
@@ -2183,38 +2315,13 @@ window.__ModuleLoader__.load({
             ),
             // Minimizing hides the window without deleting it: the session page can bring
             // it back, which is the difference between "out of the way" and "gone".
-            props.onMinimize !== undefined
-              ? h(
-                  'button',
-                  {
-                    type: 'button',
-                    style: buttonStyle,
-                    onClick: () => props.onMinimize(record.uiId),
-                    title: tr('minimize', 'Hide the window'),
-                    'aria-label': tr('minimize', 'Hide the window'),
-                  },
-                  '—',
-                )
-              : null,
-            props.onDismiss !== undefined
-              ? h(
-                'button',
-                {
-                  type: 'button',
-                  // The confirmation replaces the ✕ in the very same button (the manager's own
-                  // two-step does that too): a second control appearing beside it would be a
-                  // different question in a different place.
-                  style: closeConfirm.armed ? closeConfirmButtonStyle : buttonStyle,
-                  onClick: closeConfirm.ask,
-                  title: dismissHint,
-                  'aria-label': closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
-                  // Announced to assistive technology, and readable from the DOM while the
-                  // confirmation is showing.
-                  'aria-live': closeConfirm.armed ? 'assertive' : undefined,
-                },
-                closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : '✕',
-              )
-              : null,
+            // Both controls come from the one component every floating form shares.
+            h(HtmlUiWindowControls, {
+              uiId: record.uiId,
+              onMinimize: props.onMinimize,
+              onDismiss: props.onDismiss,
+              closeConfirm,
+            }),
           ),
           h('div', { style: { position: 'relative', flex: '1 1 auto', minHeight: '0', background: 'var(--dsw-alias-bg-base, #fff)' } }, body),
           h('div', {
@@ -3069,7 +3176,11 @@ window.__ModuleLoader__.load({
         // and a render that overtakes the close leaves the old surface drawn where it was.
         for (const record of records) dismissRecord(record.uiId);
         setTimeout(() => {
-          applyTemplate(row.slug, sessionId, chosen).then((ok) => {
+          // `applyTemplateInto`, not `applyTemplate`: the render alone leaves a dock-right
+          // surface collapsed and invisible. This path used to call the render by itself and
+          // nothing else, which is why choosing 右侧栏 here looked like nothing happening —
+          // see `revealDockRight`.
+          applyTemplateInto(row.slug, sessionId, chosen).then((ok) => {
             onStatus(ok ? tr('managerRestoreUiDone', 'Interface restored.') : tr('managerRestoreUiFailed', 'Could not restore that interface.'));
           });
         }, 120);
@@ -3728,6 +3839,11 @@ window.__ModuleLoader__.load({
       // body: leaving them listed would show the session page rows whose content is gone.
       // Two teardowns are not the reader's doing and are ignored: the page going away, and
       // the plugin itself letting the tab go.
+      //
+      // 那个 ✕ 拦不住：它是宿主的组件（`DockLayout` 的 tab chip），登记的 tab 类型里没有任何
+      // 关闭前的钩子（见 `SidebarRightTabDefinition`：全是静态字段），所以误触一次就是上面这条
+      // 卸载路径 —— 本会话全部 dock-right 界面一起被销毁。宿主没给拦截点，插件能做的只有
+      // 「让后果在误触之前就看得见」：下面第一行就是这句话。
       useEffect(
         () => () => {
           if (pageUnloading || rightPaneWiring.released) return;
@@ -3741,9 +3857,40 @@ window.__ModuleLoader__.load({
       // occupies it without something to put there.
       const records = sessionId === undefined ? [] : recordsIn(sessionId, ['dock-right']);
       if (records.length === 0) return null;
+      const notice = tr(
+        'rightPaneCloseTabNotice',
+        'Closing the tab above closes all {count} interfaces below (their documents are destroyed; the manager can open them again)',
+        { count: records.length },
+      );
       return h(
         'div',
         { style: { display: 'flex', flexDirection: 'column', gap: '8px', height: '100%', minHeight: '0', padding: '6px' } },
+        // The one thing this plugin cannot do is ask before the host's ✕ acts, so it says what
+        // that ✕ costs while the reader can still read it: one line, above the surfaces, with the
+        // count of what goes. 手机: it wraps instead of clipping, and takes no share of the height.
+        h(
+          'div',
+          {
+            style: {
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '6px',
+              // `flexShrink`, not a `flex` shorthand: the surface rows below are the ones that
+              // share the column's height, and this line takes none of it.
+              flexShrink: 0,
+              padding: '4px 6px',
+              borderRadius: '6px',
+              border: '1px solid var(--dsw-alias-border-l1, #e2e2e2)',
+              background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.02))',
+              fontSize: '11px',
+              lineHeight: '15px',
+              color: 'var(--dsw-alias-label-secondary, #888)',
+            },
+            title: notice,
+          },
+          h('span', { 'aria-hidden': 'true' }, 'ⓘ'),
+          h('span', { style: { minWidth: '0' } }, notice),
+        ),
         ...records.map((record) =>
           h(
             'div',
@@ -3915,8 +4062,12 @@ window.__ModuleLoader__.load({
      * state: one instance per record (the layer array is keyed by `uiId`) keeps every interface's
      * question its own instead of sharing one flag across the session's fullscreen surfaces.
      *
-     * 切回聊天 is not confirmed: it hides the layer (`state.fullscreenDismissed`) and leaves the
-     * record and its document alone, so it is the safe way out — and the one a reader should take.
+     * The bar used to spell its own two controls out — 「切回聊天」 in words and a labelled
+     * 「关闭」— and that was the last place where the same two acts wore a different shape from
+     * the float's '—' and '✕'. Both now come from `HtmlUiWindowControls`, and the words with them
+     * (最小化/关闭). The semantics are unchanged: minimizing hides the layer
+     * (`state.fullscreenDismissed`) and leaves the record and its document alone, so it stays
+     * unconfirmed and stays the safe way out; the ✕ still asks first.
      */
     function HtmlUiFullscreenChrome(props) {
       const { record, onLeave, onDismiss } = props;
@@ -3926,18 +4077,10 @@ window.__ModuleLoader__.load({
         'div',
         { style: Object.assign({}, surfaceChrome, { minHeight: '36px', padding: '0 10px' }) },
         h('span', { style: titleStyle }, `${title} ${tr('fullscreenSuffix', '· fullscreen')}`),
-        h('button', { type: 'button', style: buttonStyle, onClick: onLeave }, tr('backToChat', 'Back to chat')),
-        h(
-          'button',
-          {
-            type: 'button',
-            style: closeConfirm.armed ? closeConfirmButtonStyle : buttonStyle,
-            onClick: closeConfirm.ask,
-            title: closeConfirm.armed ? tr('closeConfirmUiHint', 'Click again to destroy this interface: the document goes away and unsaved runtime state is lost.') : tr('close', 'Close'),
-            'aria-label': closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
-          },
-          closeConfirm.armed ? tr('closeConfirmUi', 'Close it? The interface is destroyed and cannot be recovered') : tr('close', 'Close'),
-        ),
+        // 切回聊天是这一形态的「最小化」：它只隐藏图层（`state.fullscreenDismissed`），记录和
+        // 文档都原样留着，因此它渲染的正是浮动窗口那一对控件 —— 同一个组件，所以两种形态的
+        // 「安全出口」长得一样、读起来也一样，只有一个 ✕ 和一个最小化，不再各有一套说法。
+        h(HtmlUiWindowControls, { uiId: record.uiId, onMinimize: onLeave, onDismiss, closeConfirm }),
       );
     }
 
@@ -5091,22 +5234,12 @@ window.__ModuleLoader__.load({
                     if (sessionId === undefined || state.create.busy === true) return;
                     state.create.busy = true;
                     bump();
-                    applyTemplate(state.create.source, sessionId, state.create.placement).then((created) => {
+                    // The reader asked for it, so the column opens for it — `applyTemplateInto`
+                    // renders *and* reveals, now and again shortly after, because the tab type
+                    // registers asynchronously and the first attempt can arrive too early.
+                    applyTemplateInto(state.create.source, sessionId, state.create.placement).then((created) => {
                       state.create.busy = false;
-                      if (created === true) {
-                        state.create.open = false;
-                        // The reader asked for it, so open the column for it — now, and
-                        // again shortly after, because the tab type registers
-                        // asynchronously and the first attempt can arrive too early.
-                        const latest = recordsFor(sessionId);
-                        const mine = latest.length > 0 ? latest[latest.length - 1] : undefined;
-                        if (mine !== undefined && mine.placement === 'dock-right') {
-                          openRightPane(mine.uiId);
-                          for (const delay of [150, 500, 1200]) {
-                            setTimeout(() => openRightPane(mine.uiId), delay);
-                          }
-                        }
-                      }
+                      if (created === true) state.create.open = false;
                       bump();
                     });
                   },
@@ -5152,7 +5285,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
               title: tr('applyHint', 'Apply to this session (no model round trip)'),
-              onClick: () => applyTemplate(template.slug, sessionId),
+              onClick: () => applyTemplateInto(template.slug, sessionId),
             },
             tr('apply', 'Apply'),
           ),
@@ -5210,7 +5343,8 @@ window.__ModuleLoader__.load({
               type: 'button',
               style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
               title: tr('newBlankHint', 'Start an empty interface in the right column (no model round trip)'),
-              onClick: () => applyTemplate('blank', sessionId),
+              // The copy above promises the right column: the reveal is what makes it true.
+              onClick: () => applyTemplateInto('blank', sessionId),
             },
             tr('newBlank', 'Blank canvas'),
           ),
@@ -5515,6 +5649,10 @@ window.__ModuleLoader__.load({
         markTemplatesAsked,
         toggleTemplates,
         applyTemplate,
+        // The render-and-reveal pair, exported so a test can drive either half and assert that a
+        // restart really does open the column instead of only drawing into it.
+        applyTemplateInto,
+        revealDockRight,
         askModelForTemplate,
         ensureTicket,
         ticketToken,
@@ -5565,6 +5703,10 @@ window.__ModuleLoader__.load({
         // reason as the rest: the confirmation is the only thing standing between a mis-tap and a
         // destroyed document, so a test has to be able to render it.
         useCloseConfirm,
+        // The two window controls every floating form wears. Exported because the point of it is
+        // that the float and the fullscreen bar render the *same* component, and a test can only
+        // assert that by finding it in both trees.
+        HtmlUiWindowControls,
         HtmlUiFullscreenChrome,
         HtmlUiToolView,
         HtmlUiDock,

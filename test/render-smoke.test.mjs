@@ -513,7 +513,10 @@ test('the overlay renders nothing without a session, and the fullscreen layer wh
   const ctx = { sessions: { list: { getSnapshot: () => ({ current: 'viewed', byId: {} }), subscribe: () => () => {} } } };
   const overlay = render(__internals.HtmlUiOverlay, { ctx });
   assert.match(overlay.text, /fullscreen/u);
-  assert.match(overlay.text, /Back to chat/u, 'the switch back is part of the layer');
+  // The layer's own bar: the switch back is the float's minimize — the same component, the same
+  // '—' — rather than a differently-worded control of its own.
+  assert.match(overlay.text, /—/u, 'the switch back is the window minimize the float draws');
+  assert.ok(!overlay.text.includes('Back to chat'), 'and it is no longer a control with its own name');
   // The layer draws the chrome, so the frame inside must not draw a second one.
   assert.equal(overlay.text.match(/fullscreen/gu).length, 1, 'exactly one title row');
 
@@ -1639,8 +1642,10 @@ test('every close control that destroys an interface asks first, and acts on the
     float.press(confirmLabel);
     assert.deepEqual(floatDismissed, ['ui-1a2b3c4d'], 'and closes on the second');
 
-    // fullscreen. 切回聊天 is the safe way out — it only hides the layer — so it is offered first
-    // and is not confirmed, which is what keeps the confirmation meaningful.
+    // fullscreen. Its minimize is the safe way out — it only hides the layer — so it is offered
+    // first and is not confirmed, which is what keeps the confirmation meaningful. It is the
+    // float's own minimize now, glyph and all, so the safe control is the one a reader already
+    // knows from a floating window.
     resetStore();
     const fsLeaves = [];
     const fsDismissed = [];
@@ -1649,10 +1654,10 @@ test('every close control that destroys an interface asks first, and acts on the
       onLeave: () => fsLeaves.push('left'),
       onDismiss: () => fsDismissed.push('dismissed'),
     });
-    chrome.press('切回聊天');
+    chrome.press('—');
     assert.deepEqual(fsLeaves, ['left'], 'leaving the layer acts at once');
     assert.deepEqual(fsDismissed, [], 'and is not what closes the interface');
-    chrome.press('关闭');
+    chrome.press('✕');
     assert.deepEqual(fsDismissed, [], 'the fullscreen close asks as well');
     assert.ok(chrome.text.includes(confirmLabel), 'with the same words as the other two');
     chrome.press(confirmLabel);
@@ -1735,5 +1740,178 @@ test('the manager splits cross-session processes from this session’s interface
   resetStore();
   state.templates.items = [];
   resetCreate();
+});
+
+// ------------------------------------------- the restart path reveals what it rendered
+
+test('restarting a project into the right column opens the column, exactly as the create dialog does', async () => {
+  // The bug this guards: 重启UI界面 rendered the project and stopped there. A `dock-right` record is
+  // drawn where the right column *would* be — and that column stays collapsed until somebody opens
+  // its tab — so the interface really existed and really was invisible, which reads as "nothing
+  // happened" (and only pressing some other control brought the column up). The reveal is one
+  // function now, `applyTemplateInto` → `revealDockRight`, used by every path that renders into a
+  // session; this asserts the call the restart path was missing, and its timing.
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  resetStore();
+  resetCreate();
+  setCatalogue([backendProject()]);
+  state.rightPane.available = true;
+  // The column's own controller, as the host provides it: `openTab(kind, options)` is the call
+  // that brings the column up, recorded here so the assertion is about the call, not a flag.
+  state.rightPane.controller = { openTab: (kind, options) => calls.push({ kind, params: options?.params }) };
+  globalThis.fetch = () =>
+    Promise.resolve({
+      json: () =>
+        Promise.resolve({
+          ok: true,
+          ui: { uiId: 'ui-restart1', sessionId: 'session-1', title: '看板', placement: 'dock-right', template: 'heimiao', revision: 1, bytes: 5, createdAt: Date.now() },
+        }),
+    });
+  const statuses = [];
+  try {
+    const row = __internals.managerRowsFor('session-1')[0];
+    assert.ok(row !== undefined, 'the project whose process is loaded has a row');
+    const picking = render(__internals.HtmlUiManagerRow, {
+      row,
+      sessionId: 'session-1',
+      onStatus: (text) => statuses.push(text),
+      placementPicking: true,
+      props: {},
+    });
+    const chooseRight = buttonsLabelled(picking, 'Right column (a real split)')[0];
+    assert.ok(chooseRight !== undefined, 'the restart picker offers the right column');
+    chooseRight.props.onClick();
+    // The render waits 120ms for the host to tear the old records down, so the assertion waits
+    // for the step the live page waits for rather than for an arbitrary moment.
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    assert.ok(calls.length >= 1, 'the restart asks the column to open its tab');
+    assert.equal(calls[0].kind, __internals.TAB_KIND, 'through the column tab kind, not some other tab');
+    assert.equal(calls[0].params.uiId, 'ui-restart1', 'naming the record the render just published');
+    assert.ok(__internals.state.rightPane.opened.has('ui-restart1'), 'and the record is remembered as opened');
+    assert.deepEqual(statuses, ['Interface restored.'], 'while the row still reports the render it made');
+    // The reveal is repeated, because the tab type registers asynchronously and the first ask can
+    // arrive before the column knows it: the create dialog has always re-asked, and a restart that
+    // only asked once would be the same bug on a cold column.
+    await new Promise((resolve) => setTimeout(resolve, 520));
+    assert.ok(calls.length >= 3, `the re-asks are part of the same reveal (${calls.length} calls so far)`);
+    assert.ok(
+      calls.every((call) => call.params.uiId === 'ui-restart1'),
+      'and every one of them names the same record, never the surface it replaced',
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  resetStore();
+  resetCreate();
+  state.templates.items = [];
+});
+
+// ------------------------------------------------ one set of window controls, everywhere
+
+test('the fullscreen bar wears the float’s window controls, not a pair of its own', () => {
+  // The regression this guards: the fullscreen layer spelled its own two controls out — 「切回聊天」
+  // in words and a labelled 「关闭」— so the same two acts wore a different shape from the float's
+  // '—' and '✕', and the safe way out of a fullscreen surface did not look like the safe way out
+  // of a window. Style is asserted by *identity*, not by copy: the same component and the same
+  // style objects are what make them the same control, and a copy assertion would pass on two
+  // lookalikes that drift apart again tomorrow.
+  resetStore();
+  const buttonsOf = (tree) => tree.elements.filter((element) => element.type === 'button');
+  const controlsOf = (tree) => tree.elements.filter((element) => element.type === __internals.HtmlUiWindowControls);
+  const lastButton = (tree) => buttonsOf(tree).slice(-1)[0];
+
+  const float = render(__internals.HtmlUiFrame, {
+    record: recordFor('float'),
+    theme: 'light',
+    variant: 'float',
+    onMinimize: () => {},
+    onDismiss: () => {},
+  });
+  const chrome = render(__internals.HtmlUiFullscreenChrome, { record: recordFor('fullscreen'), onLeave: () => {}, onDismiss: () => {} });
+  assert.equal(controlsOf(float).length, 1, 'the float draws the shared window controls');
+  assert.equal(controlsOf(chrome).length, 1, 'and so does the fullscreen bar: the same component');
+
+  const [floatMin, floatClose] = buttonsOf(float);
+  const [fsMin, fsClose] = buttonsOf(chrome);
+  assert.equal(fsMin.props.style, floatMin.props.style, 'the minimize wears the float’s style object, not an equal one');
+  assert.equal(fsClose.props.style, floatClose.props.style, 'and so does the close');
+  assert.equal(fsMin.children[0], floatMin.children[0], 'the fullscreen minimize is the float’s glyph');
+  assert.equal(floatMin.children[0], '—', 'which is the minimize glyph');
+  assert.equal(fsClose.children[0], floatClose.children[0], 'the fullscreen close is the float’s glyph');
+  assert.equal(floatClose.children[0], '✕', 'which is the close glyph');
+  // The words travel with the control: 最小化 就是 最小化, 关闭 就是 关闭 — on both surfaces.
+  assert.equal(fsMin.props.title, 'Minimize', 'minimizing is called what it is');
+  assert.equal(floatMin.props.title, 'Minimize', 'on the float too');
+  assert.equal(fsMin.props['aria-label'], 'Minimize', 'and the glyph button says so to assistive technology');
+  assert.equal(fsClose.props.title, 'Close', 'closing is called what it is');
+  assert.equal(floatClose.props.title, 'Close', 'on the float too');
+  // The semantics did not move with the looks: minimizing is still the unconfirmed safe way out,
+  // and closing still asks.
+  const floatLeaves = [];
+  const chromeLeaves = [];
+  const armingFloat = renderStateful(__internals.HtmlUiFrame, {
+    record: recordFor('float'),
+    theme: 'light',
+    variant: 'float',
+    onMinimize: (uiId) => floatLeaves.push(uiId),
+    onDismiss: () => {},
+  });
+  armingFloat.press('—');
+  assert.deepEqual(floatLeaves, ['ui-1a2b3c4d'], 'a float minimize acts at once, with no question');
+  const armingChrome = renderStateful(__internals.HtmlUiFullscreenChrome, {
+    record: recordFor('fullscreen'),
+    onLeave: () => chromeLeaves.push('left'),
+    onDismiss: () => {},
+  });
+  armingChrome.press('—');
+  assert.deepEqual(chromeLeaves, ['left'], 'and so does the fullscreen one');
+  // The two-step close, from either surface: the same armed style and the same announcement.
+  const armedFloat = renderStateful(__internals.HtmlUiFrame, {
+    record: recordFor('float'),
+    theme: 'light',
+    variant: 'float',
+    onMinimize: () => {},
+    onDismiss: () => {},
+  });
+  armedFloat.press('✕');
+  const armedChrome = renderStateful(__internals.HtmlUiFullscreenChrome, { record: recordFor('fullscreen'), onLeave: () => {}, onDismiss: () => {} });
+  armedChrome.press('✕');
+  assert.equal(
+    lastButton(armedChrome).props.style,
+    lastButton(armedFloat).props.style,
+    'the confirmation wears the identical style object on both',
+  );
+  assert.equal(lastButton(armedChrome).props['aria-live'], 'assertive', 'a fullscreen confirmation announces itself');
+  assert.equal(lastButton(armedFloat).props['aria-live'], 'assertive', 'exactly as a float’s does');
+  resetStore();
+});
+
+// ------------------------------------- what the host’s tab ✕ costs, said while it can be read
+
+test('the right column says what closing its tab costs, with the count', () => {
+  // The ✕ on the HTML UI tab is the host's own control and offers no callback (the tab-type
+  // contract is static — `SidebarRightTabDefinition` has no close hook — and the dock's close is
+  // planned before any plugin hears about it), so the plugin cannot ask before it acts. What it
+  // *can* do is say what that ✕ costs while the reader can still read it, and what it costs is
+  // every interface in this pane: the body's own teardown takes them with it. This asserts the
+  // line exists, carries the number, and leaves with the last interface.
+  const dockRight = (uiId) =>
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId, sessionId: 'session-1', title: 'R', placement: 'dock-right', revision: 1, bytes: 5 },
+      undefined,
+    );
+  resetStore([dockRight('ui-nb000001'), dockRight('ui-nb000002')]);
+  const pane = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
+  assert.match(pane.text, /Closing the tab above closes all 2 interfaces below/u, 'the line names how many go with it');
+  assert.match(pane.text, /Preparing interface/u, 'and the surfaces are still drawn under it');
+  withChinese(() => {
+    const chinese = render(__internals.HtmlUiRightPane, { sessionId: 'session-1' });
+    assert.ok(chinese.text.includes('会一起关掉下面 2 个界面'), `the Chinese line says the same: ${chinese.text}`);
+  });
+  resetStore([dockRight('ui-nb000001')]);
+  assert.match(render(__internals.HtmlUiRightPane, { sessionId: 'session-1' }).text, /closes all 1 interfaces below/u, 'one interface, one number');
+  resetStore();
+  assert.equal(render(__internals.HtmlUiRightPane, { sessionId: 'session-1' }).text, '', 'nothing hosted, nothing to warn about');
 });
 
