@@ -88,6 +88,32 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- **A session can no longer reopen an empty panel by itself.** The column keeps its own layout per
+  session — in the reader's browser, not on the server — and that layout remembered this plugin's tab
+  after the records that opened it were gone, with `expanded: true` beside it: the session came back
+  with the column open on an empty `HTML UI` tab on every load, and neither a restart nor a cleared
+  browser cache touched it. Unregistering the tab *type* cannot take such a tab away, and closing it
+  once is not enough either: the shell loads a session's saved layout *after* plugins are injected and
+  puts the tab straight back, and `tabsIn` is documented to be **empty before that adoption** — which
+  is why the first two attempts at this did nothing visible. The tab is now removed through the
+  column's own API and re-checked whenever the column's view changes: `openTabs` (published, and
+  populated for saved layouts too) and `mounted` are subscribed, `tabsIn`/`openTabs` are read to see
+  whether the layout still holds it, and `close(tabId)` takes it out — all feature detected, so a
+  column without them keeps its behaviour instead of having its internals guessed at.
+- **An expanded column with nothing in it is collapsed.** Removing the stale tab was only half of the
+  same report: `expanded` is persisted per session too, and the shell collapses the column only when
+  it *cannot* close the tab it is asked to close — so after the tab went, the column still opened by
+  itself, empty. When the mounted session's layout holds no tab at all (nobody's, not just ours), and
+  `isExpanded()` says the column is standing open, the plugin asks it to collapse
+  (`toggleExpanded`, feature detected) instead of leaving the reader with an empty column that keeps
+  coming back. A column holding another plugin's tab is left exactly as it is.
+- **Revealing a right-column interface is scoped to its own session.** `openTab` acts on the session
+  the column is mounted for, so revealing a record that belongs to a *different* session threw
+  "no tab type is registered" and could open a column nobody asked for. The reveal is skipped unless
+  the record's session is the mounted one.
+- **Closing the tab retires the interfaces it held.** The column tells plugins before it removes a
+  tab (`registerCloseHandler`), which replaces the guess this plugin used to make from a body
+  unmount — the same guess that let a record outlive the tab that held it.
 - **Collapsing a right-column interface no longer destroys its document.** The collapsed branch
   returned the control row *instead of* the body, so the `<iframe>` left React's tree, the browser
   dropped the document, and expanding mounted an empty frame that fetched a fresh ticket — every

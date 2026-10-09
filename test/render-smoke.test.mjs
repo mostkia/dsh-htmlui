@@ -420,6 +420,95 @@ test('a docked card offers the right-column route when the column is available',
   assert.match(withColumn.text, /Open in the right column/u);
 });
 
+test('the column is told to close our tab, so an empty panel stops reopening itself', () => {
+  // The column keeps its own layout per session, so unregistering the tab *type* cannot take away a
+  // tab it already remembers: the session came back with an empty panel every single time, because
+  // nothing ever closed the instance. `tabsIn` says whether the layout still holds it, `close` is
+  // what takes it out — and only while no right-column interface is using it.
+  const controllerFor = (tabs, closed) => ({
+    openTab: () => {},
+    close: (tabId) => closed.push(tabId),
+    tabsIn: () => tabs,
+    mounted: { getSnapshot: () => 'session-1' },
+  });
+  resetStore();
+  const closed = [];
+  state.rightPane.available = true;
+  state.rightPane.controller = controllerFor([{ id: '@mostkia/dsh-htmlui/panel', kind: 'dsh-htmlui-panel' }], closed);
+  __internals.releaseRightPaneTab();
+  assert.deepEqual(closed, ['@mostkia/dsh-htmlui/panel'], 'the column is asked to close this plugin’s tab');
+
+  // An interface is using that tab: it is not stale, and closing it would take away the reader's work.
+  const withInterface = [];
+  resetStore([
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-33330000', sessionId: 'session-1', title: 'D', placement: 'dock-right', revision: 1, bytes: 5 },
+      undefined,
+    ),
+  ]);
+  state.rightPane.available = true;
+  state.rightPane.controller = controllerFor([{ id: '@mostkia/dsh-htmlui/panel', kind: 'dsh-htmlui-panel' }], withInterface);
+  __internals.releaseRightPaneTab();
+  assert.deepEqual(withInterface, [], 'a tab that still holds an interface is left alone');
+
+  // A column that offers no close is left alone: guessing at its internals would be worse than the
+  // empty panel, and the reader can always close the tab by hand.
+  resetStore();
+  state.rightPane.controller = { openTab: () => {} };
+  assert.doesNotThrow(() => __internals.releaseRightPaneTab(), 'no close on offer, no complaint');
+});
+
+test('an expanded column with nothing in it is collapsed, not left standing open', () => {
+  // The other half of the same report: the tab went away but `expanded` stayed true, and `expanded`
+  // is persisted per session — so the column still opened by itself, empty. The shell collapses the
+  // column only when it *cannot* close the tab, so this has to be done here.
+  const collapsed = [];
+  const controllerFor = (tabs, expanded) => ({
+    openTab: () => {},
+    tabsIn: () => tabs,
+    mounted: { getSnapshot: () => 'session-1' },
+    isExpanded: () => expanded.value,
+    toggleExpanded: () => {
+      collapsed.push(true);
+      expanded.value = false;
+    },
+  });
+  resetStore();
+  const expanded = { value: true };
+  state.rightPane.available = true;
+  state.rightPane.controller = controllerFor([], expanded);
+  __internals.releaseRightPaneTab();
+  assert.deepEqual(collapsed, [true], 'an empty column that is standing open is collapsed');
+
+  // Someone else's tab is in there: that column is open because they are using it.
+  const keptOpen = [];
+  const otherExpanded = { value: true };
+  resetStore();
+  state.rightPane.controller = {
+    openTab: () => {},
+    tabsIn: () => [{ id: 'tab9', kind: 'dsh-client-ui-sidebar-terminal' }],
+    mounted: { getSnapshot: () => 'session-1' },
+    isExpanded: () => otherExpanded.value,
+    toggleExpanded: () => keptOpen.push(true),
+  };
+  __internals.releaseRightPaneTab();
+  assert.deepEqual(keptOpen, [], 'another plugin’s tab keeps the column open');
+
+  // Already collapsed: nothing to do, and nothing to toggle (a toggle would open it).
+  const alreadyShut = { value: false };
+  const touched = [];
+  resetStore();
+  state.rightPane.controller = {
+    openTab: () => {},
+    tabsIn: () => [],
+    mounted: { getSnapshot: () => 'session-1' },
+    isExpanded: () => alreadyShut.value,
+    toggleExpanded: () => touched.push(true),
+  };
+  __internals.releaseRightPaneTab();
+  assert.deepEqual(touched, [], 'a collapsed column is left collapsed');
+});
+
 test('the fallback dock draws nothing without a record, but still measures the column', () => {
   const meta = (uiId, placement) => ({ htmlui: true, op: 'render', uiId, sessionId: 'session-1', title: uiId, placement, revision: 1, bytes: 5 });
   resetStore();

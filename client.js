@@ -190,6 +190,8 @@ window.__ModuleLoader__.load({
       sessionSync: new Map(),
       /** Ids the user closed here, so a convergence cannot bring them back. */
       dismissed: new Set(),
+      /** Ids the host itself has handed this page, i.e. records that really exist right now. */
+      liveIds: new Set(),
       /** Last ids the host listed per session, and which sessions have been asked. */
       hostListed: new Map(),
       hostSynced: new Set(),
@@ -411,6 +413,10 @@ window.__ModuleLoader__.load({
       // Republishing an identical record must not notify: a component effect that
       // republishes would otherwise re-render itself forever.
       if (sameRecord(previous, next)) return;
+      // The host is the only one who can say a record exists right now, so only what it hands us (or
+      // hands back on a later sync) counts as live. A transcript card republishes without this flag,
+      // and history must never open the column by itself.
+      if (fromHost) state.liveIds.add(uiId);
       state.byId.set(uiId, next);
       if (previous === undefined || previous.sessionId !== record.sessionId) {
         if (previous !== undefined) removeFromSession(previous.sessionId, uiId);
@@ -573,6 +579,16 @@ window.__ModuleLoader__.load({
     function openRightPane(uiId) {
       const controller = state.rightPane.controller;
       if (controller === undefined || typeof controller.openTab !== 'function') return false;
+      // The column is a per-session thing and `openTab` acts on the session it is mounted for, so a
+      // record belonging to another session must not be revealed from here: the call would throw
+      // "no tab type is registered" and, at best, open a column nobody asked for. Widening a record
+      // happens in the session it lives in; elsewhere the shell hands it its own seat.
+      const mounted = controller.mounted;
+      const here = mounted !== undefined && typeof mounted.getSnapshot === 'function' ? mounted.getSnapshot() : undefined;
+      const owner = state.byId.get(uiId);
+      if (typeof here === 'string' && owner !== undefined && typeof owner.sessionId === 'string' && owner.sessionId !== here) {
+        return false;
+      }
       try {
         controller.openTab(TAB_KIND, { params: { uiId, source: '@mostkia/dsh-htmlui' } });
         if (typeof uiId === 'string' && uiId.length > 0) state.rightPane.opened.add(uiId);
@@ -3483,12 +3499,24 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (record === undefined || record.placement !== 'dock-right') return;
         if (state.rightPane.opened.has(record.uiId)) return;
+        // Only a record the host has actually handed this page may open the column. `publish` already
+        // refuses the ones the host does not list — history in the transcript — and this effect was
+        // ignoring that refusal, because it used the record it had just built from the block instead
+        // of asking whether anything live stood behind it. So every recorded right-column card
+        // revealed itself on every load, one at a time, always in whichever session was mounted: that
+        // is why the sessions which had ever developed a template came back with the column open, and
+        // why closing it there never lasted.
+        if (state.liveIds.has(record.uiId) !== true) return;
         openRightPane(record.uiId);
       }, [
         record === undefined ? undefined : record.uiId,
         record === undefined ? undefined : record.placement,
         rightPaneController,
         rightPaneTab,
+        // A card whose record the host hands over after this effect first ran still has to reveal
+        // itself, so the store's own answer is part of the condition (a primitive, so the dep is
+        // stable).
+        record === undefined ? undefined : state.liveIds.has(record.uiId),
       ]);
 
       // An inline interface lives *inside this tool row*, and a collapsed row hides it
@@ -3899,6 +3927,32 @@ window.__ModuleLoader__.load({
         const controller = scope.sidebarRight;
         if (controller === undefined || typeof controller.openTab !== 'function') return;
         state.rightPane.controller = controller;
+        // The column can say when the reader closes our tab: that is the signal this plugin used to
+        // guess at from a body unmount, and guessing is exactly how interfaces came to outlive the
+        // tab that held them. With the hook, closing the tab retires them, deliberately and once.
+        if (typeof controller.registerCloseHandler === 'function') {
+          try {
+            const release = controller.registerCloseHandler(TAB_KIND, (sessionId) => {
+              retireDockRightRecords(sessionId);
+            });
+            if (typeof release === 'function') disposers.push(release);
+          } catch (error) {
+            logWarn(undefined, '[dsh-htmlui] right pane refused a close handler', error);
+          }
+        }
+        // The decision may already have been taken before the column arrived — at boot the records
+        // are known first — so it is taken again now that closing has become possible, and again
+        // whenever the column's own view of its tabs changes, which is when a saved layout lands.
+        syncRightPane();
+        watchRightPaneTabs(controller, disposers);
+        // A session's layout keeps our tab after the records that opened it are gone, and the shell
+        // restores that layout on every load, so the column opens itself on an empty panel. Closing
+        // it needs the column's seat, which binds after plugins are injected: hence the retries, the
+        // same ones the reveal path uses for the same reason.
+        closeStaleRightPaneTab();
+        for (const delay of DOCK_REVEAL_RETRY_MS) {
+          setTimeout(() => closeStaleRightPaneTab(), delay);
+        }
         bump();
         scope.effect(
           () => () => {
@@ -3976,8 +4030,131 @@ window.__ModuleLoader__.load({
       rightPaneWiring.disposes = disposes;
     }
 
+    /**
+     * Retire the interfaces a session's tab was holding.
+     *
+     * The shell tells us before it removes that tab, so the interfaces go with it rather than
+     * lingering as records whose surface no longer exists. This replaces the guess the plugin used to
+     * make from a body unmount — the same guess that made a stale layout possible in the first place.
+     */
+    function retireDockRightRecords(sessionId) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return;
+      for (const record of recordsFor(sessionId)) {
+        if (record.placement === 'dock-right') dismissRecord(record.uiId);
+      }
+    }
+
+    /**
+     * The tab records the column still holds for a session, from either of its two published views.
+     *
+     * `tabsIn` is the per-session view and is **empty before the session's store is adopted**, which
+     * is exactly how the first attempt at this silently did nothing; `openTabs` is the cross-session
+     * view and is populated for saved layouts too, so it is the fallback that makes the check work
+     * whenever it happens to run.
+     */
+    function rightPaneTabsFor(controller, sessionId) {
+      const mine = [];
+      try {
+        for (const tab of controller.tabsIn(sessionId) ?? []) {
+          if (tab !== undefined && tab !== null) mine.push(tab);
+        }
+      } catch {
+        /* not readable yet: the cross-session view below may still be */
+      }
+      try {
+        const source = controller.openTabs;
+        const all = source !== undefined && typeof source.getSnapshot === 'function' ? source.getSnapshot() : [];
+        for (const tab of Array.isArray(all) ? all : []) {
+          if (tab === undefined || tab === null) continue;
+          if (typeof tab.sessionId === 'string' && tab.sessionId !== sessionId) continue;
+          if (!mine.some((seen) => seen.id === tab.id)) mine.push(tab);
+        }
+      } catch {
+        /* nothing readable: leave the column alone rather than guess at it */
+      }
+      return mine;
+    }
+
+    /**
+     * Watch the column's own list of open tabs, so a stale one is closed whenever it (re)appears.
+     *
+     * Closing at boot is not enough by itself: the shell loads a session's saved layout *after* plugins
+     * are injected and puts its tab back, which is why this session came up on an empty panel however
+     * many times the browser was restarted or its cache cleared. Both of these subscriptions re-run
+     * the same check whenever the column's view of its tabs, or of its mounted session, changes.
+     */
+    function watchRightPaneTabs(controller, disposers) {
+      const sources = [];
+      if (controller.openTabs !== undefined && typeof controller.openTabs.subscribe === 'function') sources.push(controller.openTabs);
+      if (controller.mounted !== undefined && typeof controller.mounted.subscribe === 'function') sources.push(controller.mounted);
+      for (const source of sources) {
+        try {
+          const stop = source.subscribe(() => {
+            closeStaleRightPaneTab();
+          });
+          if (typeof stop === 'function') disposers.push(stop);
+        } catch (error) {
+          logWarn(undefined, '[dsh-htmlui] right pane refused a tab watch', error);
+        }
+      }
+    }
+
+    /**
+     * Close the column's tab when this session's layout still holds it and nothing else does.
+     *
+     * The column keeps its own layout per session, and a tab in that layout outlives the records that
+     * opened it: the shell then restored the column with our tab in it on every load — an empty panel
+     * that came back by itself, unbothered by restarts or a cleared browser cache, because the state
+     * is the reader's own layout. `tabsIn` is the published way to see it and `close` the published
+     * way to take it away; both are feature detected, since a column without them should keep today's
+     * behaviour rather than have its internals guessed at.
+     */
+    function closeStaleRightPaneTab() {
+      const controller = state.rightPane.controller;
+      if (controller === undefined) return false;
+      // Each branch asks only for what it needs: closing a tab needs `close`, and collapsing an empty
+      // column needs neither `close` nor anything else that branch would have required.
+      if (typeof controller.tabsIn !== 'function') return false;
+      const mounted = controller.mounted;
+      const sessionId = mounted !== undefined && typeof mounted.getSnapshot === 'function' ? mounted.getSnapshot() : undefined;
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return false;
+      // Only when the tab has no reason to exist: a session with right-column interfaces is using it.
+      if (recordsFor(sessionId).some((record) => record.placement === 'dock-right')) return false;
+      const held = rightPaneTabsFor(controller, sessionId);
+      const mine = held.find((tab) => tab.kind === TAB_KIND || tab.id === TAB_ID);
+      if (mine === undefined) {
+        // Nothing of ours. And when there is nothing of anyone else's either, the column is an empty
+        // shell left standing by a layout that outlived its content: the shell collapses the column
+        // only when it *cannot* close the tab, so taking our tab away was half the job — `expanded` is
+        // persisted per session and stayed true, which is the pop the reader still saw.
+        if (held.length > 0) return false;
+        if (typeof controller.isExpanded !== 'function' || typeof controller.toggleExpanded !== 'function') return false;
+        if (controller.isExpanded() !== true) return false;
+        try {
+          controller.toggleExpanded();
+          return true;
+        } catch (error) {
+          logWarn(undefined, '[dsh-htmlui] right pane refused to collapse', error);
+          return false;
+        }
+      }
+      const tabId = typeof mine.id === 'string' && mine.id.length > 0 ? mine.id : TAB_ID;
+      if (typeof controller.close !== 'function') return false;
+      try {
+        controller.close(tabId);
+        if (state.rightPane.opened !== undefined) state.rightPane.opened.clear();
+        return true;
+      } catch (error) {
+        logWarn(undefined, '[dsh-htmlui] right pane refused to close a stale tab', error);
+        return false;
+      }
+    }
+
     /** Take the tab back out of the column. */
     function releaseRightPaneTab() {
+      // Before the type goes, and even when this page never registered it: the column may still be
+      // holding our tab open from an earlier visit, and only the shell can take that away.
+      closeStaleRightPaneTab();
       if (!rightPaneWiring.wired) {
         state.rightPane.available = false;
         return;
