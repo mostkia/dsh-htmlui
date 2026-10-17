@@ -61,7 +61,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.3';
+const PLUGIN_VERSION = '0.1.4';
 
 /**
  * Placements this plugin offers.
@@ -118,10 +118,21 @@ const SLOT_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 // Every carrier route shares this cap. State is the largest legitimate payload
 // (MAX_STATE_BYTES); anything above this is a body nobody asked for.
 const MAX_BODY_BYTES = 256 * 1024;
+/**
+ * What one action may hand the model. The model only ever sees the first 8000 characters of the
+ * payload, so a bigger body buys nothing and costs a full `JSON.stringify` of whatever arrived
+ * (the carrier reads rpc bodies up to ROWS_BODY_BYTES for the row layer's sake). Rejected before
+ * the action bucket is spent, so a refused body cannot eat the allowance for a real click.
+ */
+const MAX_ACTION_BYTES = 256 * 1024;
 const SSE_HEARTBEAT_MS = 15_000;
-/** Writes: a burst, then one every 1.5 s. Reads: far wider, because paging and search are normal. */
+/**
+ * Writes: a burst, then one every 1.5 s. Reads — and a project backend's own calls, which share
+ * this bucket — run at 16/s with a burst of 64: frames and quotes arrive in batches, and the
+ * document that needs them is not talking to the model while it does.
+ */
 const ACTION_BUCKET = { capacity: 8, refillMs: 1_500 };
-const READ_BUCKET = { capacity: 40, refillMs: 100 };
+const READ_BUCKET = { capacity: 64, refillMs: 62.5 };
 
 /**
  * A project's own backend: server-side code that lives in the project's directory.
@@ -137,7 +148,7 @@ const APP_DEFAULT_FILE = 'server.js';
 /** How long one backend call may run before this route answers on its behalf. */
 const APP_TIMEOUT_MS = 10_000;
 /** What one backend call may send, and what its answer may weigh. */
-const APP_MAX_BYTES = 1 << 20;
+const APP_MAX_BYTES = 4 * 1024 * 1024;
 /** How long a project's backend stays loaded after its last call. */
 const APP_IDLE_MS = 10 * 60_000;
 /** The headers a backend is shown: never the document's capability token, never a cookie. */
@@ -1760,8 +1771,16 @@ function readBody(req, limit) {
   });
 }
 
-async function readJsonBody(req, limit) {
+/**
+ * Read one JSON object body.
+ *
+ * `onRaw` is told how many bytes actually arrived, before parsing: the rpc route has to read up to
+ * ROWS_BODY_BYTES for the row layer, and the action op needs to know whether what it got is a
+ * normal click payload or something that only costs a stringify (see MAX_ACTION_BYTES).
+ */
+async function readJsonBody(req, limit, onRaw) {
   const text = await readBody(req, limit);
+  if (typeof onRaw === 'function') onRaw(byteLength(text));
   if (text.trim().length === 0) return {};
   const value = JSON.parse(text);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -1827,7 +1846,10 @@ export function apply(ctx, config) {
     const refill = Math.floor((now - bucket.at) / spec.refillMs);
     if (refill > 0) {
       bucket.tokens = Math.min(spec.capacity, bucket.tokens + refill);
-      bucket.at = now;
+      // Carry the remainder. Advancing to `now` would throw away whatever part of an interval had
+      // not elapsed yet, so a document calling faster than one refill per interval would never
+      // accrue at all: the bucket stated 16 a second and delivered about ten.
+      bucket.at += refill * spec.refillMs;
     }
     if (bucket.tokens <= 0) {
       buckets.set(key, bucket);
@@ -2987,7 +3009,11 @@ export function apply(ctx, config) {
       sendJson(res, 500, { ok: false, error: 'the backend answered with something this route cannot send' });
       return;
     }
-    if (byteLength(typeof payload === 'string' ? payload : payload.toString('utf8')) > APP_MAX_BYTES) {
+    // Measured on what will actually be sent. A Buffer is binary: decoding it to a string just to
+    // count it both mangles the measurement (bytes that are not valid UTF-8 come back as U+FFFD and
+    // inflate it) and copies up to 4 MiB for nothing. `payload.length` is the byte count, exactly.
+    const answerBytes = typeof payload === 'string' ? byteLength(payload) : payload.length;
+    if (answerBytes > APP_MAX_BYTES) {
       sendJson(res, 502, { ok: false, error: `the backend answered with more than ${APP_MAX_BYTES} bytes` });
       return;
     }
@@ -3166,7 +3192,10 @@ export function apply(ctx, config) {
     // The widest body any rpc op may carry: a slot row of MAX_ROW_BYTES plus its JSON envelope.
     // Every other route keeps MAX_BODY_BYTES; per-op checks below still hold the narrow limits
     // (a slot value, the per-interface state) for the ops that have them.
-    readJsonBody(req, ROWS_BODY_BYTES)
+    let rawBytes = 0;
+    readJsonBody(req, ROWS_BODY_BYTES, (bytes) => {
+      rawBytes = bytes;
+    })
       .then(async (body) => {
         const uiId = String(body.uiId ?? '');
         const token = typeof body.t === 'string' ? body.t : '';
@@ -3337,6 +3366,16 @@ export function apply(ctx, config) {
           return;
         }
         const action = typeof body.action === 'string' && body.action.trim().length > 0 ? body.action.trim().slice(0, 200) : 'action';
+        // The model sees at most 8000 characters of this payload, so an oversized action is refused
+        // here — before the bucket is spent — instead of paying to stringify a body nobody reads.
+        if (rawBytes > MAX_ACTION_BYTES) {
+          sendJson(res, 413, {
+            ok: false,
+            error: `action body larger than ${MAX_ACTION_BYTES} bytes`,
+            hint: 'send only what the model needs; it never sees more than the first 8000 characters',
+          });
+          return;
+        }
         if (!takeToken(uiId)) {
           sendJson(res, 429, { ok: false, error: 'rate limited', hint: 'this document is sending actions too quickly' });
           return;

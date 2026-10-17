@@ -669,6 +669,55 @@ test('slot rows refuse what an interface did not declare, and a row that is too 
   assert.equal(JSON.parse((await store({ store: 'rows', rows: 'keys', name: 'notes' })).text).total, 1, 'the refused row was not written');
 });
 
+test('an action body the model could never read is refused before it costs anything', async () => {
+  // The trap this closes: the rpc route reads up to ROWS_BODY_BYTES because the row layer may need
+  // it, so an action inherited a 20 MiB ceiling while the model only ever sees 8000 characters of
+  // the payload — a body that size bought a full stringify and nothing else.
+  const created = await tool('html_ui').execute({ op: 'render', html: '<p>actions</p>' }, exec('session-action-cap'));
+  const capability = await capabilityFor(created.uiId);
+
+  const oversized = await rpc(created.uiId, capability, {
+    op: 'action',
+    action: 'go',
+    data: 'x'.repeat(300 * 1024),
+  });
+  assert.equal(oversized.status, 413);
+  assert.match(JSON.parse(oversized.text).error, /action body larger than/);
+});
+
+test('the read bucket refills during a steady stream, so its stated rate is real', async () => {
+  // The trap this closes: the refill used to advance the clock to `now`, dropping the part of an
+  // interval that had not elapsed. A document calling faster than one refill per interval then
+  // never accrued at all — the bucket said 16 a second and delivered about ten.
+  const created = await tool('html_ui').execute(
+    { op: 'render', html: '<meta name="dsh-htmlui" content="store=notes"><p>rate</p>' },
+    exec('session-rate'),
+  );
+  const capability = await capabilityFor(created.uiId);
+  const keys = () => rpc(created.uiId, capability, { op: 'store', store: 'rows', rows: 'keys', name: 'notes' });
+
+  // Spend the burst.
+  let drained = false;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if ((await keys()).status === 429) {
+      drained = true;
+      break;
+    }
+  }
+  assert.equal(drained, true, 'the burst of 64 is finite');
+
+  // Twenty polls fifty milliseconds apart: one second of traffic at a cadence just under the
+  // refill interval. That is the pattern the old code broke — every refill discarded the part of
+  // the interval that had not elapsed, so a second of polling bought about ten tokens. Keeping the
+  // remainder earns the sixteen the bucket advertises.
+  let allowed = 0;
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if ((await keys()).status === 200) allowed += 1;
+  }
+  assert.ok(allowed >= 14, `expected about 16 calls a second, got ${allowed} from 20 polls 50ms apart`);
+});
+
 test('css and js are merged whatever the source, and a dropped argument is reported', async () => {
   // The trap this closes: a template render used to ignore `js`/`css` without a word, so a caller
   // saw status=ok and spent turns wondering why its script never ran. Now the merge is uniform, and

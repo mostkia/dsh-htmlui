@@ -2,6 +2,47 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.4
+
+### Changed
+
+- A project backend gets more room and more calls. One request, and one answer, may now weigh
+  4 MiB (was 1 MiB), and the bucket that guards backend calls — shared with rpc reads — runs at
+  16 calls a second with a burst of 64 (was 10 a second, burst 40). Two changes of the same
+  constant: `APP_MAX_BYTES` covers both ends of a backend call, so raising it raises both.
+
+  The arithmetic this fixes: a document that polls frames through `/app/` was capped at ten
+  responses a second, so 1080p at source quality (~82 KiB a frame) could only ever draw ten
+  frames a second. At 16 a second with 4 MiB in hand, the same channel carries five to ten
+  frames per answer — 80 to 160 frames a second of headroom, which is 30 fps at 1080p with
+  room to spare.
+
+### Added
+
+- An action body over 256 KiB is refused with 413 before it spends the action bucket. The model
+  only ever sees the first 8000 characters of a payload, so a bigger body bought nothing but a
+  `JSON.stringify` of whatever a page chose to send — the carrier reads rpc bodies up to
+  `ROWS_BODY_BYTES` for the row layer's sake, and the action op was inheriting that ceiling.
+
+### Fixed
+
+- The refill advanced the bucket's clock all the way to `now`, dropping the part of an interval that
+  had not elapsed. Traffic arriving faster than one refill per interval therefore never accrued:
+  the bucket stated 16 a second and delivered about ten. It now carries the remainder
+  (`at += refill * refillMs`), and a test holds it to that: twenty polls fifty milliseconds apart
+  have to earn the sixteen refills a second the bucket advertises (the old code managed twelve).
+- A backend answer was measured by decoding a `Buffer` to a UTF-8 string first: bytes that are not
+  valid UTF-8 came back as U+FFFD and inflated the count (random binary measured about 1.8×, so
+  the real ceiling sat near 2.2 MiB rather than 4), and it copied up to 4 MiB per answer for
+  nothing. The measurement is now the byte count itself — `payload.length` for a Buffer, no copy —
+  so binary answers get the whole 4 MiB.
+
+### Unchanged on purpose
+
+- `MAX_BODY_BYTES` stays 256 KiB, the model-facing allowance stays 8 actions per 1.5 s, and the
+  ticket mint stays on that same bucket: this release only widens what a document may exchange
+  with its own backend, never what it may ask of the model.
+
 ## 0.1.3
 
 ### Added

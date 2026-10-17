@@ -235,8 +235,9 @@ What to know before relying on it:
   to its file is only noticed when something calls it, so give the reader a way to stop it and a
   panel that calls it often enough to pick edits up.
 - **It cannot hang the page silently.** One call gets ten seconds (`appTimeoutMs` in the plugin
-  config changes it), bodies and answers are capped at 1 MiB, calls are rate-limited like the rest
-  of the carrier, and a throw or a timeout comes back as a `500`/`504` answer carrying the error.
+  config changes it), one request and one answer are capped at 4 MiB, calls run at 16 a second with
+  a burst of 64 (the bucket it shares with rpc reads), and a throw or a timeout comes back as a
+  `500`/`504` answer carrying the error. Batch: ten frames in one answer cost one call, not ten.
 - **Say what you need in the answer, not in the transcript.** The point of a backend is that no
   model turn happens: fetch, compute, answer. Ask the model only for what a backend cannot do.
 
