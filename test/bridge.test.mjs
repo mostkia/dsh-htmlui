@@ -42,6 +42,15 @@ function loadBridge(config, overrides = {}) {
     addEventListener: (name, handler) => frames.add({ name, handler }),
     dispatchEvent: () => {},
   };
+  // A frame the test drives by hand: the bridge coalesces forwarded input into one message per
+  // frame, so a test that emits two wheels has to say when that frame ends.
+  const frameQueue = [];
+  let frameClock = 0;
+  window_.requestAnimationFrame = (callback) => {
+    frameQueue.push(callback);
+    return frameQueue.length;
+  };
+  window_.cancelAnimationFrame = () => {};
   window_.parent.parent = window_.parent;
   const EventSource = function EventSource(url) {
     this.url = url;
@@ -74,7 +83,22 @@ function loadBridge(config, overrides = {}) {
     error: (...args) => logs.push(args.map((value) => String(value)).join(' ')),
   };
   run(window_, document, fetch_, EventSource, CustomEvent, fakeConsole);
-  return { window: window_, document, calls, dispatched, posted, frames, logs };
+  return {
+    window: window_,
+    document,
+    calls,
+    dispatched,
+    posted,
+    frames,
+    logs,
+    /** End one animation frame, as the browser would after the events of that frame. */
+    flushFrames: () => {
+      for (const callback of frameQueue.splice(0)) {
+        frameClock += 16;
+        callback(frameClock);
+      }
+    },
+  };
 }
 
 const baseConfig = {
@@ -277,6 +301,7 @@ test('a wheel the document cannot use is forwarded to the conversation', () => {
   const flat = { scrollTop: 0, scrollHeight: 100, clientHeight: 100, scrollWidth: 100, clientWidth: 100, parentElement: null };
 
   env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  env.flushFrames();
   assert.equal(wheel().length, 1, 'a wheel nothing can use is forwarded');
   assert.equal(wheel()[0].deltaY, 120);
   assert.equal(wheel()[0].uiId, 'ui-1a2b3c4d', 'and it names the document it came from');
@@ -285,21 +310,124 @@ test('a wheel the document cannot use is forwarded to the conversation', () => {
   const inner = { scrollTop: 0, scrollHeight: 900, clientHeight: 200, scrollWidth: 100, clientWidth: 100, parentElement: null };
   const nested = Object.assign({}, flat, { parentElement: inner });
   env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: nested });
+  env.flushFrames();
   assert.equal(wheel().length, 1, 'a document that can scroll keeps its own wheel');
   // At the end of that scrollable there is no room left, so the conversation takes it again.
   inner.scrollTop = 700;
   env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: nested });
+  env.flushFrames();
   assert.equal(wheel().length, 2, 'and the conversation takes it at the end of the document');
   // Scrolling back up inside the document keeps it there too.
   env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: -120, deltaMode: 0, target: nested });
+  env.flushFrames();
   assert.equal(wheel().length, 2, 'upwards inside a document that has room stays inside it');
 
   // Lines and pages are converted to pixels, because the host scrolls in pixels.
   env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 3, deltaMode: 1, target: flat });
+  env.flushFrames();
   assert.equal(wheel()[2].deltaY, 48, 'a line-wise delta is converted');
   // A pinch gesture zooms; it is not a scroll to hand over.
   env.document.emit('wheel', { ctrlKey: true, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  env.flushFrames();
   assert.equal(wheel().length, 3, 'a pinch gesture is left alone');
+});
+
+test('the wheels of one frame are summed into one message', () => {
+  // A wheel that reports faster than the display used to cost one host scroll per event, which is
+  // a main-thread scroll of the transcript each time. The deltas of a frame now arrive together,
+  // so the forwarded path costs the same as a native one: one scroll per frame.
+  const env = loadBridge(baseConfig);
+  const wheel = () => env.posted.filter((message) => message.__dshHtmlUi === 'wheel');
+  const flat = { scrollTop: 0, scrollHeight: 100, clientHeight: 100, scrollWidth: 100, clientWidth: 100, parentElement: null };
+
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 40, deltaMode: 0, target: flat });
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 40, deltaMode: 0, target: flat });
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 40, deltaMode: 0, target: flat });
+  assert.equal(wheel().length, 0, 'nothing is sent before the frame ends');
+  env.flushFrames();
+  assert.equal(wheel().length, 1, 'the three of them leave as one message');
+  assert.equal(wheel()[0].deltaY, 120, 'carrying the sum');
+
+  // The next frame is a new message: coalescing must not swallow a later tick.
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: -60, deltaMode: 0, target: flat });
+  env.flushFrames();
+  assert.equal(wheel().length, 2);
+  assert.equal(wheel()[1].deltaY, -60);
+});
+
+test('a released drag keeps the conversation moving, and a new touch stops it', async () => {
+  // A script-driven scroll has no velocity of its own: the moment the finger lifts it stops dead,
+  // which is the "the page sticks to my thumb" report. The bridge therefore takes the speed of the
+  // last of the gesture and decays it per frame, the way a native fling does.
+  const env = loadBridge(baseConfig);
+  const touches = () => env.posted.filter((message) => message.__dshHtmlUi === 'touch');
+  const flat = { scrollTop: 0, scrollHeight: 100, clientHeight: 100, scrollWidth: 100, clientWidth: 100, parentElement: null };
+
+  env.document.emit('touchstart', { touches: [{ screenX: 10, screenY: 500 }] });
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 480 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 1, 'the drag itself is forwarded');
+  assert.equal(touches()[0].deltaY, 20);
+
+  // A second sample, a moment later, is what the release reads its speed from.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 460 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 2);
+
+  const before = touches().length;
+  env.document.emit('touchend', { touches: [] });
+  assert.ok(touches().length > before, 'the release starts the fling at once');
+  const firstFling = touches()[touches().length - 1].deltaY;
+  assert.ok(firstFling > 0, 'in the direction the finger was moving');
+
+  env.flushFrames();
+  const secondFling = touches()[touches().length - 1].deltaY;
+  assert.ok(secondFling > 0, 'and the transcript keeps moving after the finger is gone');
+  assert.ok(secondFling < firstFling, 'slower every frame, the way a fling decays');
+
+  // A finger on the glass stops it: the next gesture must not fight a leftover fling.
+  env.document.emit('touchstart', { touches: [{ screenX: 10, screenY: 460 }] });
+  const stopped = touches().length;
+  env.flushFrames();
+  env.flushFrames();
+  assert.equal(touches().length, stopped, 'a new touch ends the fling');
+});
+
+test('a drag inside a scrolling document is handed to the conversation at its edge', () => {
+  // A document with its own scroll box used to trap the gesture: once it reached its end the drag
+  // did nothing at all, and the conversation could not be scrolled from that spot. The document
+  // now hands the gesture over at its edge — once, and never takes it back mid-drag.
+  const env = loadBridge(baseConfig);
+  const touches = () => env.posted.filter((message) => message.__dshHtmlUi === 'touch');
+  const inner = { scrollTop: 0, scrollHeight: 900, clientHeight: 200, scrollWidth: 100, clientWidth: 100, parentElement: null };
+  const flat = { scrollTop: 0, scrollHeight: 100, clientHeight: 100, scrollWidth: 100, clientWidth: 100, parentElement: inner };
+
+  env.document.emit('touchstart', { touches: [{ screenX: 10, screenY: 500 }] });
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 480 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 0, 'a document that still has room keeps the gesture');
+
+  // At the bottom edge the conversation takes it.
+  inner.scrollTop = 700;
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 460 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 1, 'the edge hands the gesture over');
+  assert.equal(touches()[0].deltaY, 20);
+
+  // And it stays handed over: dragging back must not start scrolling the document again.
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 490 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 2, 'the rest of the gesture belongs to the conversation');
+  assert.equal(touches()[1].deltaY, -30);
+
+  // A document already at its top hands over on the very first downward movement.
+  env.document.emit('touchstart', { touches: [{ screenX: 10, screenY: 500 }] });
+  inner.scrollTop = 0;
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 540 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 3, 'no room in that direction means no wait');
+  assert.equal(touches()[2].deltaY, -40);
 });
 
 test('the shared store reads at once, writes through the host, and follows other panels', async () => {

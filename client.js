@@ -1855,6 +1855,63 @@ window.__ModuleLoader__.load({
     let inlineSyncQueued = false;
 
     /**
+     * Write one inline style only when it differs from what is already there.
+     *
+     * A scroll handler runs on every frame of a wheel or a finger, and most of what this loop
+     * would write — the clipped box, the frame's size — is the same as the last frame's. Assigning
+     * an identical value still goes through the CSSOM and invalidates style for that element, so
+     * the comparison is what keeps a scroll frame down to the one property that really moved.
+     */
+    function writeStyle(node, name, value) {
+      if (node.style[name] !== value) node.style[name] = value;
+    }
+
+    /**
+     * Keep pull-to-refresh out of the way while a hosted inline document exists.
+     *
+     * A touch that lands on an iframe is not consumed by the transcript's scroller — the frame has
+     * no scroll chain to it, so the bridge forwards the movement and the conversation scrolls from
+     * script. The browser then sees a gesture nobody handled and, near the top of the page, turns a
+     * downward drag into the refresh pull: dragging over an interface reloads the page, which
+     * dragging over the same conversation never would. `overscroll-behavior-y: contain` on the root
+     * is the setting Chrome honours for that gesture. It is held only while a hosted document
+     * exists, and whatever the app had on the root is put back when the last one is gone.
+     */
+    let overscrollSaved = null;
+    function holdOverscroll(on) {
+      const root = typeof document === 'object' && document !== null ? document.documentElement : null;
+      if (root === null || root === undefined) return;
+      if (on === true) {
+        if (overscrollSaved !== null) return;
+        overscrollSaved = root.style.overscrollBehaviorY;
+        root.style.overscrollBehaviorY = 'contain';
+        return;
+      }
+      if (overscrollSaved === null) return;
+      root.style.overscrollBehaviorY = overscrollSaved;
+      overscrollSaved = null;
+    }
+
+    /**
+     * Stop whatever fling a hosted document is running.
+     *
+     * The fling scrolls the conversation from inside the frame — during a forwarded gesture the
+     * transcript has no native scroll of its own — so a thumb landing on the page cannot end it.
+     * Only the document can stop it, and only the host knows a touch happened elsewhere.
+     */
+    function haltInlineFling() {
+      for (const wrapper of inlineBoxes.values()) {
+        const frame = typeof wrapper.querySelector === 'function' ? wrapper.querySelector('iframe') : null;
+        if (frame === null || frame === undefined || frame.contentWindow === null) continue;
+        try {
+          frame.contentWindow.postMessage({ __dshHtmlUi: 'halt' }, '*');
+        } catch {
+          /* the frame is mid-navigation */
+        }
+      }
+    }
+
+    /**
      * Place every hosted inline frame over the seat it belongs to.
      *
      * A hosted frame is a fixed layer clipped to the transcript's own viewport, not a child of
@@ -1891,19 +1948,24 @@ window.__ModuleLoader__.load({
         const height = Math.max(0, transcriptBandBottom(raw !== null ? raw.top + raw.height : window.innerHeight) - top);
         const at = element.getBoundingClientRect();
         if (wrapper.style.display !== 'block') wrapper.style.display = 'block';
-        wrapper.style.position = 'fixed';
-        wrapper.style.left = `${Math.round(left)}px`;
-        wrapper.style.top = `${Math.round(top)}px`;
-        wrapper.style.width = `${Math.round(width)}px`;
-        wrapper.style.height = `${Math.round(height)}px`;
-        wrapper.style.overflow = 'hidden';
-        wrapper.style.pointerEvents = 'none';
-        inner.style.position = 'absolute';
-        inner.style.left = `${Math.round(at.left - left)}px`;
-        inner.style.top = `${Math.round(at.top - top)}px`;
-        inner.style.width = `${Math.round(at.width)}px`;
-        inner.style.height = `${Math.round(at.height)}px`;
-        inner.style.pointerEvents = 'auto';
+        // The wrapper is fixed and the frame absolute from the moment they are created; writing
+        // them again here keeps the placement correct even if that markup ever changes, and costs
+        // nothing after the first frame because an identical value is skipped.
+        writeStyle(wrapper, 'position', 'fixed');
+        writeStyle(wrapper, 'left', `${Math.round(left)}px`);
+        writeStyle(wrapper, 'top', `${Math.round(top)}px`);
+        writeStyle(wrapper, 'width', `${Math.round(width)}px`);
+        writeStyle(wrapper, 'height', `${Math.round(height)}px`);
+        writeStyle(wrapper, 'overflow', 'hidden');
+        writeStyle(wrapper, 'pointerEvents', 'none');
+        writeStyle(inner, 'width', `${Math.round(at.width)}px`);
+        writeStyle(inner, 'height', `${Math.round(at.height)}px`);
+        // Only the frame's offset inside the clipped box changes while the transcript scrolls —
+        // the box itself is the transcript's viewport, which does not move. A translate is
+        // written instead of `top`: the compositor moves the layer, where a `top` change would
+        // lay the box out again on every frame of every wheel.
+        writeStyle(inner, 'transform', `translate3d(${Math.round(at.left - left)}px, ${Math.round(at.top - top)}px, 0)`);
+        writeStyle(inner, 'pointerEvents', 'auto');
       }
     }
 
@@ -1935,10 +1997,16 @@ window.__ModuleLoader__.load({
         if (Number.isFinite(dx) && dx !== 0) target.scrollLeft = beforeLeft + dx;
         return target.scrollTop !== beforeTop || target.scrollLeft !== beforeLeft;
       };
-      if (move(scroller)) return;
+      if (move(scroller)) {
+        // Place the frame in the same task as the scroll. The frame is a fixed layer: if it waits
+        // for the scroll event that follows, it trails the content by a frame, and a forwarded
+        // wheel over a document is precisely where that shows.
+        syncInlineBoxes();
+        return;
+      }
       const page = document.scrollingElement;
       if (page === null || page === undefined || page === scroller) return;
-      move(page);
+      if (move(page)) syncInlineBoxes();
     }
 
     /** Place the hosted frames again, at most once per animation frame. */
@@ -2756,9 +2824,13 @@ window.__ModuleLoader__.load({
         (element) => {
           if (element === null) {
             inlineBoxes.delete(record.uiId);
+            // The gesture a touch over this document produces is only unhandled while the
+            // document is here; without it the page keeps the app's own overscroll behaviour.
+            if (inlineBoxes.size === 0) holdOverscroll(false);
             return;
           }
           inlineBoxes.set(record.uiId, element);
+          holdOverscroll(true);
           scheduleInlineSync();
         },
         [record.uiId],
@@ -4437,6 +4509,9 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (typeof window !== 'object' || window === null || typeof window.addEventListener !== 'function') return undefined;
         const place = (event) => {
+          // Nothing is hosted, so a scroll has nothing to place: the whole handler gets out of
+          // the way instead of walking seats that were never claimed.
+          if (inlineBoxes.size === 0) return;
           // A scroll teaches us which box actually scrolls a seat: the event's target *is* that
           // scroller. The walk up the ancestors finds it as well, but this is the ground truth,
           // and preferring it means a layout the walk misreads corrects itself on first scroll.
@@ -4457,9 +4532,13 @@ window.__ModuleLoader__.load({
         };
         window.addEventListener('scroll', place, { capture: true, passive: true });
         window.addEventListener('resize', place);
+        // A touch on the page — not on a document — is the reader saying stop; the frame cannot
+        // see it, so the host forwards the intent.
+        window.addEventListener('touchstart', haltInlineFling, { capture: true, passive: true });
         return () => {
           window.removeEventListener('scroll', place, { capture: true });
           window.removeEventListener('resize', place);
+          window.removeEventListener('touchstart', haltInlineFling, { capture: true });
         };
       }, []);
 

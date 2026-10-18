@@ -43,6 +43,11 @@
   var slots = config.store !== null && typeof config.store === 'object' ? config.store : {};
   /** The author's script always runs after this one, so `ready` must be replayable. */
   var readyDetail = null;
+  /**
+   * Set once the touch watcher is installed. A fling scrolls the conversation from here, so the
+   * host asks this document to stop it — a thumb on the page never reaches the frame itself.
+   */
+  var haltFling = function () {};
 
   function emit(type, detail) {
     var bucket = listeners[type];
@@ -165,6 +170,10 @@
       return;
     }
     if (data.__dshHtmlUi === 'theme') applyTheme(data.theme);
+    // A fling belongs to this document because the scroll does, so only this document can stop
+    // it — and a thumb landing anywhere else on the page never reaches it. The host watches for
+    // that touch and says so here.
+    if (data.__dshHtmlUi === 'halt') haltFling();
   });
 
   /**
@@ -177,6 +186,13 @@
    * `preventDefault`, on a passive listener: when a scrollable ancestor of the pointer still has
    * room in the wheel's direction the browser scrolls it and nothing is forwarded; otherwise the
    * host scrolls the conversation by the same delta, which is exactly what chaining did.
+   *
+   * What is handed over is the *sum* of one frame's events, not one message per event. A wheel
+   * that reports faster than the display — a high-resolution mouse, or two events in the same
+   * frame — used to make the host scroll once per message, each of those a main-thread scroll of
+   * the transcript. Summing them first makes the forwarded scroll cost the same as a native one:
+   * one scroll per frame. The decision stays per event (`hasRoom` is read against the live
+   * scroll position), so a document that can still scroll keeps each of its own ticks.
    */
   function watchWheel() {
     if (typeof document.addEventListener !== 'function') return;
@@ -187,6 +203,26 @@
       var vertical = dy < 0 ? element.scrollTop > 0 : dy > 0 ? element.scrollTop + element.clientHeight < element.scrollHeight - 1 : false;
       var horizontal = dx < 0 ? element.scrollLeft > 0 : dx > 0 ? element.scrollLeft + element.clientWidth < element.scrollWidth - 1 : false;
       return vertical || horizontal;
+    }
+
+    var pendingX = 0;
+    var pendingY = 0;
+    var queued = false;
+
+    function flushWheel() {
+      queued = false;
+      var dx = pendingX;
+      var dy = pendingY;
+      pendingX = 0;
+      pendingY = 0;
+      if (dx !== 0 || dy !== 0) notifyHost('wheel', { deltaX: dx, deltaY: dy });
+    }
+
+    function queueWheel() {
+      if (queued) return;
+      queued = true;
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(flushWheel);
+      else setTimeout(flushWheel, 16);
     }
 
     document.addEventListener(
@@ -202,7 +238,9 @@
           node = node.parentElement;
         }
         var factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight || 800 : 1;
-        notifyHost('wheel', { deltaX: dx * factor, deltaY: dy * factor });
+        pendingX += dx * factor;
+        pendingY += dy * factor;
+        queueWheel();
       },
       { passive: true },
     );
@@ -222,6 +260,105 @@
     var touchAxis = null;
     var pendingY = 0;
     var pendingFrame = false;
+
+    /**
+     * Momentum, for the gestures the conversation owns.
+     *
+     * The document cannot chain a finger to the transcript, so the transcript is scrolled from
+     * script — and a script-driven scroll stops dead the moment the finger lifts, because the
+     * browser never owned that scroll and has no velocity to decay. Without a fling of its own,
+     * a forwarded drag reads as "the page sticks to my thumb", which is exactly what it did.
+     *
+     * The last window of the gesture gives a speed in px/ms; each frame moves the transcript by
+     * `speed × dt` while the speed decays per millisecond, so the shape is the same as a native
+     * fling and does not depend on the display's frame rate.
+     */
+    var FLING_MIN_SPEED = 0.05; // px/ms — slower than this is a drift, not a throw
+    var FLING_MAX_SPEED = 6; // px/ms — a thumb cannot do better, and a jump that large is an artifact
+    var FLING_DECAY_PER_MS = 0.9965;
+    var FLING_STOP_SPEED = 0.02;
+    var FLING_WINDOW_MS = 120;
+
+    /** The forwarded movement of this gesture, for the speed a release starts from. */
+    var samples = [];
+    var gestureDy = 0;
+    var gestureOnPage = false;
+    /** Who owns this gesture, and the box that owns it while the document does. */
+    var gestureOwner = null;
+    var gestureScroller = null;
+    var flingSpeed = 0;
+    var flingLast = 0;
+    var flingRun = 0;
+
+    function clock() {
+      return typeof performance === 'object' && performance !== null && typeof performance.now === 'function' ? performance.now() : Date.now();
+    }
+
+    function startFling(speed) {
+      flingRun += 1;
+      flingSpeed = Math.max(-FLING_MAX_SPEED, Math.min(FLING_MAX_SPEED, speed));
+      flingLast = 0;
+      flingStep(0, flingRun);
+    }
+
+    function flingStep(stamp, run) {
+      // A run number instead of cancelAnimationFrame: stopping has to work whether this browser
+      // scheduled the next step on a frame or on a timeout, and a stale step does nothing.
+      if (run !== flingRun) return;
+      var at = typeof stamp === 'number' && stamp > 0 ? stamp : clock();
+      var dt = flingLast === 0 ? 16 : at - flingLast;
+      if (!(dt > 0)) dt = 16;
+      // A backgrounded tab resumes with a huge delta; capping it keeps one frame from throwing
+      // the conversation a screen and a half away.
+      if (dt > 64) dt = 64;
+      flingLast = at;
+      var step = flingSpeed * dt;
+      flingSpeed *= Math.pow(FLING_DECAY_PER_MS, dt);
+      if (Math.abs(flingSpeed) < FLING_STOP_SPEED) flingSpeed = 0;
+      if (step !== 0) notifyHost('touch', { deltaX: 0, deltaY: step });
+      if (flingSpeed === 0) return;
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(function (next) {
+          flingStep(next, run);
+        });
+      } else {
+        setTimeout(function () {
+          flingStep(0, run);
+        }, 16);
+      }
+    }
+
+    function stopFling() {
+      flingRun += 1;
+      flingSpeed = 0;
+      flingLast = 0;
+    }
+
+    haltFling = stopFling;
+
+    /** The speed of the gesture that just ended, in px/ms, positive being the direction it moved. */
+    function releasedSpeed() {
+      if (samples.length < 2) return 0;
+      var first = samples[0];
+      var last = samples[samples.length - 1];
+      var dt = last.t - first.t;
+      if (!(dt > 0)) return 0;
+      return (last.y - first.y) / dt;
+    }
+
+    /**
+     * Whether this box can still scroll the way the finger is pushing.
+     *
+     * The one-pixel tolerance is not cosmetic: a scroll position can be reported a fraction short
+     * of the real end, and without it a document that is already at its edge would be read as
+     * still movable — so it would never hand the gesture over, which is the bug this exists for.
+     */
+    function canScrollVertically(element, dy) {
+      if (element === null || element === undefined) return false;
+      if (dy > 0) return element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+      if (dy < 0) return element.scrollTop > 0;
+      return false;
+    }
 
     function flushTouch() {
       pendingFrame = false;
@@ -243,6 +380,13 @@
     document.addEventListener(
       'touchstart',
       function (event) {
+        // A new touch owns the transcript again: whatever the last throw left running stops here.
+        stopFling();
+        samples = [];
+        gestureDy = 0;
+        gestureOnPage = false;
+        gestureOwner = null;
+        gestureScroller = null;
         var touches = event.touches;
         touchAt = touches !== undefined && touches !== null && touches.length === 1 ? { x: touches[0].screenX, y: touches[0].screenY } : null;
         touchAxis = null;
@@ -272,31 +416,40 @@
           touchAxis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
         }
         if (touchAxis !== 'y') return;
-        // Option 1 — one owner per gesture, decided once and never revisited.
+        // Who owns this gesture: decided once, and handed over at most once.
         //
-        // Re-deciding on every event meant a gesture inside a scrollable document changed hands the
-        // moment that document reached its end, so one direction looked fine while the other was
-        // taken over by the conversation immediately. The gesture now belongs to the document if the
-        // document can scroll vertically at all, and to the conversation otherwise. A locked
-        // document stops at its own boundary instead of dragging the chat along with it.
-        //
-        // Option 2 (handing the remainder at that boundary to the conversation) was tried and
-        // dropped: it caused more problems than it solved, and keeping the page usable matters more
-        // than the smoothness of a case — a scrolling inner document — that is rare in practice.
-        if (touchAt.owner === undefined) {
+        // Re-deciding on every event was tried and dropped. The moment a document reached its
+        // edge the gesture changed hands, and the first small movement back gave it straight back
+        // again, so the two scrollers fought every wobble — one direction looked fine while the
+        // other was taken over by the conversation immediately. What survives from that is the
+        // part that was right: a document that has run out of room in the direction the finger is
+        // pushing hands the gesture over for good, and never takes it back mid-drag. There is
+        // nothing left to fight, and the conversation still picks up where the document stopped.
+        if (gestureOwner === null) {
           var probe = event.target;
-          var ownsGesture = false;
+          gestureScroller = null;
           while (probe !== null && probe !== undefined) {
             if (typeof probe.scrollHeight === 'number' && probe.scrollHeight > probe.clientHeight + 1) {
-              ownsGesture = true;
+              gestureScroller = probe;
               break;
             }
             probe = probe.parentElement;
           }
-          touchAt.owner = ownsGesture ? 'document' : 'page';
+          gestureOwner = gestureScroller === null ? 'page' : 'document';
         }
-        if (touchAt.owner === 'document') return;
+        if (gestureOwner === 'document') {
+          // Still inside the document and still room in this direction: the browser scrolls it,
+          // and forwarding as well would scroll both at once.
+          if (canScrollVertically(gestureScroller, dy)) return;
+          gestureOwner = 'page';
+        }
+        gestureOnPage = true;
         pendingY += dy;
+        // What this gesture has forwarded so far, and when — the release uses the last 120 ms of
+        // it as the speed to continue at. Samples older than that are noise from before the throw.
+        gestureDy += dy;
+        samples.push({ y: gestureDy, t: clock() });
+        while (samples.length > 2 && clock() - samples[0].t > FLING_WINDOW_MS) samples.shift();
         if (!pendingFrame) {
           pendingFrame = true;
           scheduleTouchFlush();
@@ -305,8 +458,35 @@
       { passive: true },
     );
 
-    document.addEventListener('touchend', forgetTouch, { passive: true });
-    document.addEventListener('touchcancel', forgetTouch, { passive: true });
+    document.addEventListener(
+      'touchend',
+      function () {
+        // Everything the browser would have done after a native scroll has to be done here: it
+        // never owned this scroll, so it has no velocity to keep it going.
+        var speed = gestureOnPage ? releasedSpeed() : 0;
+        if (Math.abs(speed) >= FLING_MIN_SPEED) startFling(speed);
+        forgetTouch();
+        samples = [];
+        gestureOnPage = false;
+        gestureDy = 0;
+        gestureOwner = null;
+        gestureScroller = null;
+      },
+      { passive: true },
+    );
+    document.addEventListener(
+      'touchcancel',
+      function () {
+        stopFling();
+        forgetTouch();
+        samples = [];
+        gestureOnPage = false;
+        gestureDy = 0;
+        gestureOwner = null;
+        gestureScroller = null;
+      },
+      { passive: true },
+    );
   }
 
   /** Subscribe to one event type; the single path both `on` and `ready` take. */  function subscribe(type, handler) {
