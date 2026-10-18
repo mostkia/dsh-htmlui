@@ -52,6 +52,10 @@ function loadBridge(config, overrides = {}) {
   };
   window_.cancelAnimationFrame = () => {};
   window_.parent.parent = window_.parent;
+  // The host speaks to the bridge with postMessage; a test has to be able to do the same.
+  window_.emit = (name, event) => {
+    for (const entry of frames) if (entry.name === name) entry.handler(event);
+  };
   const EventSource = function EventSource(url) {
     this.url = url;
     this.listeners = new Map();
@@ -428,6 +432,42 @@ test('a drag inside a scrolling document is handed to the conversation at its ed
   env.flushFrames();
   assert.equal(touches().length, 3, 'no room in that direction means no wait');
   assert.equal(touches()[2].deltaY, -40);
+});
+
+test('a document hosted inside the transcript leaves the wheel and the finger to the browser', () => {
+  // In flow mode the frame is a descendant of the transcript's scroller again, so the browser
+  // scrolls it, chains what it cannot use to the conversation at its edge, and runs the release's
+  // momentum itself. Forwarding as well moved the page twice — the wheel was caught in review, the
+  // finger on a phone.
+  const env = loadBridge(baseConfig);
+  const wheel = () => env.posted.filter((message) => message.__dshHtmlUi === 'wheel');
+  const touches = () => env.posted.filter((message) => message.__dshHtmlUi === 'touch');
+  const flat = { scrollTop: 0, scrollHeight: 100, clientHeight: 100, scrollWidth: 100, clientWidth: 100, parentElement: null };
+
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  env.flushFrames();
+  assert.equal(wheel().length, 1, 'a hosted frame forwards its wheel');
+
+  env.window.emit('message', { data: { __dshHtmlUi: 'hosting', flow: true } });
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  env.flushFrames();
+  assert.equal(wheel().length, 1, 'inside the transcript the browser chains it, and nothing is forwarded');
+
+  env.document.emit('touchstart', { touches: [{ screenX: 10, screenY: 500 }] });
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 480 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 0, 'and a finger is the browser’s too, for the same reason');
+
+  // Back to a hosted arrangement: the wheel and the finger are forwarded again.
+  env.window.emit('message', { data: { __dshHtmlUi: 'hosting', flow: false } });
+  env.document.emit('wheel', { ctrlKey: false, deltaX: 0, deltaY: 120, deltaMode: 0, target: flat });
+  env.flushFrames();
+  assert.equal(wheel().length, 2);
+
+  env.document.emit('touchstart', { touches: [{ screenX: 10, screenY: 500 }] });
+  env.document.emit('touchmove', { touches: [{ screenX: 10, screenY: 480 }], target: flat });
+  env.flushFrames();
+  assert.equal(touches().length, 1, 'with the frame back in the overlay the finger is forwarded again');
 });
 
 test('the shared store reads at once, writes through the host, and follows other panels', async () => {

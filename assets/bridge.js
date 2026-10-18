@@ -48,6 +48,16 @@
    * host asks this document to stop it — a thumb on the page never reaches the frame itself.
    */
   var haltFling = function () {};
+  /**
+   * True while the host keeps this document inside the transcript rather than in an overlay.
+   *
+   * Inside the transcript the browser chains a wheel the document cannot use to the conversation
+   * by itself, which is what it always did before hosting existed. Forwarding as well would scroll
+   * the page twice, so the host says which arrangement is in force and the wheel handler stands
+   * down. The finger is a different matter: a touch never chains across a frame, so it is
+   * forwarded in both arrangements.
+   */
+  var flowHosted = false;
 
   function emit(type, detail) {
     var bucket = listeners[type];
@@ -170,6 +180,10 @@
       return;
     }
     if (data.__dshHtmlUi === 'theme') applyTheme(data.theme);
+    if (data.__dshHtmlUi === 'hosting') {
+      flowHosted = data.flow === true;
+      return;
+    }
     // A fling belongs to this document because the scroll does, so only this document can stop
     // it — and a thumb landing anywhere else on the page never reaches it. The host watches for
     // that touch and says so here.
@@ -228,6 +242,8 @@
     document.addEventListener(
       'wheel',
       function (event) {
+        // Inside the transcript the browser chains this wheel to the conversation itself.
+        if (flowHosted === true) return;
         // A pinch gesture zooms; it is not a scroll to forward.
         if (event.ctrlKey === true) return;
         var dx = event.deltaX;
@@ -380,8 +396,17 @@
     document.addEventListener(
       'touchstart',
       function (event) {
-        // A new touch owns the transcript again: whatever the last throw left running stops here.
+        // Inside the transcript the browser owns the whole gesture: it scrolls the document,
+        // chains what the document cannot use to the conversation, and gives the release its
+        // momentum, all natively. Forwarding as well scrolled the page twice on a phone, which is
+        // also how this arrangement's one open question — whether a finger chains across a frame —
+        // got answered.
         stopFling();
+        if (flowHosted === true) {
+          forgetTouch();
+          return;
+        }
+        // A new touch owns the transcript again: whatever the last throw left running stops here.
         samples = [];
         gestureDy = 0;
         gestureOnPage = false;
@@ -397,6 +422,8 @@
     document.addEventListener(
       'touchmove',
       function (event) {
+        // The browser is scrolling and chaining this gesture by itself.
+        if (flowHosted === true) return;
         if (touchAt === null) return;
         var touches = event.touches;
         if (touches === undefined || touches === null || touches.length !== 1) {
@@ -461,6 +488,9 @@
     document.addEventListener(
       'touchend',
       function () {
+        // In flow mode there is no forwarded scroll to carry on: the browser's own momentum is
+        // already running the one it started.
+        if (flowHosted === true) return;
         // Everything the browser would have done after a native scroll has to be done here: it
         // never owned this scroll, so it has no velocity to keep it going.
         var speed = gestureOnPage ? releasedSpeed() : 0;

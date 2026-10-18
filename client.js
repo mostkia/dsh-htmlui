@@ -19,6 +19,9 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
     const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
+    // A layout effect is what lets the seat hand its frame over before React removes it; a host
+    // without one (React always has it, a test renderer may not) degrades to a passive effect.
+    const useLayoutEffect = typeof React.useLayoutEffect === 'function' ? React.useLayoutEffect : useEffect;
 
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
     /**
@@ -213,6 +216,15 @@ window.__ModuleLoader__.load({
       inlineSeats: new Map(),
       /** The height each inline document asked for, so its seat can hold the space it occupies. */
       inlineHeights: new Map(),
+      /**
+       * The flowing mode's two ends: the frame element itself, and the hidden box it parks in.
+       *
+       * In flow mode the frame lives inside its transcript seat while the seat exists, and is
+       * moved to its hidden home — not removed — when the seat goes away. Both maps are keyed by
+       * interface id and pruned with the record.
+       */
+      inlineFrames: new Map(),
+      inlineHomes: new Map(),
       /**
        * The plugin's own seat inside the composer block, when one is mounted.
        *
@@ -443,6 +455,10 @@ window.__ModuleLoader__.load({
       state.inlineHosted.delete(uiId);
       state.inlineSeats.delete(uiId);
       state.inlineHeights.delete(uiId);
+      // The flowing frame is removed by its own cleanup; the maps must not outlive the record, or
+      // a later interface would inherit a dead frame under the same id.
+      state.inlineFrames.delete(uiId);
+      state.inlineHomes.delete(uiId);
       removeFromSession(sessionId ?? record?.sessionId, uiId);
       if (state.fullscreen === uiId) state.fullscreen = null;
       syncRightPane();
@@ -1788,6 +1804,23 @@ window.__ModuleLoader__.load({
     // -------------------------------------------------------------- inline hosting
 
     /**
+     * Whether this browser can move a node without rebuilding it.
+     *
+     * `Element.moveBefore` moves a node and keeps its state — for an iframe that means its
+     * document: its variables, its input, its scroll position. With it, an inline document can sit
+     * inside the transcript, where the browser's own scroll chaining and its own scroll feel come
+     * for free, and still survive a Session switch, because the frame is *moved* to a hidden box
+     * rather than removed and inserted again. Without it the previous arrangement stays: the frame
+     * is hosted in a fixed overlay and the bridge forwards the wheel and the finger.
+     */
+    const FLOW_INLINE =
+      typeof Element === 'function' &&
+      Element.prototype !== undefined &&
+      Element.prototype !== null &&
+      typeof Element.prototype.moveBefore === 'function';
+
+
+    /**
      * The height an inline document asks for.
      *
      * One function for both halves of the arrangement: the hosted frame renders at this height,
@@ -1878,17 +1911,24 @@ window.__ModuleLoader__.load({
      * exists, and whatever the app had on the root is put back when the last one is gone.
      */
     let overscrollSaved = null;
+    let overscrollHolders = 0;
     function holdOverscroll(on) {
       const root = typeof document === 'object' && document !== null ? document.documentElement : null;
       if (root === null || root === undefined) return;
       if (on === true) {
-        if (overscrollSaved !== null) return;
-        overscrollSaved = root.style.overscrollBehaviorY;
-        root.style.overscrollBehaviorY = 'contain';
+        // Counted, not a flag: a Session may hold several inline documents, and the root has to
+        // keep the setting until the last of them is gone.
+        if (overscrollHolders === 0) {
+          overscrollSaved = root.style.overscrollBehaviorY;
+          root.style.overscrollBehaviorY = 'contain';
+        }
+        overscrollHolders += 1;
         return;
       }
-      if (overscrollSaved === null) return;
-      root.style.overscrollBehaviorY = overscrollSaved;
+      if (overscrollHolders === 0) return;
+      overscrollHolders -= 1;
+      if (overscrollHolders > 0) return;
+      root.style.overscrollBehaviorY = overscrollSaved ?? '';
       overscrollSaved = null;
     }
 
@@ -1900,6 +1940,16 @@ window.__ModuleLoader__.load({
      * Only the document can stop it, and only the host knows a touch happened elsewhere.
      */
     function haltInlineFling() {
+      // Flow mode keeps its frames in a map, hosted mode in the boxes below; both are inline
+      // documents, and only those fling.
+      for (const frame of state.inlineFrames.values()) {
+        if (frame.contentWindow === null) continue;
+        try {
+          frame.contentWindow.postMessage({ __dshHtmlUi: 'halt' }, '*');
+        } catch {
+          /* the frame is mid-navigation */
+        }
+      }
       for (const wrapper of inlineBoxes.values()) {
         const frame = typeof wrapper.querySelector === 'function' ? wrapper.querySelector('iframe') : null;
         if (frame === null || frame === undefined || frame.contentWindow === null) continue;
@@ -2032,6 +2082,7 @@ window.__ModuleLoader__.load({
       const known = state.inlineSeats.get(uiId);
       if (known !== undefined && known.element === element) {
         scheduleInlineSync();
+        adoptInlineFrame(uiId);
         return;
       }
       state.inlineSeats.set(uiId, { element, scroller: scrollContainerOf(element) });
@@ -2039,13 +2090,67 @@ window.__ModuleLoader__.load({
         state.inlineHosted.add(uiId);
         bump();
       }
+      // The frame may already exist (coming back to a Session), so it is adopted now; if it does
+      // not exist yet, the frame's own mount adopts it once it does. A failed adoption is retried
+      // once on the next frame: the seat is connected and the frame is connected, so a failure
+      // here is a timing accident, and leaving the seat empty would read as a broken interface.
+      if (FLOW_INLINE === true && adoptInlineFrame(uiId) !== true) {
+        const retry = () => adoptInlineFrame(uiId);
+        if (typeof window === 'object' && window !== null && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(retry);
+        else if (typeof setTimeout === 'function') setTimeout(retry, 16);
+      }
       scheduleInlineSync();
     }
 
-    /** The seat is gone; the hosted frame is hidden until another one claims it. */
+    /** The seat is gone; the frame parks and is hidden until another one claims it. */
     function releaseInlineSeat(uiId) {
       state.inlineSeats.delete(uiId);
+      parkInlineFrame(uiId);
       scheduleInlineSync();
+    }
+
+    /**
+     * Move a flowing frame into the seat it belongs to.
+     *
+     * This is the whole of the flow mode: while the seat exists the frame is a descendant of the
+     * transcript's scroller, so the browser scrolls it, chains its wheel to the conversation and
+     * paints it in the same frame as the text around it. Nothing is forwarded, nothing is placed by
+     * script. `moveBefore` is what makes the move safe: it keeps the document instead of loading it
+     * again, which is the difference between an interface that comes back as it was and one that
+     * comes back empty.
+     */
+    function adoptInlineFrame(uiId) {
+      if (FLOW_INLINE !== true) return false;
+      const frame = state.inlineFrames.get(uiId);
+      const seat = state.inlineSeats.get(uiId);
+      if (frame === undefined || seat === undefined) return false;
+      const element = seat.element;
+      if (element === null || element === undefined || element.isConnected !== true) return false;
+      if (frame.parentElement === element) return true;
+      try {
+        element.moveBefore(frame, null);
+        return true;
+      } catch {
+        // The frame stays where it was: a parked document is intact, one that was re-inserted is
+        // not, so a failed move never escalates into a reload.
+        return false;
+      }
+    }
+
+    /** Return a flowing frame to the hidden box it lives in while its seat is not on screen. */
+    function parkInlineFrame(uiId) {
+      if (FLOW_INLINE !== true) return false;
+      const frame = state.inlineFrames.get(uiId);
+      if (frame === undefined) return false;
+      const home = state.inlineHomes.get(uiId);
+      if (home === null || home === undefined || home.isConnected !== true) return false;
+      if (frame.parentElement === home) return true;
+      try {
+        home.moveBefore(frame, null);
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     // ---------------------------------------------------------------- surfaces
@@ -2158,11 +2263,15 @@ window.__ModuleLoader__.load({
         const frame = frameRef.current;
         if (frame === null || frame.contentWindow === null) return;
         try {
+          // Flow mode puts the frame back inside the transcript, where the browser chains the
+          // wheel to the conversation by itself. The bridge has to be told, or it would forward
+          // what the browser has already scrolled, and the page would move twice.
+          frame.contentWindow.postMessage({ __dshHtmlUi: 'hosting', flow: FLOW_INLINE === true && variant === 'inline' }, '*');
           frame.contentWindow.postMessage({ __dshHtmlUi: 'init', nonce: nonceRef.current, theme }, '*');
         } catch {
           /* the frame is mid-navigation */
         }
-      }, [theme]);
+      }, [theme, variant]);
 
       useEffect(() => {
         if (url === undefined) return undefined;
@@ -2445,6 +2554,34 @@ window.__ModuleLoader__.load({
         // conversation, not as a window parked in it — even though the fixed host layer,
         // clipped to the transcript's own viewport, is what draws it.
         const height = inlineHeightOf(contentHeight ?? initial.h);
+        // Flow mode draws the same box, but the frame inside it is created by script and then
+        // moved into its seat in the transcript; this element is only where it parks.
+        if (FLOW_INLINE === true) {
+          return h(
+            'div',
+            {
+              style: {
+                width: '100%',
+                height: `${height}px`,
+                minHeight: '0',
+                overflow: 'hidden',
+                background: 'transparent',
+              },
+            },
+            h(InlineFlowBody, {
+              record,
+              url,
+              status,
+              handshake,
+              frameRef,
+              onRetry: () => {
+                state.tickets.delete(record.uiId);
+                setStatus('loading');
+                setAttempt((current) => current + 1);
+              },
+            }),
+          );
+        }
         return h(
           'div',
           {
@@ -2786,11 +2923,17 @@ window.__ModuleLoader__.load({
     /**
      * The transcript's seat for one inline interface.
      *
-     * It holds the space the document occupies and nothing else. The document itself is drawn by
-     * the overlay, because a frame living here is destroyed every time the product rebuilds the
-     * transcript — a Session switch, or a turn scrolling out of the virtualized window — and the
-     * interface would come back empty. The height comes from the frame (`HtmlUiFrame`), so the
-     * seat and the document always agree on how much room it takes.
+     * It holds the space the document occupies, and in flow mode it also holds the document: the
+     * frame is moved in here while the seat is on screen, so the browser scrolls it with the
+     * transcript and chains its wheel there by itself. The height comes from the frame
+     * (`HtmlUiFrame`), so the seat and the document always agree on how much room it takes.
+     *
+     * The layout-effect cleanup is the load-bearing part. React runs a component's layout cleanups
+     * before it removes that component's host nodes from the document, so this is the one moment
+     * the frame can be moved out while both ends are still connected. Moving it later would mean
+     * moving it out of a detached seat — `moveBefore` refuses that, the frame leaves with the seat,
+     * and the document is rebuilt on the way back, which is exactly the loss this mode exists to
+     * prevent.
      */
     function InlineSeat(props) {
       useStore();
@@ -2803,20 +2946,91 @@ window.__ModuleLoader__.load({
         },
         [record.uiId],
       );
+      useLayoutEffect(
+        () => () => {
+          // Idempotent with the ref above: whichever runs first parks the frame, and the second
+          // finds it already home.
+          releaseInlineSeat(record.uiId);
+        },
+        [record.uiId],
+      );
       return h('div', {
         ref: bind,
         'data-htmlui-inline-seat': record.uiId,
-        style: { width: '100%', height: `${height}px`, minHeight: '0' },
+        style: { width: '100%', height: `${height}px`, minHeight: '0', overflow: 'hidden' },
       });
     }
 
     /**
-     * The hosted inline document itself.
+     * The body of an inline document in flow mode.
      *
-     * A fixed wrapper, clipped to the transcript's own viewport, with the frame placed at its
-     * seat's offset inside it; the sync loop writes both. It is rendered from the overlay — a
-     * frame-wide seat — so leaving the Session hides it rather than unmounting it, which is what
-     * keeps the document's runtime state.
+     * The frame is created here by script, not rendered by React, and that is the whole trick: a
+     * node React rendered is a node React removes when the component unmounts, and this frame has
+     * to outlive those unmounts. `moveBefore` then carries it between its seat and the hidden box
+     * below without the document being loaded again.
+     *
+     * The seat, not this component, decides where the frame is: the component owns the hidden box
+     * it parks in, and `InlineSeat` takes it from there while the turn is on screen.
+     */
+    function InlineFlowBody(props) {
+      const { record, url, status, handshake, frameRef, onRetry } = props;
+      const slotRef = useRef(null);
+      const handshakeRef = useRef(handshake);
+      handshakeRef.current = handshake;
+
+      useEffect(() => {
+        const slot = slotRef.current;
+        if (slot === null || slot === undefined || url === undefined) return undefined;
+        const frame = document.createElement('iframe');
+        frame.setAttribute('title', record.title !== undefined && record.title.length > 0 ? record.title : `HTML UI ${record.uiId}`);
+        frame.setAttribute('sandbox', sandboxFor(record.security));
+        frame.setAttribute('referrerpolicy', 'no-referrer');
+        frame.setAttribute('allow', 'clipboard-write');
+        Object.assign(frame.style, frameStyle);
+        frame.addEventListener('load', () => handshakeRef.current());
+        frame.src = url;
+        slot.appendChild(frame);
+        // The host's own listener and the height reports find the frame through this ref, exactly
+        // as they did when React rendered it.
+        frameRef.current = frame;
+        state.inlineFrames.set(record.uiId, frame);
+        state.inlineHomes.set(record.uiId, slot);
+        adoptInlineFrame(record.uiId);
+        holdOverscroll(true);
+        return () => {
+          holdOverscroll(false);
+          if (state.inlineFrames.get(record.uiId) === frame) state.inlineFrames.delete(record.uiId);
+          if (state.inlineHomes.get(record.uiId) === slot) state.inlineHomes.delete(record.uiId);
+          if (frameRef.current === frame) frameRef.current = null;
+          frame.remove();
+        };
+      }, [url, record.uiId, record.title, record.security, frameRef]);
+
+      return h(
+        'div',
+        { style: { position: 'relative', width: '100%', height: '100%' } },
+        h('div', { ref: slotRef, 'data-htmlui-inline-slot': record.uiId, style: { width: '100%', height: '100%' } }),
+        url === undefined
+          ? h('div', { style: Object.assign({}, emptyStyle, { position: 'absolute', inset: '0' }) }, 'Preparing interface…')
+          : null,
+        status === 'error'
+          ? h(
+              'div',
+              { style: Object.assign({}, emptyStyle, { position: 'absolute', inset: '0', gap: '8px' }) },
+              h('span', null, tr('frameUnavailable', 'This interface could not be loaded')),
+              h('button', { type: 'button', style: buttonStyle, onClick: onRetry }, tr('retry', 'Retry')),
+            )
+          : null,
+      );
+    }
+
+    /**
+     * One inline document's home while it is not in its seat.
+     *
+     * In hosted mode (no `moveBefore`) this is a fixed overlay clipped to the transcript, positioned
+     * by script over the seat; the frame is drawn here for its whole life, which is why nothing can
+     * destroy it. In flow mode it is only a hidden box the frame parks in when its seat leaves the
+     * screen — the same box, one `display: none` and no placement loop at all.
      */
     function HtmlUiInlineHost(props) {
       const { record } = props;
@@ -2835,6 +3049,17 @@ window.__ModuleLoader__.load({
         },
         [record.uiId],
       );
+      if (FLOW_INLINE === true) {
+        return h(
+          'div',
+          {
+            'data-htmlui-inline-host': record.uiId,
+            'data-htmlui-inline-flow': '',
+            style: { position: 'fixed', left: '0', top: '0', width: '0', height: '0', display: 'none', overflow: 'hidden', pointerEvents: 'none', zIndex: 0 },
+          },
+          h(HtmlUiFrame, { record, theme: state.theme, variant: 'inline', onDismiss: dismissRecord }),
+        );
+      }
       return h(
         'div',
         {
@@ -2868,10 +3093,11 @@ window.__ModuleLoader__.load({
      * scrolls up as the conversation grows — instead of appearing again at the bottom of every
      * new turn, which is what electing a "newest tail" while rendering did.
      *
-     * What it claims is a seat, not the document: an inline frame is hosted by the overlay
-     * (`HtmlUiInlineHost`), because everything under this tail is destroyed whenever the product
-     * rebuilds the transcript — switching Session, or scrolling this turn out of the virtualized
-     * window — and a hosted document simply stops being painted instead.
+     * What it claims is a seat, not the document: everything under this tail is destroyed whenever
+     * the product rebuilds the transcript — switching Session, or scrolling this turn out of the
+     * virtualized window. With `moveBefore` the frame lives in the seat while the seat exists and
+     * is moved to a hidden box when it goes, so the browser's own scrolling applies throughout;
+     * without it the frame stays in the overlay and the bridge forwards the wheel and the finger.
      */
     function HtmlUiInlineTail(props) {
       useStore();
