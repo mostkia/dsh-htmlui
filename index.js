@@ -64,6 +64,17 @@ const BRIDGE_FILE = 'bridge.js';
 const PLUGIN_VERSION = '0.1.4';
 
 /**
+ * The origin a Desktop page runs on.
+ *
+ * The browser page names the loopback host and reaches this carrier directly; Desktop keeps its
+ * own `dsh-app://app` origin in the page and in every relative URL, and only *forwards* the
+ * request to the local host. A document served to that page is therefore framed by, and injects
+ * its bridge from, an origin the policy has to name explicitly — `host` alone would refuse both,
+ * which is a blank panel.
+ */
+const DESKTOP_APP_ORIGIN = 'dsh-app://app';
+
+/**
  * Placements this plugin offers.
  *
  * `dock-top`, `dock-bottom` and `panel` were removed after a live acceptance pass:
@@ -2751,7 +2762,17 @@ export function apply(ctx, config) {
    */
   function contentSecurityPolicy(req, security) {
     const host = String(req.headers.host ?? '');
-    const selfOrigin = host.length > 0 ? `http://${host} https://${host}` : '';
+    // Two carriers, one policy: a browser page reaches this route under the loopback host, while
+    // Desktop forwards the same request from a page that keeps `dsh-app://app` as its origin. Both
+    // must be named, or the Desktop frame is refused by `frame-ancestors` and its bridge by
+    // `script-src` — a white panel with a CSP error in the console.
+    const selfOrigin = [
+      host.length > 0 ? `http://${host}` : '',
+      host.length > 0 ? `https://${host}` : '',
+      DESKTOP_APP_ORIGIN,
+    ]
+      .filter((entry) => entry.length > 0)
+      .join(' ');
     const wide = security === 'open' || security === 'unsafe';
     const web = wide ? 'https: http:' : '';
     const sockets = wide ? 'ws: wss:' : '';

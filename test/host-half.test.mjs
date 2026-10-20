@@ -420,8 +420,12 @@ test('the document policy lets the injected bridge load in an opaque origin', as
   assert.ok(directives.get('script-src').includes('http://127.0.0.1:3080'), `script-src must allow the host: ${csp}`);
   assert.ok(!directives.get('script-src').includes("'self'"), 'an opaque origin cannot use self');
   assert.ok(directives.get('script-src').includes("'unsafe-inline'"), 'the runtime config is inline');
+  // Desktop keeps its own origin in the page and merely forwards the request here, so the bridge
+  // script is fetched from `dsh-app://app` and the framing page wears that origin too. Both
+  // allowances are the difference between a rendered document and a white panel there.
+  assert.ok(directives.get('script-src').includes('dsh-app://app'), `script-src must allow the Desktop origin: ${csp}`);
   // The frame is embedded by the host page, so frame-ancestors must name it too.
-  assert.deepEqual(directives.get('frame-ancestors'), ['http://127.0.0.1:3080', 'https://127.0.0.1:3080']);
+  assert.deepEqual(directives.get('frame-ancestors'), ['http://127.0.0.1:3080', 'https://127.0.0.1:3080', 'dsh-app://app']);
   assert.ok(directives.get('style-src').includes('http://127.0.0.1:3080'));
   assert.ok(directives.get('font-src').includes('http://127.0.0.1:3080'));
   assert.ok(!csp.includes("'self'"), `no directive may rely on self in an opaque origin: ${csp}`);
