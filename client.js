@@ -1878,6 +1878,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The strip at the top of the page that the Desktop shell owns.
+     *
+     * Desktop's Windows shell draws its menu and its window buttons as a 40px native title bar
+     * *over* the page. A fullscreen layer that starts at viewport 0 puts its own minimize and close
+     * controls underneath that bar, where the native buttons take the click: the layer looks
+     * impossible to close, and the session underneath cannot be reached either. Starting below the
+     * bar is the whole fix. Every other shell — the browser, macOS, Linux — owns no such strip and
+     * gets 0, which leaves its layout exactly as it was.
+     */
+    function desktopTitlebarInset() {
+      if (typeof navigator !== 'object' || navigator === null) return 0;
+      const agent = String(navigator.userAgent ?? '');
+      return agent.includes('dsh-desktop') && /Windows/u.test(agent) ? 40 : 0;
+    }
+
+    /**
      * The hosted boxes, by interface.
      *
      * Each entry is the fixed wrapper the sync loop places; its first child is the frame itself,
@@ -4607,6 +4623,11 @@ window.__ModuleLoader__.load({
       // just the active one meant switching away unmounted its document, so coming back
       // reloaded the interface from scratch and lost whatever lived in it — the same loss
       // the floats had, and the same fix: hide it rather than destroy it.
+      //
+      // The layer starts below the Desktop shell's native title bar when there is one: its own
+      // minimize and close controls sit at the top edge, and underneath that bar the native window
+      // buttons take the click — a fullscreen interface that cannot be closed.
+      const titlebarInset = desktopTitlebarInset();
       for (const surface of records.filter((entry) => entry.placement === 'fullscreen')) {
         const active = fullscreenRecord !== undefined && fullscreenRecord.uiId === surface.uiId;
         layers.push(
@@ -4616,7 +4637,7 @@ window.__ModuleLoader__.load({
               key: `fs-${surface.uiId}`,
               style: {
                 position: 'fixed',
-                top: '0',
+                top: `${titlebarInset}px`,
                 // A fullscreen surface covers the conversation column, not the frame: the
                 // sidebar belongs to the user, and covering it hides their sessions. The
                 // column's own edges are measured from our seat inside it.
@@ -4638,7 +4659,7 @@ window.__ModuleLoader__.load({
                 // the matching min-width is the second lock (a box never shrinks below its min-width).
                 flexShrink: 0,
                 minWidth: narrowViewport() === true ? '100vw' : undefined,
-                height: '100%',
+                height: titlebarInset > 0 ? `calc(100% - ${titlebarInset}px)` : '100%',
                 zIndex: 5,
                 display: active ? 'flex' : 'none',
                 flexDirection: 'column',
