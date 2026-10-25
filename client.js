@@ -1276,6 +1276,16 @@ window.__ModuleLoader__.load({
             state.create.autoShown = true;
             state.create.addOpen = true;
           }
+          // The same opening is when the tiles take the chosen project's own default — once, so a
+          // placement the reader picked by hand is not undone by a later refresh of this list.
+          if (state.create.open === true && state.create.placementBound !== true) {
+            const chosen = state.templates.items.find((template) => template.slug === state.create.source);
+            const preset = presetPlacementOf(chosen);
+            if (preset !== undefined) {
+              state.create.placement = preset;
+              state.create.placementBound = true;
+            }
+          }
         } else {
           state.templates.error = (value !== null && value.error) || 'unavailable';
         }
@@ -3780,8 +3790,10 @@ window.__ModuleLoader__.load({
                 state.create.open = true;
                 state.create.busy = false;
                 state.create.dirInput = undefined;
-                // A fresh opening is a fresh chance to announce what the folder holds.
+                // A fresh opening is a fresh chance to announce what the folder holds, and to let
+                // the chosen project's own placement apply again.
                 state.create.autoShown = false;
+                state.create.placementBound = false;
                 bump();
                 loadTemplates();
               },
@@ -5065,6 +5077,19 @@ window.__ModuleLoader__.load({
     ];
 
     /**
+     * The placement a project declares, when it is one this dialog can show.
+     *
+     * `meta.json` has carried a `placement` since the manifest form existed, and until now nothing
+     * read it at creation: the reader picked a project and then picked a place, and the project's
+     * own answer was only ever a comment. A project that declares something the menu no longer
+     * offers — `background` — has no tile to light, so its answer is not applied.
+     */
+    function presetPlacementOf(template) {
+      const value = template !== null && template !== undefined && typeof template.placement === 'string' ? template.placement : '';
+      return CREATE_PLACEMENTS.some((entry) => entry.value === value) ? value : undefined;
+    }
+
+    /**
      * The glyph a project is recognised by.
      *
      * `meta.json` may carry `icon`: an emoji, or a path to a small image beside the project, which
@@ -5102,6 +5127,9 @@ window.__ModuleLoader__.load({
             flex: '0 0 auto',
             border: blank ? `1.5px dashed ${BW.ink}` : 'none',
             borderRadius: '8px',
+            // A character sits on its baseline, and centring the line box leaves a `+` visibly
+            // low in the square. Two pixels up is what makes it look centred rather than measured.
+            transform: blank ? 'translateY(-2px)' : undefined,
           },
         },
         emoji,
@@ -5328,6 +5356,7 @@ window.__ModuleLoader__.load({
         state.create.folderOpen = false;
         state.create.addOpen = false;
         state.create.autoShown = false;
+        state.create.placementBound = false;
         bump();
       };
 
@@ -5585,6 +5614,12 @@ window.__ModuleLoader__.load({
                     narrow,
                     onPick: (picked) => {
                       state.create.source = picked.slug;
+                      // The tiles read the project's own default: `placement` in its manifest is
+                      // what the reader chose when they made it, and choosing a project is the
+                      // moment that answer applies. Until now it was written down and never read.
+                      const preset = presetPlacementOf(picked);
+                      if (preset !== undefined) state.create.placement = preset;
+                      state.create.placementBound = true;
                       // Picking a different project is also a statement about which project the
                       // open form is about: leaving the form on the previous one is exactly how a
                       // save lands on a project the reader was not looking at. A half-filled
@@ -6294,6 +6329,7 @@ window.__ModuleLoader__.load({
             state.create.open = true;
             state.create.dirInput = undefined;
             state.create.autoShown = false;
+            state.create.placementBound = false;
             bump();
             return markTemplatesAsked();
           },
@@ -6318,6 +6354,7 @@ window.__ModuleLoader__.load({
             state.create.busy = false;
             state.create.dirInput = undefined;
             state.create.autoShown = false;
+            state.create.placementBound = false;
             bump();
             // The source list is the catalogue, so ask for it as the dialog opens.
             loadTemplates();

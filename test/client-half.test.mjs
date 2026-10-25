@@ -470,6 +470,36 @@ test('opening the menu announces what the folder holds but has not been added', 
   }
 });
 
+test('opening the menu reads the chosen project’s placement, once', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () =>
+    Promise.resolve({
+      json: () =>
+        Promise.resolve({
+          ok: true,
+          dir: '/opt/html-templates',
+          configured: true,
+          asked: true,
+          candidates: [],
+          templates: [{ slug: 'tetris', name: 'Tetris', placement: 'inline' }],
+        }),
+    });
+  try {
+    const { state } = __internals;
+    state.create = { open: true, source: 'tetris', placement: 'dock-right', busy: false, placementBound: false };
+    await __internals.loadTemplates();
+    assert.equal(state.create.placement, 'inline', 'the tiles start from the project’s own answer');
+    assert.equal(state.create.placementBound, true, 'and that happens once per opening');
+    // A later refresh of the same list must not undo a placement the reader picked by hand.
+    state.create.placement = 'float';
+    await __internals.loadTemplates();
+    assert.equal(state.create.placement, 'float', 'a manual choice survives a refresh');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.create = { open: false, source: 'blank', placement: 'dock-right', busy: false };
+  }
+});
+
 test('a release that lands before the slot resolves still leaves the column clean', () => {
   // Creating and closing quickly used to strand a registration: the release ran while
   // the injection was still pending, and the callback registered afterwards with nobody

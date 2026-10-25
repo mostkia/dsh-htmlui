@@ -1085,6 +1085,29 @@ test('the folder badge opens the add list even for a single new project', () => 
   resetCreate();
 });
 
+test('choosing a project takes its own placement, and only when the menu can show it', () => {
+  // `placement` in a manifest is the project's own answer about where it opens; the tiles are
+  // where that answer is read, so choosing a project is the moment it applies.
+  resetStore();
+  resetCreate();
+  __internals.state.create.open = true;
+  __internals.state.templates.items = [
+    { slug: 'tetris', name: 'Tetris', placement: 'inline' },
+    { slug: 'older', name: 'Older', placement: 'background' },
+    { slug: 'plain', name: 'Plain' },
+  ];
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const row = (slug) => dialog.elements.find((element) => element.props?.['data-source'] === slug);
+  row('tetris').props.onClick();
+  assert.equal(__internals.state.create.placement, 'inline', 'the tiles take the project’s own answer');
+  __internals.state.create.placement = 'float';
+  row('older').props.onClick();
+  assert.equal(__internals.state.create.placement, 'float', 'a placement this menu no longer offers is not applied');
+  row('plain').props.onClick();
+  assert.equal(__internals.state.create.placement, 'float', 'and a project that declares none leaves the choice alone');
+  resetCreate();
+});
+
 test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.

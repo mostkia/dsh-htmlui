@@ -29,6 +29,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 - Opening the menu while the folder holds something unadopted opens the add list with it, once per
   opening. The badge is a small target on a corner, and a reader who never pressed it would believe
   this menu had no way to add a project at all.
+- The placement tiles read the chosen project's own `placement`, which until now was written down
+  and never read at creation — so a default chosen in the manifest form finally decides where that
+  project opens. Once per opening: a place the reader picks by hand is not undone by the list
+  refreshing itself.
+- The blank canvas's plus is centred in its dashed square; a character sits on its baseline, and
+  centring the line box left it visibly low.
 - A `meta.json` written with a byte-order mark — what an editor on this platform writes by
   default — parsed as no manifest at all, so a project copied in and edited with Notepad appeared
   neither as a project nor as a candidate. The reader strips the mark.
