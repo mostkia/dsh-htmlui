@@ -1181,6 +1181,27 @@ test('a page with no backend says so instead of claiming it is not running', () 
   __internals.state.templates.items = [];
 });
 
+test('a long project id stays on one line, and the title gives way before it', () => {
+  // The bug this closes: a long id wrapped onto a second line on a phone, pushing the state chips
+  // down and making two neighbouring rows look like different kinds of thing.
+  resetStore();
+  resetCreate();
+  __internals.state.create.open = true;
+  __internals.state.templates.items = [{ slug: 'a-very-long-project-id', name: 'A very long project name' }];
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const row = dialog.elements.find((element) => element.props?.['data-source'] === 'a-very-long-project-id');
+  const titleRow = row.children[1].children[0];
+  assert.equal(titleRow.props.style.flexWrap, 'nowrap', 'the title line never wraps');
+  const name = titleRow.children[0];
+  assert.equal(name.props.style.whiteSpace, 'nowrap');
+  assert.equal(name.props.style.textOverflow, 'ellipsis', 'the name is what gets clipped');
+  const aid = titleRow.children[1];
+  assert.equal(aid.props.text, '(AID: a-very-long-project-id)', 'the id is handed to the marquee whole');
+  assert.equal(aid.props.active, false, 'and it only scrolls once its row is selected');
+  resetCreate();
+  __internals.state.templates.items = [];
+});
+
 test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.

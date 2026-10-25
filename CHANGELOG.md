@@ -18,6 +18,20 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Changed
 
+- On a phone the create sheet fills the viewport again. An installed plugin caps every
+  `[aria-modal="true"]` it does not recognise at `calc(100vw - 32px)`, and on a 390px screen that
+  left a 32px strip of page uncovered down the right edge. The dialog states its own width and
+  maximum inline, which is what a non-`!important` stylesheet rule cannot beat.
+- A modal is drawn at the document root now (`react-dom`'s `createPortal`). The shell mounts plugin
+  surfaces in its overlay layer, and that layer is one step below its own mobile chrome — the
+  header's menu button is `z-index: 21` on a layer that is `20`. A scrim inside the layer therefore
+  dimmed the page but never the header, and no z-index of ours could escape the layer's stacking
+  context. On a phone the fullscreen layer is portalled for the same reason; a host without
+  `react-dom` falls back to the old inline behaviour instead of failing.
+- A project's title and id now stay on one line at every width: the name is clipped with an ellipsis
+  (it is still recognisable from its beginning) and the id scrolls as a marquee while its row is
+  selected. A wrapped id pushed the state chips down and made neighbouring rows look like different
+  kinds of thing.
 - A project that declares no backend now reads **No backend** in amber, not "Not running" in grey.
   A page with nothing behind it has no process that could ever start, so the old label described a
   state that project can never leave — the one thing the list must not do is imply something is

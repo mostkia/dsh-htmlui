@@ -101,9 +101,13 @@ test('the entries the loader resolves on its own exist', () => {
   assert.match(read(pkg.icon), /^<svg/u);
 });
 
-test('the browser half imports nothing but react', () => {
+test('the browser half imports only what the shell runtime already carries', () => {
   const required = [...read('client.js').matchAll(/require\((['"])([^'"]+)\1\)/gu)].map((match) => match[2]);
-  assert.deepEqual([...new Set(required)], ['react'], 'a second runtime import would need dsh.client.external');
+  // `react` and `react-dom` are both resolved by the shell's own client runtime — the first-party
+  // client packages import them the same way. `react-dom` is used for one thing: a modal has to be
+  // drawn at the document root, because the shell's overlay layer sits below its own mobile chrome.
+  // Anything else would need a `dsh.client.external` entry and a package that provides it.
+  assert.deepEqual([...new Set(required)].sort(), ['react', 'react-dom'], 'a third runtime import would need dsh.client.external');
 });
 
 test('the host half carries no runtime harness import', () => {

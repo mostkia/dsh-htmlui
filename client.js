@@ -23,6 +23,31 @@ window.__ModuleLoader__.load({
     // without one (React always has it, a test renderer may not) degrades to a passive effect.
     const useLayoutEffect = typeof React.useLayoutEffect === 'function' ? React.useLayoutEffect : useEffect;
 
+    /**
+     * Render a modal surface at the document root instead of inside the seat that asked for it.
+     *
+     * The shell mounts plugin surfaces in its overlay layer, and that layer sits deliberately one
+     * step below its own mobile chrome: the header's menu button carries `z-index: 21` on a layer
+     * that is `20` (`pI_x6G_overlayLayer`). A scrim drawn inside the layer can therefore never cover
+     * the header, and because the layer is a stacking context, no z-index of ours can escape it. A
+     * portal to `<body>` puts the dialog in the same stacking context as the shell itself, which is
+     * where a modal belongs.
+     *
+     * A host without `react-dom` keeps the old inline behaviour: everything still works, the dialog
+     * just cannot rise above chrome that was drawn above the layer it was mounted in.
+     */
+    let createPortal = null;
+    try {
+      const reactDom = require('react-dom');
+      if (reactDom !== null && reactDom !== undefined && typeof reactDom.createPortal === 'function') createPortal = reactDom.createPortal;
+    } catch {
+      createPortal = null;
+    }
+    function portalToBody(node) {
+      const usable = createPortal !== null && typeof document === 'object' && document !== null && document.body !== null && document.body !== undefined;
+      return usable ? createPortal(node, document.body) : node;
+    }
+
     const ROUTE_BASE = '/plugins/@mostkia/dsh-htmlui';
     /**
      * The version this browser half belongs to, and the line that announces it.
@@ -4752,8 +4777,7 @@ window.__ModuleLoader__.load({
       const titlebarInset = desktopTitlebarInset();
       for (const surface of records.filter((entry) => entry.placement === 'fullscreen')) {
         const active = fullscreenRecord !== undefined && fullscreenRecord.uiId === surface.uiId;
-        layers.push(
-          h(
+        const fullscreenLayer = h(
             'div',
             {
               key: `fs-${surface.uiId}`,
@@ -4781,6 +4805,9 @@ window.__ModuleLoader__.load({
                 // the matching min-width is the second lock (a box never shrinks below its min-width).
                 flexShrink: 0,
                 minWidth: narrowViewport() === true ? '100vw' : undefined,
+                // The same `[aria-modal="true"]` cap the create sheet has to survive: on a phone
+                // this layer is the whole screen, so it states its own maximum.
+                maxWidth: 'none',
                 height: titlebarInset > 0 ? `calc(100% - ${titlebarInset}px)` : '100%',
                 zIndex: 5,
                 display: active ? 'flex' : 'none',
@@ -4796,8 +4823,10 @@ window.__ModuleLoader__.load({
             },
             h(HtmlUiFullscreenChrome, { record: surface, onLeave: () => leaveFullscreen(surface.uiId), onDismiss: () => dismiss(surface.uiId) }),
             h('div', { style: { flex: '1 1 auto', minHeight: '0' } }, h(HtmlUiFrame, { record: surface, theme: state.theme, variant: 'dock', bare: true })),
-          ),
-        );
+          );
+        // On a phone this layer is the screen, so it is drawn at the document root for the same
+        // reason the create sheet is: the shell's own header sits above its overlay layer.
+        layers.push(narrowViewport() === true ? portalToBody(fullscreenLayer) : fullscreenLayer);
       }
 
       return layers;
@@ -5243,6 +5272,63 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * A string that is clipped when it does not fit, and scrolls while its row is selected.
+     *
+     * A project id can be longer than a phone row. Wrapping it was worse than clipping: it pushed
+     * the state chips down and made neighbouring rows look like different kinds of thing. So it
+     * stays one line and ends in an ellipsis — and while the row is selected it runs as a marquee,
+     * because the one moment the whole id matters is the moment the reader is deciding about it.
+     *
+     * The distance travelled is measured, not guessed: a marquee that scrolls further than the text
+     * is long leaves a blank gap at the end of every pass. A host without layout (a test renderer)
+     * measures zero and simply keeps the ellipsis.
+     */
+    function MarqueeText(props) {
+      const { text, active, style } = props;
+      const outerRef = useRef(null);
+      const innerRef = useRef(null);
+      const [shift, setShift] = useState(0);
+      useEffect(() => {
+        const outer = outerRef.current;
+        const inner = innerRef.current;
+        if (outer === null || outer === undefined || inner === null || inner === undefined) return;
+        const distance = Math.max(0, Math.round(inner.scrollWidth - outer.clientWidth));
+        setShift(distance);
+      }, [text, active]);
+      const running = active === true && shift > 0;
+      return h(
+        'span',
+        {
+          ref: outerRef,
+          title: text,
+          style: Object.assign(
+            {
+              display: 'block',
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              textOverflow: running === true ? 'clip' : 'ellipsis',
+              minWidth: '0',
+            },
+            style,
+          ),
+        },
+        h(
+          'span',
+          {
+            ref: innerRef,
+            'data-marquee': running === true ? 'running' : undefined,
+            style: {
+              display: 'inline-block',
+              '--dsh-htmlui-marquee': `-${shift}px`,
+              animation: running === true ? `dsh-htmlui-marquee ${Math.max(4, Math.min(14, shift / 18)).toFixed(1)}s ease-in-out infinite alternate` : undefined,
+            },
+          },
+          text,
+        ),
+      );
+    }
+
+    /**
      * One project row: what it is, whether its backend is alive, how it lives, and its pencil.
      *
      * The row is the source choice — a reader picks a project by pressing it, the way the
@@ -5273,7 +5359,11 @@ window.__ModuleLoader__.load({
           ? null
           : h(
               'div',
-              { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+              {
+                // Under the pill, on a phone, the chips start at the left edge with the state they
+                // describe; `flex-end` packed them against the right and read as a crowded block.
+                style: { display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: narrow === true ? 'flex-start' : 'flex-end', minWidth: '0' },
+              },
               ...chips.map(([key, label, hint]) =>
                 h(
                   'span',
@@ -5318,13 +5408,31 @@ window.__ModuleLoader__.load({
           { style: { flex: '1 1 auto', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '5px' } },
           h(
             'div',
-            { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' } },
-            h('span', { style: { fontSize: narrow ? '15px' : '18px', fontWeight: 600, color: BW.ink, wordBreak: 'break-word' } }, name),
+            // One line, always: a wrapped id pushed the chips down and made two neighbouring rows
+            // look like different kinds of thing. The name gives way first, because a name is still
+            // recognisable from its beginning, and the id is drawn whole in its tooltip.
+            { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'nowrap', minWidth: '0' } },
             h(
               'span',
-              { style: { fontSize: '12.5px', color: BW.muted, fontFamily: 'ui-monospace, Consolas, monospace', whiteSpace: 'nowrap' } },
-              `(AID: ${template.slug})`,
+              {
+                style: {
+                  fontSize: narrow ? '15px' : '18px',
+                  fontWeight: 600,
+                  color: BW.ink,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  minWidth: '0',
+                  flex: '0 1 auto',
+                },
+              },
+              name,
             ),
+            h(MarqueeText, {
+              text: `(AID: ${template.slug})`,
+              active: selected === true,
+              style: { fontSize: '12.5px', color: BW.muted, fontFamily: 'ui-monospace, Consolas, monospace', flex: '0 1 auto' },
+            }),
           ),
           h(
             'div',
@@ -5687,13 +5795,21 @@ window.__ModuleLoader__.load({
         padding: narrow ? '22px 14px 14px' : '24px 22px 18px',
       };
 
-      return h(
-        'div',
-        {
-          style: {
-            position: 'fixed',
-            inset: '0',
-            zIndex: 6,
+      return portalToBody(
+        h(
+          'div',
+          {
+            style: {
+              position: 'fixed',
+              inset: '0',
+            // The dialog is a modal and covers the page, so its size is the viewport and nothing
+            // else. `max-width` is stated explicitly because an installed plugin caps every
+            // `[aria-modal="true"]` it does not recognise at `calc(100vw - 32px)`, and an inline
+            // declaration is what a non-`!important` stylesheet rule cannot beat: on a 390px phone
+            // that cap left a 32px strip of page uncovered down the right edge.
+            width: '100vw',
+            maxWidth: 'none',
+            zIndex: 1200,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -6051,6 +6167,7 @@ window.__ModuleLoader__.load({
           : null,
         // ---------------------------------------------------------------- manifest form
         adoptOpen === true ? h(HtmlUiManifestPanel, { narrow, props }) : null,
+        ),
       );
     }
 
@@ -6630,6 +6747,13 @@ window.__ModuleLoader__.load({
           // carries the same number the branch above uses rather than the sheet-wide one.
           `@media (max-width: ${MOBILE.maxWidthPx}px) and (pointer: coarse) {`,
           `  #${SHEET_ID} [data-dsh-htmlui-dir] { font-size: ${MOBILE.inputFont} !important; }`,
+          '}',
+          // The marquee a selected project's id runs when it does not fit: the distance is measured
+          // in the browser half and handed over as a custom property, so one keyframes rule serves
+          // every id of every length.
+          '@keyframes dsh-htmlui-marquee { from { transform: translateX(0); } to { transform: translateX(var(--dsh-htmlui-marquee, 0px)); } }',
+          '@media (prefers-reduced-motion: reduce) {',
+          `  #${SHEET_ID} [data-marquee="running"] { animation: none !important; }`,
           '}',
         ].join('\n');
         document.head.appendChild(fields);
