@@ -4805,9 +4805,6 @@ window.__ModuleLoader__.load({
                 // the matching min-width is the second lock (a box never shrinks below its min-width).
                 flexShrink: 0,
                 minWidth: narrowViewport() === true ? '100vw' : undefined,
-                // The same `[aria-modal="true"]` cap the create sheet has to survive: on a phone
-                // this layer is the whole screen, so it states its own maximum.
-                maxWidth: 'none',
                 height: titlebarInset > 0 ? `calc(100% - ${titlebarInset}px)` : '100%',
                 zIndex: 5,
                 display: active ? 'flex' : 'none',
@@ -5802,21 +5799,18 @@ window.__ModuleLoader__.load({
             style: {
               position: 'fixed',
               inset: '0',
-            // The dialog is a modal and covers the page, so its size is the viewport and nothing
-            // else. `max-width` is stated explicitly because an installed plugin caps every
-            // `[aria-modal="true"]` it does not recognise at `calc(100vw - 32px)`, and an inline
-            // declaration is what a non-`!important` stylesheet rule cannot beat: on a 390px phone
-            // that cap left a 32px strip of page uncovered down the right edge.
-            width: '100vw',
-            maxWidth: 'none',
-            zIndex: 1200,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: narrow ? '0' : '26px',
-            background: narrow ? MOBILE.scrim : 'rgba(0,0,0,0.34)',
-            pointerEvents: 'auto',
-          },
+              // A modal is the viewport, and `inset` says so. A page-level stylesheet elsewhere
+              // that wants to cap this box is not answered here: a global styling problem belongs
+              // in the stylesheet layer, not in every dialog defending itself against rules it
+              // cannot see.
+              zIndex: 1200,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: narrow ? '0' : '26px',
+              background: narrow ? MOBILE.scrim : 'rgba(0,0,0,0.34)',
+              pointerEvents: 'auto',
+            },
           onClick: (event) => {
             if (event.target === event.currentTarget) close();
           },
