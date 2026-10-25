@@ -1155,6 +1155,32 @@ test('every project carries a delete control, and the first press only arms it',
   __internals.state.templates.armedAt = 0;
 });
 
+test('a page with no backend says so instead of claiming it is not running', () => {
+  // The bug this closes: a pure page was drawn "Not running" forever, because there is no process
+  // that could ever start. Saying "no backend" is the truth, and it needs its own colour so it does
+  // not read as a stopped service.
+  resetStore();
+  resetCreate();
+  __internals.state.create.open = true;
+  __internals.state.templates.items = [
+    { slug: 'page', name: 'Page' },
+    { slug: 'svc', name: 'Svc', backend: { declared: true, allowed: true, resident: false, loaded: false } },
+    { slug: 'live', name: 'Live', backend: { declared: true, allowed: true, resident: false, loaded: true } },
+  ];
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const rowOf = (slug) => dialog.elements.find((element) => element.props?.['data-source'] === slug);
+  const rowText = (slug) => JSON.stringify(rowOf(slug).children ?? []);
+  assert.ok(rowText('page').includes('No backend'), 'a project with no backend says so');
+  assert.ok(!rowText('page').includes('Not running'), 'and it does not claim a process that cannot exist');
+  assert.ok(rowText('svc').includes('Not running'), 'a declared backend that is idle still says not running');
+  assert.ok(rowText('live').includes('Running'), 'and a loaded one says running');
+  const pills = dialog.elements.filter((element) => Array.isArray(element.children) && element.children[0] === 'No backend');
+  assert.equal(pills.length, 1, 'the pill is drawn once, for the page');
+  assert.equal(pills[0].props.style.background, '#c68a00', 'and it is amber, not grey');
+  resetCreate();
+  __internals.state.templates.items = [];
+});
+
 test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.

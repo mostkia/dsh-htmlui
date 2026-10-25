@@ -18,6 +18,10 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Changed
 
+- A project that declares no backend now reads **No backend** in amber, not "Not running" in grey.
+  A page with nothing behind it has no process that could ever start, so the old label described a
+  state that project can never leave — the one thing the list must not do is imply something is
+  broken when there is nothing there. The same correction applies to the session manager's rows.
 - The create dialog is drawn in the frame it was designed from: a ruled panel, the folder standing
   on its top rule with a badge for what the directory holds but does not describe yet, one row per
   project carrying its icon, its process id, its process state and the pencil, and the four ways in

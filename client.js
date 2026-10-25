@@ -964,6 +964,8 @@ window.__ModuleLoader__.load({
       backendWillIdle: 'Unloads on its own',
       backendPillRunning: 'Running',
       backendPillIdle: 'Not running',
+      backendPillNone: 'No backend',
+      backendPillNoneHint: 'A page only: there is no process to start, so it is never "not running"',
       backendPillRunningHint: 'Its backend is loaded in the host process right now',
       backendPillIdleHint: 'Nothing is loaded until one of its interfaces calls it',
       backendResident: 'Resident',
@@ -1137,6 +1139,8 @@ window.__ModuleLoader__.load({
         backendWillIdle: '空闲后自动卸载',
         backendPillRunning: '运行中',
         backendPillIdle: '未运行',
+        backendPillNone: '无后台',
+        backendPillNoneHint: '纯前端页面：没有需要启动的进程，所以不存在“未运行”这回事',
         backendPillRunningHint: '它的后端此刻已加载在宿主进程里',
         backendPillIdleHint: '未加载：等它的某个界面调用时才会起来',
         backendResident: '常驻',
@@ -1817,6 +1821,10 @@ window.__ModuleLoader__.load({
      */
     function backendPill(backend) {
       const running = backend !== undefined && backend.loaded === true;
+      // A project that declares no backend has no process at all, so "not running" is not a state
+      // it can be in — the same false sentence the create dialog used to print.
+      const declared = backend !== undefined && backend.declared === true;
+      const colour = declared !== true ? '#c68a00' : running ? '#4CAF50' : '#9E9E9E';
       return h(
         'span',
         {
@@ -1828,15 +1836,18 @@ window.__ModuleLoader__.load({
             padding: '1px 5px',
             color: '#fff',
             borderRadius: '25px',
-            border: `1px ${running ? '#4CAF50' : '#9E9E9E'} solid`,
-            background: running ? '#4CAF50' : '#9E9E9E',
+            border: `1px ${colour} solid`,
+            background: colour,
             whiteSpace: 'nowrap',
           },
-          title: running
-            ? tr('backendPillRunningHint', 'Its backend is loaded in the host process right now')
-            : tr('backendPillIdleHint', 'Nothing is loaded until one of its interfaces calls it'),
+          title:
+            declared !== true
+              ? tr('backendPillNoneHint', 'A page only: there is no process to start, so it is never "not running"')
+              : running
+                ? tr('backendPillRunningHint', 'Its backend is loaded in the host process right now')
+                : tr('backendPillIdleHint', 'Nothing is loaded until one of its interfaces calls it'),
         },
-        running ? tr('backendPillRunning', 'Running') : tr('backendPillIdle', 'Not running'),
+        declared !== true ? tr('backendPillNone', 'No backend') : running ? tr('backendPillRunning', 'Running') : tr('backendPillIdle', 'Not running'),
       );
     }
 
@@ -5026,6 +5037,9 @@ window.__ModuleLoader__.load({
       none: '1.5px solid transparent',
       chip: '#c7c7c7',
       green: '#12a150',
+      // A page with no backend is not a process in either state, so it gets a third colour: the
+      // folder's own amber, which says "nothing to start here" rather than "stopped".
+      amber: '#c68a00',
     };
 
     /** The largest icon the host will take; the form refuses earlier so the reason is immediate. */
@@ -5317,13 +5331,15 @@ window.__ModuleLoader__.load({
             { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
             template.slug === 'blank'
               ? bwPill(tr('createBlankPill', 'Always available'), BW.chip, tr('createBlankPillHint', 'A new interface with nothing in it yet'))
-              : bwPill(
-                  running ? tr('backendPillRunning', 'Running') : tr('backendPillIdle', 'Not running'),
-                  running ? BW.green : BW.chip,
-                  running
-                    ? tr('backendPillRunningHint', 'Its backend is loaded in the host process right now')
-                    : tr('backendPillIdleHint', 'Nothing is loaded until one of its interfaces calls it'),
-                ),
+              : declared !== true
+                ? bwPill(tr('backendPillNone', 'No backend'), BW.amber, tr('backendPillNoneHint', 'A page only: there is no process to start, so it is never "not running"'))
+                : bwPill(
+                    running ? tr('backendPillRunning', 'Running') : tr('backendPillIdle', 'Not running'),
+                    running ? BW.green : BW.chip,
+                    running
+                      ? tr('backendPillRunningHint', 'Its backend is loaded in the host process right now')
+                      : tr('backendPillIdleHint', 'Nothing is loaded until one of its interfaces calls it'),
+                  ),
             // On a phone the row is too narrow for a second column of chips; they belong under
             // the state they describe, where the eye already is.
             narrow === true ? chipsNode : null,
