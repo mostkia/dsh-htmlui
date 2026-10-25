@@ -915,32 +915,47 @@ test('the create dialog asks what to start from and where to put it', () => {
     { slug: 'starter', name: 'starter', description: 'demo', bundled: true, bytes: 10 },
   ];
   const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-  for (const text of ['New HTML interface', 'New HTML project', 'Blank canvas', 'starter', 'Right column', 'Floating window', 'Fullscreen', 'Create', 'Cancel', 'Use this directory']) {
+  for (const text of ['New HTML project', 'Blank canvas', 'starter', 'Right column', 'In the conversation', 'Fullscreen', 'Floating window', 'Create', 'Cancel']) {
     assert.ok(dialog.text.includes(text), `the dialog offers ${text}`);
   }
-  // Only the project list is capped: a long catalogue must not push 默认生成位置 and the
-  // buttons below the fold, and everything else in the form keeps its natural size.
+  assert.equal(
+    dialog.elements.some((element) => element.props?.['aria-label'] === 'New HTML interface'),
+    true,
+    'the panel is still the create dialog for assistive technology',
+  );
+  // Only the project list is capped: a long catalogue must not push the ways in and the
+  // buttons below the fold, and everything else keeps its natural size.
   const capped = dialog.elements.filter((element) => element.props?.style?.overflowY === 'auto' && element.props?.style?.maxHeight !== undefined);
   assert.equal(capped.length, 1, 'exactly one region scrolls inside the dialog');
-  // The catalogue's directory is on screen and editable, not hidden in documentation.
-  const directory = dialog.elements.find((element) => element.props?.type === 'text');
-  assert.ok(directory !== undefined, 'a directory box is part of the dialog');
+
+  // The directory lives in the folder's own dialog now; the panel carries only the folder and its
+  // badge.
+  const folderButton = dialog.elements.find((element) => element.props?.['aria-label'] === 'Choose the project folder');
+  assert.ok(folderButton !== undefined, 'the folder stands on the panel’s top rule');
+  folderButton.props.onClick();
+  assert.equal(__internals.state.create.folderOpen, true, 'pressing it opens the folder dialog');
+  const folder = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const directory = folder.elements.find((element) => element.props?.type === 'text');
+  assert.ok(directory !== undefined, 'a directory box is part of the folder dialog');
   assert.equal(directory.props.value, '/opt/html-templates', 'showing the directory the catalogue came from');
-  // A catalogue entry reads as 项目名称（进程ID）: the human name leads and the id follows
-  // when the two differ, which is what `template=` takes.
+  assert.ok(folder.text.includes('Use this directory'), 'and a way to keep what it says');
+  __internals.state.create.folderOpen = false;
+
+  // A catalogue entry reads as the project's name plus its process id, which is what `template=`
+  // takes.
   __internals.state.templates.items = [
     { slug: 'my-page', name: '我的页面', description: '自述', bundled: false, bytes: 10 },
     { slug: 'red', name: 'red', description: '', bundled: false, bytes: 10 },
   ];
   const named = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-  assert.ok(named.text.includes('我的页面（my-page）'), 'the name leads and the id follows');
-  assert.ok(!named.text.includes('我的页面（my-page） — '), 'the description stays out of the row');
-  assert.ok(!named.text.includes('red（red）'), 'and an entry whose name is its id stays plain');
+  assert.ok(named.text.includes('我的页面'), 'the name leads');
+  assert.ok(named.text.includes('(AID: my-page)'), 'and the id follows it');
+  assert.ok(!named.text.includes('自述'), 'the description stays out of the row');
   // Every project carries a pencil that reopens the same form, prefilled, to edit it.
-  const pencils = named.elements.filter((element) => typeof element.props?.['aria-label'] === 'string' && element.props['aria-label'].startsWith('Edit this project'));
+  const pencils = named.elements.filter((element) => typeof element.props?.['data-edit-project'] === 'string');
   assert.equal(pencils.length, 2, 'one pencil per project, and none for the blank canvas');
   __internals.state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
-  pencils[0].props.onClick();
+  pencils[0].props.onClick({ stopPropagation: () => {} });
   assert.equal(__internals.state.adopt.open, true, 'the pencil opens the form');
   assert.equal(__internals.state.adopt.existing, true, 'and says it is an edit');
   assert.equal(__internals.state.adopt.slug, 'my-page');
@@ -953,22 +968,41 @@ test('the create dialog asks what to start from and where to put it', () => {
   // Picking a different project is also a statement about which project the open form is about:
   // it follows, because a save that lands on the previously opened project is exactly the failure
   // this guards against.
-  const sourceChoices = editing.elements.filter((element) => element.props?.type === 'radio' && element.props?.name === 'dsh-create-source');
-  const other = sourceChoices.find((element) => element.props?.value === 'red');
-  assert.ok(other !== undefined, 'every project has a source choice');
-  other.props.onChange();
+  const choices = editing.elements.filter((element) => typeof element.props?.['data-source'] === 'string');
+  const other = choices.find((element) => element.props['data-source'] === 'red');
+  assert.ok(other !== undefined, 'every project is a source choice');
+  other.props.onClick();
   assert.equal(__internals.state.create.source, 'red', 'the choice moves');
   assert.equal(__internals.state.adopt.slug, 'red', 'and so does the open edit form');
+
+  // The folder's badge counts what the directory holds but does not describe yet, and pressing it
+  // is the way into the add menu — the panel itself stays a list of projects.
   __internals.state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
   __internals.state.templates.candidates = [
     { kind: 'dir', name: 'my-folder', html: 2 },
     { kind: 'file', name: '我的页面.html', html: 1 },
   ];
+  const badged = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const badge = badged.elements.find((element) => element.props?.['aria-label'] === 'Projects in the folder that have not been added yet');
+  assert.ok(badge !== undefined, 'the folder carries a count of what is not a project yet');
+  assert.equal(String(badge.children?.[0] ?? ''), '2', 'and the count is the number in the folder');
+  badge.props.onClick({ stopPropagation: () => {} });
+  assert.equal(__internals.state.create.addOpen, true, 'pressing the badge opens the add menu');
   const withCandidates = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
-  assert.match(withCandidates.text, /Not projects yet \(2\)/u);
+  assert.match(withCandidates.text, /Add a project/u);
   assert.match(withCandidates.text, /my-folder/u);
   assert.match(withCandidates.text, /我的页面\.html/u);
   assert.match(withCandidates.text, /Adopt/u);
+  __internals.state.create.addOpen = false;
+
+  // With no folder chosen the badge is a plus that leads to the folder dialog instead.
+  __internals.state.templates.candidates = [];
+  __internals.state.templates.dir = undefined;
+  const first = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const plus = first.elements.find((element) => element.props?.['aria-label'] === 'Choose the folder your projects live in');
+  assert.ok(plus !== undefined, 'a first run is told where to start');
+  assert.equal(String(plus.children?.[0] ?? ''), '+', 'with a plus, not a count');
+  __internals.state.templates.dir = '/opt/html-templates';
 
   // Adopting asks for the manifest instead of writing one behind the reader's back:
   // the slug is what a template is addressed by, so it is filled in and confirmed.
@@ -1311,8 +1345,13 @@ test('the drawer keeps the project marks and only the drawer, and the manager ro
     }
     assert.equal(buttonsLabelled(dialog, '停止后台').length, 0, 'the drawer no longer ends a backend');
     assert.ok(!dialog.text.includes('只结束这个进程，不撤销授权'), 'and says nothing about a control it does not have');
-    // The pencil is the drawer's job, and every project keeps it.
-    assert.equal(buttonsLabelled(dialog, '✎').length, 3, 'every project keeps its pencil');
+    // The pencil is the drawer's job, and every project keeps it. It is an icon now, so it is
+    // found by the label it announces rather than by a glyph in its text.
+    assert.equal(
+      dialog.elements.filter((element) => typeof element.props?.['data-edit-project'] === 'string').length,
+      3,
+      'every project keeps its pencil',
+    );
     // What residency means is a tooltip: as an inline line of small print it wrapped onto a
     // second row on a phone, which made every row taller than the control it was explaining.
     assert.ok(
@@ -1453,7 +1492,7 @@ test('the manager row is a two-button program or a three-button one, and its lab
     .filter((element) => element.type === 'button')
     .map((element) => element.children[0])
     .filter((label) => typeof label === 'string' && !['Minimize', 'Maximize', 'Restart UI', 'Close backend task', 'Cancel'].includes(label));
-  assert.deepEqual(placementChoices, ['Right column', 'In the conversation', 'Floating window', 'Fullscreen', 'Background layer'], 'one choice per placement, in the create dialog’s order and words');
+  assert.deepEqual(placementChoices, ['Right column', 'In the conversation', 'Fullscreen', 'Floating window'], 'one choice per placement, in the create dialog’s order and words');
   assert.equal(buttonsLabelled(picker, 'Cancel').length, 1, 'and the question can be declined');
   assert.equal(
     picker.elements.filter((element) => element.type === 'button').some((element) => element.props.style?.borderColor === 'var(--dsw-alias-bg-accent, #247bbf)'),
@@ -1577,7 +1616,9 @@ test('the resident switch is offered only for a declared backend that may run', 
     // The pencil reopens the form on an existing project: it must start from that project's
     // effective answer, which the host reports as 跟随面板.
     state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
-    const pencil = buttonsLabelled(render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' }), '✎');
+    const pencil = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' }).elements.filter(
+      (element) => typeof element.props?.['data-edit-project'] === 'string',
+    );
     assert.equal(pencil.length, 1, 'the project row keeps its pencil');
     pencil[0].props.onClick();
     assert.equal(state.adopt.resident, false, 'the form starts from the project\u2019s effective answer');
@@ -1587,6 +1628,9 @@ test('the resident switch is offered only for a declared backend that may run', 
     // declares is 常驻, so the default follows the declaration.
     resetCreate();
     state.create.open = true;
+    // The candidates live behind the folder's badge now: the badge opens the add menu, and each
+    // row there is one 设为项目.
+    state.create.addOpen = true;
     state.templates.candidates = [{ kind: 'dir', name: 'with-server', html: 1, server: true }];
     const adopt = buttonsLabelled(render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' }), '设为项目');
     assert.equal(adopt.length, 1, 'the copied-in folder is offered');

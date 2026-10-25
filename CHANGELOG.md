@@ -2,6 +2,27 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- The create dialog is drawn in the frame it was designed from: a ruled panel, the folder standing
+  on its top rule with a badge for what the directory holds but does not describe yet, one row per
+  project carrying its icon, its process id, its process state and the pencil, and the four ways in
+  as a 2×2 of glyphs. The blank canvas keeps its row, because a folder with nothing in it still
+  has to be a way to start one.
+- A project may name its icon: `icon` in `meta.json`, either a character or one of the shipped
+  names (`notepad`, `camera`, `calculator`). A project without one is drawn with a page. The
+  artwork the dialog itself draws with travels inside the browser half, so the panel looks the
+  same on a host that predates this version.
+
+### Removed
+
+- `background` is no longer offered as a creation target in the dialog. It remains a placement the
+  tool accepts and a record still carries — the layer itself is unfinished, and what was wrong was
+  offering it in a menu that promises a usable interface. Recorded here on purpose: the next
+  reader of this file should know the placement exists, and why it has no button.
+
 ## 0.1.4
 
 ### Changed

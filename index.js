@@ -190,7 +190,11 @@ function ensureDir(path) {
 
 function readJson(path, fallback) {
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    // A byte-order mark is what an editor on this platform writes by default, and `JSON.parse`
+    // refuses it — the file then reads as "no manifest at all", so a project that was copied in
+    // with Notepad simply never appeared. Stripping it is the whole difference.
+    const text = readFileSync(path, 'utf8').replace(/^\uFEFF/u, '');
+    return JSON.parse(text);
   } catch {
     return fallback;
   }

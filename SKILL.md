@@ -173,11 +173,15 @@ reads a file, or keeps a cache in memory possible at all.
 
 ```json
 // meta.json — the declaration
-{ "slug": "weather", "name": "Weather", "backend": true }
+{ "slug": "weather", "name": "Weather", "backend": true, "icon": "camera" }
 ```
 
 `"backend": true` means `server.js`; a string names a different file inside the project
 (`"backend": "lib/server.js"`).
+
+`"icon"` is optional and only affects the create dialog's list: a character (an emoji, `"📷"`) or
+one of the shipped names — `notepad`, `camera`, `calculator`. Without it a project is drawn with a
+page.
 
 ```js
 // server.js — CommonJS, beside index.html

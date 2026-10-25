@@ -920,6 +920,15 @@ window.__ModuleLoader__.load({
         candidateDir: 'folder',
         candidateFile: 'file',
         candidateAdopt: 'Adopt',
+        createFolderTitle: 'Choose the project folder',
+        createFolderHint: 'The project list is read from this folder: every sub-folder that carries a meta.json becomes a project.',
+        createAddTitle: 'Add a project',
+        createAddHint: 'These are in the folder but carry no project manifest yet. Pick one and describe it once.',
+        createNoProjects: 'No projects yet: put one in the folder, or start from the blank canvas.',
+        createBadgeNew: 'Projects in the folder that have not been added yet',
+        createBadgePick: 'Choose the folder your projects live in',
+        createBlankPill: 'Always available',
+        createBlankPillHint: 'A new interface with nothing in it yet',
         adoptTitle: 'Project details for',
         adoptSlug: 'Process ID',
         adoptSlugHint: 'lowercase letters, digits, dot, dash, underscore',
@@ -1073,6 +1082,15 @@ window.__ModuleLoader__.load({
         candidateDir: '文件夹',
         candidateFile: '文件',
         candidateAdopt: '设为项目',
+        createFolderTitle: '选择项目目录',
+        createFolderHint: '项目列表就从这个目录读：里面的每个子文件夹只要带 meta.json，就是一个项目。',
+        createAddTitle: '添加项目',
+        createAddHint: '这些已经在目录里，但还没有项目档案。选一个，填一次资料即可成为项目。',
+        createNoProjects: '还没有项目：往目录里放一个，或者从空白画布开始。',
+        createBadgeNew: '目录里还有尚未添加的项目',
+        createBadgePick: '选择存放项目的文件夹',
+        createBlankPill: '始终可用',
+        createBlankPillHint: '一个还没有任何内容的新界面',
         adoptTitle: '补全项目信息：',
         adoptSlug: '进程ID',
         adoptSlugHint: '仅支持小写英文数字或._-',
@@ -1121,10 +1139,10 @@ window.__ModuleLoader__.load({
         adopted: '已成为项目。',
         edited: '已保存。',
         createPlacement: '生成位置',
-        placementDockRight: '右侧栏',
-        placementInline: '对话流内',
-        placementFloat: '浮动窗',
-        placementFullscreen: '全屏',
+        placementDockRight: '右侧折叠栏',
+        placementInline: '上下文对话内',
+        placementFloat: '浮动拖拽窗口',
+        placementFullscreen: '全屏覆盖会话',
         placementBackground: '背景层',
         placementBackgroundHint: '全屏常驻：切到任何视图它都在屏幕上，为保持界面可读固定为 25% 不透明度；用完请到「HTML管理器」里关闭它。',
         cancel: '取消',
@@ -4838,15 +4856,6 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** The placements the create dialog offers, with the label each one shows. */
-    const CREATE_PLACEMENTS = [
-      { value: 'dock-right', key: 'placementDockRight', fallback: 'Right column' },
-      { value: 'inline', key: 'placementInline', fallback: 'In the conversation' },
-      { value: 'float', key: 'placementFloat', fallback: 'Floating window' },
-      { value: 'fullscreen', key: 'placementFullscreen', fallback: 'Fullscreen' },
-      { value: 'background', key: 'placementBackground', fallback: 'Background layer' },
-    ];
-
     /**
      * The security levels a project can carry, in the order they are offered.
      *
@@ -4907,6 +4916,311 @@ window.__ModuleLoader__.load({
       return name === slug ? name : `${name}（${slug}）`;
     }
 
+
+    // ------------------------------------------------------------ create dialog
+
+    /**
+     * The black-and-white frame the create dialog is drawn in.
+     *
+     * The plugin's other surfaces follow the shell's own tokens; this one deliberately does not.
+     * It is the panel a reader opens to *start* something, and the wireframe it was designed from
+     * is monochrome: black rules, white paper, grey chips, one green for a process that is alive.
+     */
+    const BW = {
+      ink: '#111111',
+      muted: '#6f6f6f',
+      line: '1.5px solid #111111',
+      none: '1.5px solid transparent',
+      chip: '#c7c7c7',
+      green: '#12a150',
+    };
+
+    /**
+     * A sub-dialog's title.
+     *
+     * Those panels are narrower than the main one and scroll inside themselves, so they carry a
+     * title line instead of the legend-on-the-rule the two main boxes use — at their size a legend
+     * would sit under the pointer rather than above the content it names.
+     */
+    const subTitleStyle = { fontSize: '16px', fontWeight: 700, color: BW.ink, margin: '2px 0 10px' };
+
+    /** The dialog's field shape, shared by every input it draws. */
+    const bwFieldStyle = {
+      boxSizing: 'border-box',
+      width: '100%',
+      font: 'inherit',
+      fontSize: SHEET_FIELD_FONT,
+      padding: '7px 10px',
+      borderRadius: '8px',
+      border: BW.line,
+      background: '#ffffff',
+      color: BW.ink,
+    };
+
+    /** One button of the dialog's footer: filled for the act, outlined for leaving. */
+    function bwButtonStyle(primary, narrow) {
+      return {
+        font: 'inherit',
+        fontSize: narrow ? MOBILE.buttonFont : '14px',
+        lineHeight: 1.2,
+        height: narrow ? MOBILE.buttonHeight : '36px',
+        padding: narrow ? '0 16px' : '0 22px',
+        borderRadius: '8px',
+        border: BW.line,
+        background: primary === true ? BW.ink : '#ffffff',
+        color: primary === true ? '#ffffff' : BW.ink,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      };
+    }
+
+    /**
+     * The create dialog's artwork, inlined.
+     *
+     * The browser half is one module, and these nine images are the ones the panel is drawn with.
+     * Inlining them keeps the panel identical on a host that predates the asset route, and keeps
+     * the dialog in one file: `assets/icons/*.png` in the repository is the source these were
+     * encoded from.
+     */
+    const ICONS = {
+      calculator: 'data:image/png;base64,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',
+      camera: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAapQTFRFAAAAU8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3U8T3UsT3UcP3WMX3Xsf3Zcr3Xcf3YMj3htT4suL4zOr42O754/L51+75s+P4X8j3nNv41u759fj5/Pr5+/r5+vn51e75mtv4Xsf2Xcb2e9H3z+z5+Pn5+fn5+vr5etH3itHxyuDryeDrhdDykNf46PT59/j57/P55u348PP5+/v55/P5jdb46ejo7vX5sMr3gq32bqH1YJj1g672scv35+757fX5yODrfNH36PP59Pb5s8z3Z5z1R4j0RIb0RYb0RYf0SIn0aZ31ts73eND3gs/yz+z47vL5kbf2S4v0TIv0k7j27/L5y+r4ndv4krf2Roj0lLn2ldn4uND31e35h9X4aJ31hNT4UMP3r8r3/Pv5qd/4zOv4h7H2bqD1baD15+344vL5iLL2s+L4ssz3udH3p9/49Pj56O75aZ71ap715+749Pf5gtP4ts/3TYz0u9H31O35SIj0mbz29fb5etD35vP55fP5ds/3jNb4udD37PX5idX4d9D3g9P4////QaPRIwAAAA50Uk5TAAAEGx8exuLhHTnk4Pus2SCUAAAAAWJLR0SNGwzi1QAAAAlwSFlzAAACdgAAAnYB2mDjTwAAArlJREFUWMPtlu1XEkEUxlV8R5kF1ATcZGdUkpkSDReVEiwtdGHpXZRSMTXNTCstrdQ0s7L+6AZBXF62Ge34oXN4vsAu3N+5c+fOc6ekpKiiLkKlZYbyioIqN5SV8gAMlVXVBVVVaeACVFSbdFRdUQRcIEC79zW1Rj2AsbZGpye0e19nrNfEAKrMQ72xTqcnCqcNBGC2WK0NZvqFsZxCACA0Nl1qttntjuaWJlGDSKXEBAji5VanJEGEoCQ529pF4eSXDhcPAFzpdEOMMSIE0Q/o7ryazuFal6ebA9BznYYT6O2VZZ+3j1BE/8AxuKPL7/d0AAYA9NyAGEH55mAgGAwM3boNEYbDAzQH4PL4/SMuBkC4cxdiEhodU8IRVY2Eo/fuhwjN4UGyDt2ekYeMJQDxEY1//GRcVdJSYxOTlBAXAVcRhadujELPlCkloyllOoSwe0bg2UbQ2AoxHB3XxFNCLEFfzjZm2uEvAOG5ExN5TFWypM7JBDvnFzgAoEXC8IWSq2hiEcMlngzMLyXsHQznAsLLXizFzWwAsNgg6n2l5gIiK70I2iyADbDaEZGDeQA1KBNkt/4L4DVBqzyABgdEvkAkbwkBH4KOBjbAZG6mRRzKL+IaZxFN4I2E+95G87bxHd3Gda5GatrA5P2H3Eba3CL44yeuRhLbaNd+jmW38vYOfbkr8mRgEtrdGIcmsg7Tl719nD5MbEDqOE9Ox06P8/aeL3Oc2QCT8PUgaSiJuWjaUDZ39mn8t8PTBFiW9n342NISyyvU0tZ+bFGDhD+PtNOBZaoD/UlTXUyZ6mLSVA+Osv7AtPVf8Wxbjx+CMwHoYJmZdcLUYIEbuzOiYDobIDna5pfiNvuqI77+W8ybjmwARSycDNeF8wzXNEQ73s8D0FUOQPdyqafcC4bu9VZPnNfeoor6f/QHFPj0Q7cy8AoAAAAldEVYdGRhdGU6Y3JlYXRlADIwMTctMDQtMTlUMTI6NTM6MjgrMDI6MDAQ5WsdAAAAJXRFWHRkYXRlOm1vZGlmeQAyMDE3LTA0LTE5VDEyOjUzOjI4KzAyOjAwYbjToQAAAEZ0RVh0c29mdHdhcmUASW1hZ2VNYWdpY2sgNi43LjgtOSAyMDE2LTA2LTE2IFExNiBodHRwOi8vd3d3LmltYWdlbWFnaWNrLm9yZ+a/NLYAAAAYdEVYdFRodW1iOjpEb2N1bWVudDo6UGFnZXMAMaf/uy8AAAAYdEVYdFRodW1iOjpJbWFnZTo6aGVpZ2h0ADUxMsDQUFEAAAAXdEVYdFRodW1iOjpJbWFnZTo6V2lkdGgANTEyHHwD3AAAABl0RVh0VGh1bWI6Ok1pbWV0eXBlAGltYWdlL3BuZz+yVk4AAAAXdEVYdFRodW1iOjpNVGltZQAxNDkyNTk5MjA4iaO98wAAABF0RVh0VGh1bWI6OlNpemUAMTFLQkJj1TdgAAAAfHRFWHRUaHVtYjo6VVJJAGZpbGU6Ly8uL3VwbG9hZHMvY2FybG9zcHJldmkvTVNGNjZQQi8xMjIyLzE0OTI2MTY5ODctMjktY2FtZXJhLWNhbS1waWN0dXJlLXBob3RvLWNhcHR1cmUtZGlnaXRhbC1nb29nbGVfODM0MTAucG5nxct1SgAAAABJRU5ErkJggg==',
+      'dock-right': 'data:image/png;base64,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',
+      float: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAARRQTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////SKzSWAAAAFp0Uk5TAAMVHhQWjtPh0o0C/ogB++TgOR3Z+Ac4QAgJDXe8wL0Pffx7yM4SGdj29+xcPT8+VujmJvnJv8fnLgbihJeWlaPz2xqu/TYMamlZHxPQGKChBCm19PW4KBE7H7eRVQAAAAFiS0dEW3S8lTQAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAFHSURBVFjD7dZ3T4NAHIDhA7SCVkYZLVq1jmLVOqt1U/feu/f9P4hWjQnej9xAEyW8/5AQeELuOA6EUpgkK4x1SdD93bkelTGtVybv78th9vL9OgHIGgeANfIRFBVjw7Toz2+ZBsaqAgJmwaaPoF0wYwHgNFDMlRmAkO24rmMnALxiqVT0EgDs/SSg+wNs+ToIDJaHhtkaKVcgYNRgXn1j4wBQmeBYv9WABCZrb18Gd4redB5jSwEAB+OZ+uwcrfmFxci8RYClBv/Epw1IPIjM0xgHMPdrwPJKk7qSmqtuPLC2vkFdy15j8y+/Bxnw74BgazsMw9bOrijQOX62t58QOPATAYfVIyQCHNdPTt87O0dCwPcyIDWAyFc5AojsC19dXHLsTLUrEpCuOYCbW2Bw7u4fGPbmTo9Pz+DwvrSpPwcftQOUxl4Bobk8ZA0+nbIAAAAldEVYdGRhdGU6Y3JlYXRlADIwMjAtMDUtMjZUMTk6MDU6NDQrMDE6MDCBsX89AAAAJXRFWHRkYXRlOm1vZGlmeQAyMDIwLTA1LTI2VDE5OjA1OjQ0KzAxOjAw8OzHgQAAAEZ0RVh0c29mdHdhcmUASW1hZ2VNYWdpY2sgNi43LjgtOSAyMDE5LTAyLTAxIFExNiBodHRwOi8vd3d3LmltYWdlbWFnaWNrLm9yZ0F74sgAAAAYdEVYdFRodW1iOjpEb2N1bWVudDo6UGFnZXMAMaf/uy8AAAAYdEVYdFRodW1iOjpJbWFnZTo6aGVpZ2h0ADUxMsDQUFEAAAAXdEVYdFRodW1iOjpJbWFnZTo6V2lkdGgANTEyHHwD3AAAABl0RVh0VGh1bWI6Ok1pbWV0eXBlAGltYWdlL3BuZz+yVk4AAAAXdEVYdFRodW1iOjpNVGltZQAxNTkwNTE2MzQ0DUwAFgAAABN0RVh0VGh1bWI6OlNpemUAMy44NktCQvblhYUAAABKdEVYdFRodW1iOjpVUkkAZmlsZTovLy4vdXBsb2Fkcy81Ni9vQXVVbWo1LzIzODUvd2luZG93X3Jlc3RvcmVfaWNvbl8xNDQwMjcucG5nh5OUTgAAAABJRU5ErkJggg==',
+      folder: 'data:image/png;base64,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',
+      fullscreen: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABABAMAAABYR2ztAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAACFQTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////bW9u0wAAAAl0Uk5TAAECaqek36UE0/iVRgAAAAFiS0dECmjQ9FYAAAAJcEhZcwABOvYAATr2ATqxVzoAAABnSURBVEjHY2AYBYMMMCqBgQA6Gw6EXUOBIMQQnQ0HqjPBIAidTWcF6ciOLMOioALZm+1YFATh4w8NBcKuqJGDzgf5XQAffxRAAcGAIhjUgyE9UEUBwYxDMOsNePlAsBAjWAyOgkEAAIx1jun7jgK3AAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDE4LTAzLTA4VDEwOjAyOjM1KzAxOjAw7o4eQwAAACV0RVh0ZGF0ZTptb2RpZnkAMjAxOC0wMy0wOFQxMDowMjozNSswMTowMJ/Tpv8AAABGdEVYdHNvZnR3YXJlAEltYWdlTWFnaWNrIDYuNy44LTkgMjAxNi0wNi0xNiBRMTYgaHR0cDovL3d3dy5pbWFnZW1hZ2ljay5vcmfmvzS2AAAAGHRFWHRUaHVtYjo6RG9jdW1lbnQ6OlBhZ2VzADGn/7svAAAAGHRFWHRUaHVtYjo6SW1hZ2U6OmhlaWdodAA1MTLA0FBRAAAAF3RFWHRUaHVtYjo6SW1hZ2U6OldpZHRoADUxMhx8A9wAAAAZdEVYdFRodW1iOjpNaW1ldHlwZQBpbWFnZS9wbmc/slZOAAAAF3RFWHRUaHVtYjo6TVRpbWUAMTUyMDQ5OTc1NZp8PXkAAAATdEVYdFRodW1iOjpTaXplADEuODVLQkJzzztCAAAAQXRFWHRUaHVtYjo6VVJJAGZpbGU6Ly8uL3VwbG9hZHMvNTYvVUpnelpYRi8xMzY5Ly1mdWxsc2NyZWVuXzg5ODIyLnBuZ90gZoAAAAAASUVORK5CYII=',
+      inline: 'data:image/png;base64,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/P8CzVYhza0+bmR+Gt8r4vJ3ipuY499Ni+c8y7iLre14NnsBurKO5Hlt7C7iIi5iIP4Ps3J17pbhfFsAAAAldEVYdGRhdGU6Y3JlYXRlADIwMTktMDEtMDJUMTU6NDg6MDkrMDE6MDCKWvuRAAAAJXRFWHRkYXRlOm1vZGlmeQAyMDE5LTAxLTAyVDE1OjQ4OjA5KzAxOjAw+wdDLQAAAEZ0RVh0c29mdHdhcmUASW1hZ2VNYWdpY2sgNi43LjgtOSAyMDE2LTA2LTE2IFExNiBodHRwOi8vd3d3LmltYWdlbWFnaWNrLm9yZ+a/NLYAAAAYdEVYdFRodW1iOjpEb2N1bWVudDo6UGFnZXMAMaf/uy8AAAAYdEVYdFRodW1iOjpJbWFnZTo6aGVpZ2h0ADUxMsDQUFEAAAAXdEVYdFRodW1iOjpJbWFnZTo6V2lkdGgANTEyHHwD3AAAABl0RVh0VGh1bWI6Ok1pbWV0eXBlAGltYWdlL3BuZz+yVk4AAAAXdEVYdFRodW1iOjpNVGltZQAxNTQ2NDQwNDg5BAUGwAAAABN0RVh0VGh1bWI6OlNpemUAMjEuNEtCQue7lNYAAABjdEVYdFRodW1iOjpVUkkAZmlsZTovLy4vdXBsb2Fkcy81Ni9XVzJXUEpiLzE3NDQvMzY0MzcyOC1iYWxsb29uLWNoYXQtY29udmVyc2F0aW9uLXNwZWFrLXdvcmRfMTEzNDEzLnBuZ1GHcY0AAAAASUVORK5CYII=',
+      notepad: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAOxAAADsQBlSsOGwAABzhJREFUeJztm21sU+cVx3/n2o5jJyE4JWQhTXCo2nWDErZOBdMyUaG1UstUhDQ+pGLrxrYPmzYttGo0qRKaVjH4gMo0Nk2bQEUrlsaoNrS2UkWRpiENbUJM1TpEJVghCagkJH5J/HL9cp99SBxi+ybXsc11HPX/7Z57nnvO/+/n5dznPhbKgFJKfh0M/gKD76MB8Lsf9vf/VERUoe+RN9/scjudx0G2C9zMKmP/j/fufdfsucdOnXpOFG8oWAvyNz2T2vfySy/dqiS+FbTFNgA49lZwnyCDoolPEJ8gg8feCu4z83U7XSdEtGdFxI3II5pofzoaDHYU+h0NBjtQnEHkERFxi/Cs2+k6UWl8K5QlgCZqe7FNimwzyLOLiMdpGFsKnZyGsUVEPAu1LTP+gihLABBXsU2Z2EBEGoo8S7SZtV1sfCuUKcDygZTqePr0aYevo3uXoHYMjX36fEJP9sy973W7h7tXr7lY2O7j4U/2FNpWr2y76GtpHZ5rC01GukfDE4FC3893954utA2P3g7Edb17rs3jbhzqaf/cuwo5H7oz/Jc9e/ZkS+FVkgDnLlxYp+F8G9gEcOvuKJPxWJ5Pi8dLV3vR3MbVoU+KbGseaGdFU3OeLRqPcfvuaJHvoz29RTar+EqpD5Vkd39t27b/WVCzHgLnLl1qFeX4gBny9QAR6RMcH5y7dKnVytd6DoilXxWR4p9hiUOQXi2RftXKz1IATVPfqE5KtYB17k7LRyC9hRNFOpUimUjk2Rqd5qtQoR+AYRjFtmzW1NcMpcZXWPdcSwHExEcMRTQczrP5mlpM22d0nXhBsq5uf5Gfy+EseqbXU1gXLS6+We6FKKsO6OrspGXOLN7S1ExXZ6ep78O9D+FwOGave9Y8SJPXW+TX5PXSs+bB2WuHw8HD/ocqjm8Fy2Xw/IWLpi8YSinC0QgAK1e0IjL/o9LpNJGpSTzuRlPycxGLx0noSVqbW3C55i/uSo2/Y1tgQY6WXWQ+iAi+1pUl+bpcLlb52krybfJ6LUVabPwFn2PlMF8PWMpQShGJTRGNTxFPJK4Ziing72mNX+5/8cW84mjZCZA1soyM3SGh60X3lFJxPZn65svf/fbbOduyehnKGlmGRz81JQ+g67o3Gp449dqRI30527IRQNM0xqMRkqmU6f1kMkk0FAJwa4b62Ww7m/K7r9A0jXX+HgKPfxlvY2PR/Tnkc3jmwIEDGiwDAbRMnN6GCZqavDR7vTwdCOSJYEIeEfEkPZ4WqHMBtEycnsuHaXhvP8aN6a2IuSKYkQdQSk0dHhyMQh0LkCPviVyDrE7m7ECeCI+v30AqPs+7hfAOMzvIdSlAHvkcsjqZsz/BuHGRSCTK3bFxNn5hPe4Gd94yrgwVEziQu664DjDb8bmfcBpJnhw5SVti2PR+Kp5hZNMA+trpjeeknlQfXvkvekoXpVRSCbt+/sor7+f866oHWJKPxpi8McSKvw7SMDMcGt2N0vfF9bjd7kQheahCD7g1dqd0BhVAyybYdO2385LXozGmRu7lohwNRHYeIuUPgFJ61jB2P7P9qfcK29VFKWw65uegkHwOytFA5PmDemrdk7t3PBUoIg91IEC55AGUw4UgX3/sj6l35n1+ddK8P6iUfGTnIRYiD0tYgGqQT/m3WsepKMv7BLvIQwU7QjlUuw7ILXWeEmf7uVgseVhiPcBqna82eahCD2jxWO/flYLpdd5e8lAFAcw+iC4W02P+N7Z1+7zYZbWqIuyc8Ezjl92yCqg1eaihAEuBPNRIgKVCHmpQB1SyzhuakyubB5jQOmEmrtkJksXA1h7gdDr5aq+PtpQ5QUvyW/Yz0VHdgyq21QGaw8FXNj7GKp8Po/kNMmcHIHtvD9+q2w8//Rrp1X2Yf4QvH7bVAQ+0+Vjl8wGg+bfifOGeCKWMeY9/K12VJmsC+4ZAwc5DToRUPG3bhGcG2wS4fmOEdDqTZ5v0bWBk0wDKYXK8xQbyYKMAH129zutHj8+KEIlEuTk0gr42QGTnoTwR7CIPNq8C/7z8Ea8fPc7d8RA3h0bI7bWl/FtnRbCTPNhYB4yGJgD4x7/+zdjoHb7TvwuX8174aREOA8o28mBjDxCBbCZNWk9w5ePrnDj1ZzKZ/Dkh5Q/YSh5srAO6Otrpe7QXxfQRFoDL/7nKE1/aUGkKFcG2OqCrvYMnNq6vNFzVUfP9gFrjMwFqnUCt8ZkAVg5mJ7vrBaXkbilAMm1+7KweUErulgKEJ6M1/zxeLkrJ3VKASDwWjsamqpORjYjGpojEY2ErP0sBBHX+9vgYY+FQXcwHhmEwFg5xe3wMQZ238rf+x4jIQUPxwng07JqYjOBpcOPQtOnifilBKbKGQSKlo5RCQVoTOWjVrCQWv/pD8Fui8XuBsv6eajcUpDWD7/1gb/9JK9+S6oAf7e0/qQmbQZ1REJp9m1lKUEopCIGc0YTNpZAH+D/KbLeLLJbpRwAAAABJRU5ErkJggg==',
+      pencil: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAdpQTFRFAAAAAAAEAQABAQACAAABAAACAgACAQAFAQAAAQADAgADAwABCgAAAQACAQACAAACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQABAQACAQACAQACAQACAAACAQACAQACAQACAQACAQADAQACAQACAQACAQACAQACAQACAQADAQACAQACAQACAQACAQACAQACAQACAQACAQABAQACAQACAQACAQACAQACAQACAQABAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQABAQACAQACAQACAQACAQACAQACAQACAQACAQACAQABAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQADAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQACAQABAQACAQACAQACAQACAQADAQACAQACAQACAQACAQACAQACAQAC////XJntZgAAAJx0Uk5TAAAAAAAAAAAAAAAAABUNAUCDhDAjuJMDY+b+Xbv7kgt98Zn5JbD90mxpZ476kTrLswY/9hO2Ak/b2TEJigVt691DC4mQD4bz+OBHDJwZo0oihwp7MypF8mvcAQTRwgu0yS847oLKmp4DLkx4O9XU7D31dgcG4zZ1BsPOetcpc7muXCBTGJQ+DsQ3741J4TwRAVIkj3ABAseVllkXwa8F5gAAAAFiS0dEnQa78rEAAAAJcEhZcwABKCUAASglAevtVZ4AAAJ1SURBVFjD7db5U9NAFMDxNM96F0FFsLRylGKVKErxQA0eCPVArHiUQ/HE+wBE6g3eByreou4f6ybZpm2yyb51xhln9P3E7OT7KdlktlWU//NbE1BDJeBehkWlZYt9pmwJiwKwtHyZW4CKyuXEb8JVkOsjJLrCKUB1TS3BAGZPXAKE6mIEA7DeIQDUxxvYdSsTq1yzulFjgN1TYY0twKy1TfYHrVuvuve3OckAaNlgX2kLsHHTZiIGWrcYwNZtMacAett2IgZ27AzONv7c1V4g7O6gKx2dKSIE9uzdN0eF+sr9UCRoXQoc6I4SIVDaenDuPEhHtEM9RULtYeVIeZiIgaPH6JNK0/2PUUHtyQmZXl3pcz5uLtDfb/WWANWWkEkMgEIwgPH80+z55/8Hs0cCrD9ec4IJg+2a1buBkxyA9adOw5mzubs412v2JjB0vsueC20XVa/+EsDlVG4f9ArrNTSAK5zTgd9fvcb2YdBOxEBhf53d541hPMDrR0ZvogF+P5YvBICwFwDi3h9A9L4ApvcDUL0PgOu9AWTvCWB7LwDdewD4ng9I9FxApucCMj0PgPmNdPHWuH1+0D572+t15wEld+ji3VBBP+rZc4FxenISrfve/YLPp/vyALuJ8LD4nDbun/YTVUgABiZ5fST8CAs87uP1BA880Ry9Ak8nCGlAArDgmbNX4HlSAnjxMt+nsub7Y/7EQQOvXltxODM09cY6/+WArLEUfTuZeDf9nn1NygCgx0mqaerDx7GFwfyiDNDy6fPw9BfHqyUDfNUDQedFUnvAm78f+Dbz3X9m4lFfADd/CkiiZ+QHF2jGz0/RXv+r8ws47fJ/RXeXlgAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAxOS0wMy0zMFQwODo1Nzo0MyswMDowMFj0sBMAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMTktMDMtMzBUMDg6NTc6NDMrMDA6MDApqQivAAAARnRFWHRzb2Z0d2FyZQBJbWFnZU1hZ2ljayA2LjcuOC05IDIwMTktMDItMDEgUTE2IGh0dHA6Ly93d3cuaW1hZ2VtYWdpY2sub3JnQXviyAAAABh0RVh0VGh1bWI6OkRvY3VtZW50OjpQYWdlcwAxp/+7LwAAABh0RVh0VGh1bWI6OkltYWdlOjpoZWlnaHQANTEywNBQUQAAABd0RVh0VGh1bWI6OkltYWdlOjpXaWR0aAA1MTIcfAPcAAAAGXRFWHRUaHVtYjo6TWltZXR5cGUAaW1hZ2UvcG5nP7JWTgAAABd0RVh0VGh1bWI6Ok1UaW1lADE1NTM5MzYyNjPLmQHJAAAAE3RFWHRUaHVtYjo6U2l6ZQA4LjM4S0JCY+2XXQAAAEV0RVh0VGh1bWI6OlVSSQBmaWxlOi8vLi91cGxvYWRzLzU2L1JpNkJCUXovMTg2Mi9zaGVldGFuZHBlbmNpbF8xMTgzNjEucG5nUGHjrwAAAABJRU5ErkJggg==',
+    };
+
+    /**
+     * One asset the dialog draws with: the wireframe's own artwork.
+     *
+     * The folder, the pencil and the four ways in are line art that cannot be reproduced from a
+     * font, and drawing them again as SVG would only approximate the files the panel was designed
+     * from. They travel with this module.
+     */
+    function assetIcon(name, size, extra) {
+      return h('img', {
+        src: ICONS[name] ?? '',
+        alt: '',
+        width: size,
+        height: size,
+        draggable: 'false',
+        style: Object.assign({ width: `${size}px`, height: `${size}px`, objectFit: 'contain', flex: '0 0 auto', display: 'block' }, extra ?? {}),
+      });
+    }
+    /** Project icons the plugin ships, which a manifest may name instead of carrying a file. */
+    const NAMED_PROJECT_ICONS = ['notepad', 'camera', 'calculator'];
+
+    /** The placements the create dialog offers, in the order the wireframe lays them out. */
+    const CREATE_PLACEMENTS = [
+      { value: 'dock-right', key: 'placementDockRight', fallback: 'Right column' },
+      { value: 'inline', key: 'placementInline', fallback: 'In the conversation' },
+      { value: 'fullscreen', key: 'placementFullscreen', fallback: 'Fullscreen' },
+      { value: 'float', key: 'placementFloat', fallback: 'Floating window' },
+    ];
+
+    /**
+     * The glyph a project is recognised by.
+     *
+     * `meta.json` may carry `icon`: an emoji, or a path to a small image beside the project, which
+     * the host reads and hands over as a data URL (a document cannot fetch its own folder). A
+     * project without one gets a page, and the blank canvas gets a plus — the same two shapes the
+     * rest of the dialog uses.
+     */
+    function projectGlyph(template, size) {
+      const source = typeof template.iconSrc === 'string' ? template.iconSrc : '';
+      if (source.length > 0) {
+        return h('img', {
+          src: source,
+          alt: '',
+          style: { width: `${size}px`, height: `${size}px`, objectFit: 'contain', flex: '0 0 auto', borderRadius: '6px' },
+        });
+      }
+      const named = typeof template.icon === 'string' ? template.icon.trim() : '';
+      if (NAMED_PROJECT_ICONS.includes(named)) return assetIcon(named, size);
+      const blank = template.slug === 'blank';
+      const emoji = named.length > 0 ? named : blank ? '+' : '📄';
+      return h(
+        'span',
+        {
+          style: {
+            width: `${size}px`,
+            height: `${size}px`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            // The plus is drawn, not emoji: a heavy cross in the same weight as the project icons
+            // reads as another project rather than as the way to start one.
+            fontSize: blank ? `${Math.round(size * 0.92)}px` : `${Math.round(size * 0.72)}px`,
+            fontWeight: blank ? 300 : 400,
+            lineHeight: 1,
+            flex: '0 0 auto',
+            border: blank ? `1.5px dashed ${BW.ink}` : 'none',
+            borderRadius: '8px',
+          },
+        },
+        emoji,
+      );
+    }
+
+    /** A pill: the process that is alive, and the chips that say how it will live. */
+    function bwPill(text, background, title) {
+      return h(
+        'span',
+        {
+          title,
+          style: {
+            fontSize: '12px',
+            lineHeight: '18px',
+            padding: '0 9px',
+            borderRadius: '999px',
+            background,
+            color: '#ffffff',
+            whiteSpace: 'nowrap',
+          },
+        },
+        text,
+      );
+    }
+
+    /**
+     * One project row: what it is, whether its backend is alive, how it lives, and its pencil.
+     *
+     * The row is the source choice — a reader picks a project by pressing it, the way the
+     * wireframe draws it — so the radio it replaced is gone and the state it set is now set by the
+     * row itself.
+     */
+    function createProjectRow(props) {
+      const { template, selected, onPick, onEdit, narrow } = props;
+      const backend = backendInfoOf(template);
+      const declared = backend !== undefined && backend.declared === true;
+      const running = backend !== undefined && backend.loaded === true;
+      const name = template.slug === 'blank' ? tr('newBlank', 'Blank canvas') : typeof template.name === 'string' && template.name.length > 0 ? template.name : template.slug;
+      const chips = [];
+      if (declared === true) {
+        chips.push(['allowed', backend.allowed === true ? tr('backendAllowed', 'Allowed') : tr('backendDenied', 'Not allowed'), '']);
+        chips.push([
+          'resident',
+          backend.resident === true ? tr('backendResident', 'Resident') : tr('backendFollow', 'Follows the panel'),
+          backend.resident === true ? tr('backendResidentHint', 'Stays up after the panel closes') : tr('backendFollowHint', 'Unloads a while after the panel closes'),
+        ]);
+        chips.push(['loaded', backend.loaded === true ? tr('backendLoaded', 'Loaded') : tr('backendIdle', 'Not loaded'), '']);
+      }
+      const pencilTitle = tr('editProject', 'Edit this project’s details');
+      // Built once: on a wide row these sit in the right-hand column, under the pencil; on a
+      // phone they follow the state pill inside the text column.
+      const chipsNode =
+        chips.length === 0
+          ? null
+          : h(
+              'div',
+              { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+              ...chips.map(([key, label, hint]) =>
+                h(
+                  'span',
+                  {
+                    key,
+                    title: hint.length > 0 ? hint : undefined,
+                    style: { fontSize: '11.5px', lineHeight: '17px', padding: '0 8px', borderRadius: '999px', background: BW.chip, color: '#ffffff', whiteSpace: 'nowrap' },
+                  },
+                  label,
+                ),
+              ),
+            );
+      return h(
+        'div',
+        {
+          key: template.slug,
+          'data-source': template.slug,
+          role: 'button',
+          tabIndex: 0,
+          'aria-pressed': selected === true,
+          onClick: () => onPick(template),
+          onKeyDown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onPick(template);
+          },
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: narrow ? '10px' : '14px',
+            padding: narrow ? '8px 10px' : '10px 12px',
+            margin: '4px 2px',
+            border: selected === true ? BW.line : BW.none,
+            borderRadius: '10px',
+            cursor: 'pointer',
+            background: '#ffffff',
+          },
+        },
+        projectGlyph(template, narrow ? 40 : 50),
+        h(
+          'div',
+          { style: { flex: '1 1 auto', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '5px' } },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' } },
+            h('span', { style: { fontSize: narrow ? '15px' : '18px', fontWeight: 600, color: BW.ink, wordBreak: 'break-word' } }, name),
+            h(
+              'span',
+              { style: { fontSize: '12.5px', color: BW.muted, fontFamily: 'ui-monospace, Consolas, monospace', whiteSpace: 'nowrap' } },
+              `(AID: ${template.slug})`,
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
+            template.slug === 'blank'
+              ? bwPill(tr('createBlankPill', 'Always available'), BW.chip, tr('createBlankPillHint', 'A new interface with nothing in it yet'))
+              : bwPill(
+                  running ? tr('backendPillRunning', 'Running') : tr('backendPillIdle', 'Not running'),
+                  running ? BW.green : BW.chip,
+                  running
+                    ? tr('backendPillRunningHint', 'Its backend is loaded in the host process right now')
+                    : tr('backendPillIdleHint', 'Nothing is loaded until one of its interfaces calls it'),
+                ),
+            // On a phone the row is too narrow for a second column of chips; they belong under
+            // the state they describe, where the eye already is.
+            narrow === true ? chipsNode : null,
+          ),
+        ),
+        h(
+          'div',
+          { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flex: '0 0 auto' } },
+          // The blank canvas is not a project on disk, so there is no manifest to open on it.
+          template.slug === 'blank'
+            ? null
+            : h(
+            'button',
+            {
+              type: 'button',
+              // A language-independent handle: the pencil is an icon, so neither its text nor its
+              // label reads the same in two locales.
+              'data-edit-project': template.slug,
+              title: pencilTitle,
+              'aria-label': `${pencilTitle}: ${name}`,
+              onClick: (event) => {
+                // The pencil is inside the row, and the row is a source choice: editing a project
+                // must not silently also pick it in place of the one the reader was on.
+                event?.stopPropagation?.();
+                onEdit(template);
+              },
+              style: { padding: '2px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex' },
+            },
+            assetIcon('pencil', narrow ? 20 : 22),
+          ),
+          chips.length === 0
+            ? null
+            : narrow === true
+              ? null
+              : chipsNode,
+        ),
+      );
+    }
+
     /**
      * Open the manifest form on one existing project.
      *
@@ -4945,28 +5259,178 @@ window.__ModuleLoader__.load({
      * Everything here happens without the model — the source is either the blank canvas
      * or a saved template, and the placement is passed straight to the host route that
      * renders it.
+     *
+     * The frame is the wireframe it was designed from: one black rule around the panel, a list of
+     * projects drawn as rows, the four ways in, and the folder that sets where the list comes from.
+     * The folder's badge is the one live thing up there: red with a count when the directory holds
+     * things that are not projects yet, a plus when no directory has been chosen at all.
      */
     function HtmlUiCreateDialog(props) {
       useStore();
       const sessionId = resolveSessionId(props);
       if (state.create.open !== true) return null;
-      const items = state.templates.items;
-      const radio = (group, value, label, checked, onPick) =>
-        h(
-          'label',
-          { style: createOptionStyle },
-          h('input', { type: 'radio', name: group, value, checked, onChange: onPick }),
-          h('span', null, label),
-        );
+      const items = Array.isArray(state.templates.items) ? state.templates.items : [];
+      // The blank canvas is the way in for a reader whose folder is empty, and the host always
+      // lists it first. This keeps that promise when a catalogue arrives without it, so the panel
+      // never presents a list with no way to start anything.
+      const catalogue = items.some((template) => template.slug === 'blank')
+        ? items
+        : [{ slug: 'blank', name: tr('newBlank', 'Blank canvas') }, ...items];
+      const candidates = Array.isArray(state.templates.candidates) ? state.templates.candidates : [];
+      const narrow = narrowViewport();
+      const dir = state.templates.dir;
+      const adoptOpen = state.adopt !== undefined && state.adopt.open === true;
+
       const close = () => {
         state.create.open = false;
+        state.create.folderOpen = false;
+        state.create.addOpen = false;
         bump();
       };
-      const candidates = Array.isArray(state.templates.candidates) ? state.templates.candidates : [];
-      // The manifest form is shared by adopting and editing, so the container that holds
-      // it has to open for either — an edit has no candidates to show.
-      const adoptOpen = state.adopt !== undefined && state.adopt.open === true;
-      const narrow = narrowViewport();
+
+      /** The one input the folder's dialog owns; the panel above it only shows the badge. */
+      const openFolder = () => {
+        state.create.folderOpen = true;
+        state.create.dirInput = typeof dir === 'string' ? dir : '';
+        bump();
+      };
+
+      /** Start the manifest form on something the directory holds but does not describe yet. */
+      const startAdopt = (candidate) => {
+        const stem = String(candidate.name).replace(/\.html?$/iu, '');
+        state.create.addOpen = false;
+        state.adopt = {
+          open: true,
+          existing: false,
+          source: candidate.name,
+          slug: slugifyClient(stem),
+          name: stem,
+          description: '',
+          placement: 'dock-right',
+          security: 'strict',
+          // Off until the reader says otherwise, and only offered when the folder that was
+          // copied in actually ships a backend.
+          backend: false,
+          backendDeclared: candidate.server === true,
+          // 采纳新项目时默认常驻：我们手上还没有它的元数据，而这个目录里声明的正是
+          // "我要常驻"，所以先跟着声明走；开关只在勾了后台之后才有意义。
+          resident: true,
+          busy: false,
+        };
+        bump();
+      };
+
+      /** What the folder's badge says, and what pressing it does. */
+      const badge = (() => {
+        if (candidates.length > 0) return { text: String(candidates.length), hint: tr('createBadgeNew', 'Projects in the folder that are not added yet'), action: () => {
+          if (candidates.length === 1) startAdopt(candidates[0]);
+          else {
+            state.create.addOpen = true;
+            bump();
+          }
+        } };
+        if (typeof dir !== 'string' || dir.length === 0) return { text: '+', hint: tr('createBadgePick', 'Choose the folder your projects live in'), action: openFolder };
+        return null;
+      })();
+
+      const placements = CREATE_PLACEMENTS.map((entry) =>
+        h(
+          'button',
+          {
+            key: entry.value,
+            type: 'button',
+            role: 'radio',
+            'aria-checked': state.create.placement === entry.value,
+            onClick: () => {
+              state.create.placement = entry.value;
+              bump();
+            },
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: narrow ? '10px' : '14px',
+              padding: narrow ? '8px 10px' : '10px 14px',
+              border: state.create.placement === entry.value ? BW.line : BW.none,
+              borderRadius: '14px',
+              background: '#ffffff',
+              cursor: 'pointer',
+              font: 'inherit',
+              textAlign: 'left',
+              color: BW.ink,
+            },
+          },
+          assetIcon(entry.value, narrow ? 26 : 30),
+          h('span', { style: { fontSize: narrow ? '14px' : '16px', lineHeight: 1.25 } }, tr(entry.key, entry.fallback)),
+        ),
+      );
+
+      // Two boxes, not one: the legend and the folder stand *on* the panel's top rule, so they
+      // cannot live inside the box that scrolls — an `overflow: auto` parent clips exactly the
+      // overhang they are drawn with.
+      const panelOuterStyle = {
+        position: 'relative',
+        width: narrow ? '100%' : 'min(760px, 92vw)',
+        maxHeight: narrow ? '94vh' : '88vh',
+        display: 'flex',
+        flexDirection: 'column',
+      };
+      const panelStyle = {
+        boxSizing: 'border-box',
+        width: '100%',
+        // Sized by the flex parent that carries the max height. The panel itself does not scroll:
+        // its body does, and the footer stays on its bottom edge.
+        flex: '1 1 auto',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        background: '#ffffff',
+        color: BW.ink,
+        border: BW.line,
+        borderRadius: '6px',
+      };
+      const bodyStyle = {
+        flex: '1 1 auto',
+        minHeight: 0,
+        overflow: 'auto',
+        padding: narrow ? '18px 12px 14px' : '24px 22px 18px',
+      };
+      const footerStyle = {
+        flex: '0 0 auto',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+        flexWrap: 'wrap',
+        padding: narrow ? '10px 12px 12px' : '12px 22px 14px',
+        borderTop: '1px solid #e6e6e6',
+      };
+      const legendStyle = (left) => ({
+        position: 'absolute',
+        top: '-13px',
+        left,
+        background: '#ffffff',
+        padding: '0 10px',
+        fontSize: narrow ? '15px' : '16px',
+        fontWeight: 700,
+        lineHeight: '26px',
+        color: BW.ink,
+        whiteSpace: 'nowrap',
+      });
+      // A sub-dialog is a whole panel of its own: the main panel's flex sizing would stretch it to
+      // the width of the one underneath.
+      const subPanelStyle = {
+        boxSizing: 'border-box',
+        width: narrow ? '100%' : 'min(560px, 92vw)',
+        maxHeight: '86vh',
+        overflow: 'auto',
+        background: '#ffffff',
+        color: BW.ink,
+        border: BW.line,
+        borderRadius: '6px',
+        padding: narrow ? '22px 14px 14px' : '24px 22px 18px',
+      };
+
       return h(
         'div',
         {
@@ -4975,14 +5439,11 @@ window.__ModuleLoader__.load({
             inset: '0',
             zIndex: 6,
             display: 'flex',
-            // On a phone this is a sheet from the bottom: within thumb reach, full width, and it
-            // cannot be mistaken for a card floating in the middle of a 390px screen.
-            alignItems: narrow ? 'flex-end' : 'center',
+            alignItems: 'center',
             justifyContent: 'center',
+            padding: narrow ? '0' : '26px',
+            background: narrow ? MOBILE.scrim : 'rgba(0,0,0,0.34)',
             pointerEvents: 'auto',
-            padding: narrow ? '0' : '16px',
-            // The dim is the original one on desktop; the flat variant exists only on a phone.
-            background: narrow ? MOBILE.scrim : 'rgba(0,0,0,0.28)',
           },
           onClick: (event) => {
             if (event.target === event.currentTarget) close();
@@ -4996,704 +5457,153 @@ window.__ModuleLoader__.load({
         },
         h(
           'div',
-          {
-            style: {
-              // Without this a `width: 100%` sheet plus its own padding is wider than the screen,
-              // which is what pushed the left edge off it.
-              boxSizing: 'border-box',
-              width: narrow ? '100%' : 'min(520px, 92vw)',
-              maxHeight: narrow ? MOBILE.sheetMaxHeight : '80vh',
-              overflow: 'auto',
-              // The opaque surface token: `bg-base` is the page behind it and read straight through.
-              background: 'var(--dsw-alias-bg-overlay, #fff)',
-              color: 'var(--dsw-alias-text-primary, #111)',
-              border: '1px solid var(--dsw-alias-border-l1, #ddd)',
-              borderRadius: narrow ? MOBILE.sheetRadius : '12px',
-              boxShadow: narrow ? 'none' : '0 18px 48px rgba(0,0,0,0.28)',
-              padding: narrow ? MOBILE.sheetPadding : '14px 16px',
-            },
-          },
+          { style: panelOuterStyle },
+          h('div', { style: legendStyle(narrow ? '14px' : '22px') }, tr('createSource', 'New HTML project')),
+          // The folder stands on the panel's own top rule, badge and all — the wireframe puts it
+          // at the corner rather than in a row of its own.
           h(
             'div',
-            { style: { display: 'flex', alignItems: narrow ? 'center' : 'baseline', gap: '8px', marginBottom: '4px' } },
+            { style: { position: 'absolute', top: '-26px', right: '16px', width: '58px', height: '48px' } },
             h(
-              'div',
-              { style: Object.assign({}, titleStyle, narrow ? { fontSize: MOBILE.titleFont, fontWeight: MOBILE.titleWeight } : { fontSize: '14px' }) },
-              tr('createTitle', 'New HTML interface'),
+              'button',
+              {
+                type: 'button',
+                title: tr('createDirBrowseHint', 'Choose the folder with the system file browser'),
+                'aria-label': tr('createFolderTitle', 'Choose the project folder'),
+                onClick: openFolder,
+                style: { width: '100%', height: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+              },
+              assetIcon('folder', 48),
             ),
-            h('span', { style: { flex: '1 1 auto' } }),
-            // The close control is part of the mobile sheet; the desktop dialog closes the way it
-            // always did (backdrop click), so it is not added there.
-            narrow
-              ? h(
+            badge === null
+              ? null
+              : h(
                   'button',
                   {
                     type: 'button',
-                    style: Object.assign({}, buttonStyle, {
-                      // A thumb, not a mouse: every control on the sheet is a little bigger. The close
-                      // control squares off the same tap size the other sheet buttons stand at.
-                      height: MOBILE.buttonHeight,
-                      width: MOBILE.buttonHeight,
-                      padding: '0',
-                      borderRadius: MOBILE.closeRadius,
-                      fontSize: MOBILE.closeFont,
-                    }),
-                    title: tr('cancel', 'Cancel'),
-                    onClick: close,
-                  },
-                  '✕',
-                )
-              : null,
-          ),
-          h(
-            'div',
-            {
-              style: narrow
-                ? { fontSize: MOBILE.hintFont, lineHeight: '1.5', opacity: 0.6, marginBottom: '8px' }
-                : { fontSize: '11.5px', opacity: 0.65, marginBottom: '10px' },
-            },
-            tr('createHint', 'Nothing here goes through the model; the interface is created in this session right away.'),
-          ),
-          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: narrow ? MOBILE.sectionMargin : '6px 0 4px' } }, tr('createSource', 'New HTML project')),
-          // Where the list comes from, read from the host on every open. The reader can
-          // point it at their own directory; an empty value restores the defaults.
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: narrow ? MOBILE.dirRowGap : '6px', marginBottom: '6px' } },
-            h('input', {
-              type: 'text',
-              // The one control the sheet draws smaller on a phone, so the injected rule needs to be
-              // able to tell it apart from the rest of the fields.
-              'data-dsh-htmlui-dir': '',
-              value: state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '',
-              placeholder: tr('createDirPlaceholder', 'No directory chosen yet'),
-              onChange: (event) => {
-                state.templates.dirInput = event.target.value;
-                bump();
-              },
-              style: {
-                boxSizing: 'border-box',
-                flex: '1 1 auto',
-                minWidth: '0',
-                font: 'inherit',
-                fontSize: narrow ? MOBILE.inputFont : SHEET_FIELD_FONT,
-                // Compact on a phone, exactly as it always was on a desktop.
-                height: narrow ? MOBILE.inputHeight : 'auto',
-                padding: narrow ? MOBILE.inputPadding : '4px 8px',
-                borderRadius: narrow ? MOBILE.inputRadius : '7px',
-                border: '1px solid var(--dsw-alias-border-l2, #ccc)',
-                background: 'var(--dsw-alias-bg-base, #fff)',
-                color: 'inherit',
-              },
-            }),
-            h(
-              'button',
-              {
-                type: 'button',
-                // `Object.assign` writes `undefined` just as happily as a value, which would erase
-                // the height/padding/fontSize this inherits from `buttonStyle` on desktop. The mobile
-                // branch is therefore a whole object, and the desktop branch adds nothing.
-                style: Object.assign(
-                  {},
-                  buttonStyle,
-                  { flex: '0 0 auto' },
-                  narrow ? { flexShrink: 0, height: MOBILE.buttonHeight, padding: MOBILE.buttonPadding, fontSize: MOBILE.buttonFont } : {},
-                ),
-                title: tr('createDirBrowseHint', 'Choose the folder with the system file browser'),
-                onClick: () => {
-                  // The shell exposes a directory picker; typing a path by hand is the
-                  // fallback, not the way in.
-                  const workspace = props !== undefined && props.ctx !== undefined && typeof props.ctx.get === 'function' ? props.ctx.get('uiWorkspace') : undefined;
-                  if (workspace === undefined || typeof workspace.pickDirectory !== 'function') {
-                    state.templates.error = tr('createDirNoPicker', 'This build cannot open a folder picker; type the path instead.');
-                    bump();
-                    return;
-                  }
-                  workspace.pickDirectory().then(
-                    (chosen) => {
-                      if (typeof chosen !== 'string' || chosen.length === 0) return;
-                      state.templates.dirInput = chosen;
-                      bump();
-                      saveTemplatesDir(chosen);
+                    title: badge.hint,
+                    'aria-label': badge.hint,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      badge.action();
                     },
-                    () => undefined,
-                  );
-                },
-              },
-              tr('createDirBrowse', 'Browse…'),
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                // `Object.assign` writes `undefined` just as happily as a value, which would erase
-                // the height/padding/fontSize this inherits from `buttonStyle` on desktop. The mobile
-                // branch is therefore a whole object, and the desktop branch adds nothing.
-                style: Object.assign(
-                  {},
-                  buttonStyle,
-                  { flex: '0 0 auto' },
-                  narrow ? { flexShrink: 0, height: MOBILE.buttonHeight, padding: MOBILE.buttonPadding, fontSize: MOBILE.buttonFont } : {},
+                    style: {
+                      position: 'absolute',
+                      top: '-4px',
+                      right: '-8px',
+                      minWidth: '22px',
+                      height: '22px',
+                      padding: '0 5px',
+                      borderRadius: '999px',
+                      border: '2px solid #ffffff',
+                      background: '#e53935',
+                      color: '#ffffff',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      lineHeight: '18px',
+                      cursor: 'pointer',
+                    },
+                  },
+                  badge.text,
                 ),
-                disabled: state.templates.savingDir === true,
-                onClick: () => {
-                  const value = state.templates.dirInput !== undefined ? state.templates.dirInput : state.templates.dir ?? '';
-                  saveTemplatesDir(value);
-                },
-              },
-              state.templates.savingDir === true ? tr('creating', 'Creating…') : tr('createDirSave', 'Use this directory'),
-            ),
           ),
-          state.templates.dir === undefined
-            ? h(
-                'div',
-                { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } },
-                tr('createDirUnset', 'No directory yet: choose the folder that holds your HTML projects.'),
-              )
-            : null,
+          // The ruled box: its body scrolls, the footer stays put at its bottom edge.
+          h(
+            'div',
+            { style: panelStyle },
+          h(
+            'div',
+            { style: bodyStyle },
+          // The list: the only region that scrolls, so a long catalogue never pushes the ways in
+          // and the buttons off the panel.
           h(
             'div',
             {
-              // Only the project list is capped, and only so the rest of the form stays
-              // reachable: a long catalogue used to push 默认生成位置 and the buttons far
-              // below the fold, which made the form awkward to finish. The list scrolls
-              // in place; everything around it keeps its natural size.
               style: {
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '2px',
-                marginBottom: '10px',
-                maxHeight: '30vh',
+                border: BW.line,
+                borderRadius: '4px',
+                padding: '6px',
+                maxHeight: narrow ? '40vh' : '44vh',
                 overflowY: 'auto',
                 overscrollBehavior: 'contain',
               },
             },
-            radio('dsh-create-source', 'blank', tr('newBlank', 'Blank canvas'), state.create.source === 'blank', () => {
-              state.create.source = 'blank';
-              bump();
-            }),
-            ...items.map((template) => {
-              const backend = backendInfoOf(template);
-              const declared = backend !== undefined && backend.declared === true;
-              return h(
-                'div',
-                {
-                  key: template.slug,
-                  // 手机优先, and laid out as two lines on purpose: the project and its pencil, then
-                  // the control on the left with the three marks pushed to the right edge, where they
-                  // read as one answer to "what is this project doing right now".
-                  style: { display: 'flex', flexDirection: 'column', gap: '3px', padding: '0' },
-                },
-                h(
-                  'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: '4px', minWidth: '0' } },
-                  h(
-                    'div',
-                    { style: { flex: '1 1 auto', minWidth: '0' } },
-                    radio(
-                      'dsh-create-source',
-                      template.slug,
-                      // The reader's own name first: the slug is an id, and an id is not what
-                      // a person looks for in a list. It stays visible beside it, in
-                      // parentheses, because it is what `template=` takes.
-                      templateListItem(template),
-                      state.create.source === template.slug,
-                      () => {
-                        state.create.source = template.slug;
-                        // Picking a different project is also a statement about which project the
-                        // open form is about: leaving the form on the previous one is exactly how a
-                        // save lands on a project the reader was not looking at. A half-filled
-                        // *adopt* form is not moved — that one is about a folder, not a catalogue
-                        // entry.
-                        if (state.adopt.open === true && state.adopt.existing === true && state.adopt.slug !== template.slug) {
-                          openProjectEditor(template);
-                          return;
-                        }
-                        bump();
-                      },
-                    ),
-                  ),
-                  // A pencil on every project: the manifest stays editable, with the same
-                  // form that created it, prefilled with what is on disk.
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      style: Object.assign({}, buttonStyle, { flex: '0 0 auto', padding: '2px 7px', lineHeight: 1.1 }),
-                      title: tr('editProject', 'Edit this project’s details'),
-                      'aria-label': `${tr('editProject', 'Edit this project’s details')}: ${templateListItem(template)}`,
-                      onClick: () => {
-                        openProjectEditor(template);
-                      },
+            catalogue.length === 0
+              ? h('div', { style: { padding: '16px 12px', fontSize: '13px', color: BW.muted } }, tr('createNoProjects', 'No projects yet: put one in the folder, or start from the blank canvas.'))
+              : catalogue.map((template) =>
+                  createProjectRow({
+                    template,
+                    selected: state.create.source === template.slug,
+                    narrow,
+                    onPick: (picked) => {
+                      state.create.source = picked.slug;
+                      // Picking a different project is also a statement about which project the
+                      // open form is about: leaving the form on the previous one is exactly how a
+                      // save lands on a project the reader was not looking at. A half-filled
+                      // *adopt* form is not moved — that one is about a folder, not a catalogue
+                      // entry.
+                      if (state.adopt.open === true && state.adopt.existing === true && state.adopt.slug !== picked.slug) {
+                        openProjectEditor(picked);
+                        return;
+                      }
+                      bump();
                     },
-                    '✎',
-                  ),
+                    onEdit: (edited) => openProjectEditor(edited),
+                  }),
                 ),
-                declared
-                  ? h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '3px' } },
-                      // 项目管理 only: this drawer is where a project is created, picked and edited.
-                      // Ending a process belongs to the manager row — one place, next to the
-                      // interface it belongs to — so the drawer keeps the marks and the pencil and
-                      // nothing that acts on a running backend.
-                      // 正在运行 / 未运行 先说，它是这一行里唯一会变的状态；各枚徽标说“它将怎么活”，
-                      // 药丸说“它此刻活着没有”——两件事，所以不合并成一枚。
-                      backendPill(backend),
-                      h('span', { style: { flex: '1 1 auto' } }),
-                      ...backendChips(backend, true),
-                    )
-                  : null,
-              );
-            }),
           ),
-          h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, tr('createPlacement', 'Where')),
-          h(
-            'div',
-            { style: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '10px' } },
-            ...CREATE_PLACEMENTS.map((entry) =>
-              radio(
-                'dsh-create-placement',
-                entry.value,
-                `${tr(entry.key, entry.fallback)} · ${entry.value}`,
-                state.create.placement === entry.value,
-                () => {
-                  state.create.placement = entry.value;
-                  bump();
-                },
-              ),
-            ),
-          ),
-          // A background layer is unlike the other four: it belongs to no view, so it is
-          // still on screen after switching to the trajectory or the session page, and it
-          // only goes away when it is closed from there. Said here, where the choice is
-          // made, because otherwise "it is still there" reads as a stray record that keeps
-          // coming back rather than the form doing what it says.
-          state.create.placement === 'background'
-            ? h(
-                'div',
-                { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } },
-                tr('placementBackgroundHint', 'Full-screen and always on screen, in every view, at 25% opacity so the interface stays readable. Close it from the session page when you are done.'),
-              )
-            : null,
           state.templates.error !== null
-            ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary, #c33)', marginBottom: '8px' } }, String(state.templates.error))
+            ? h('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary, #c33)', marginTop: '8px' } }, String(state.templates.error))
             : null,
           state.templates.notice !== null
-            ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '8px' } }, String(state.templates.notice))
+            ? h('div', { style: { fontSize: '12px', color: BW.muted, marginTop: '8px' } }, String(state.templates.notice))
             : null,
-          // Files copied into the directory that are not projects yet: a folder without a
-          // manifest, or a file whose name cannot be a slug. Asking is the whole point —
-          // silently skipping them is what made a copied file look like it never arrived.
-          //
-          // This container also carries the manifest form, which is why it opens for a
-          // form even with no candidates at all: editing a project that is already
-          // registered used to show nothing, because the form lived inside the
-          // "not registered yet" branch.
-          candidates.length > 0 || adoptOpen
-            ? h(
-                'div',
-                { style: { marginBottom: '10px' } },
-                candidates.length > 0
-                  ? h('div', { style: { fontSize: '12px', fontWeight: 600, margin: '6px 0 4px' } }, `${tr('candidatesTitle', 'Not projects yet')} (${candidates.length})`)
-                  : null,
-                candidates.length > 0
-                  ? h(
-                      'div',
-                      { style: { fontSize: '11.5px', opacity: 0.72, marginBottom: '4px' } },
-                      tr('candidatesHint', 'These are in the directory but carry no project manifest. Adopt one and it becomes a template you can create from.'),
-                    )
-                  : null,
-                ...candidates.map((candidate) =>
-                  h(
-                    'div',
-                    { key: candidate.name, style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px' } },
-                    h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0', fontSize: '12px' }) }, candidate.name),
-                    h('span', { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, candidate.kind === 'dir' ? tr('candidateDir', 'folder') : tr('candidateFile', 'file')),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        // `Object.assign` writes `undefined` just as happily as a value, which would erase
-                // the height/padding/fontSize this inherits from `buttonStyle` on desktop. The mobile
-                // branch is therefore a whole object, and the desktop branch adds nothing.
-                style: Object.assign(
-                  {},
-                  buttonStyle,
-                  { flex: '0 0 auto' },
-                  narrow ? { flexShrink: 0, height: MOBILE.buttonHeight, padding: MOBILE.buttonPadding, fontSize: MOBILE.buttonFont } : {},
-                ),
-                        onClick: () => {
-                          const stem = candidate.name.replace(/\.html?$/iu, '');
-                          state.adopt = {
-                            open: true,
-                            existing: false,
-                            source: candidate.name,
-                            slug: slugifyClient(stem),
-                            name: stem,
-                            description: '',
-                            placement: 'dock-right',
-                            security: 'strict',
-                            // Off until the reader says otherwise, and only offered when the
-                            // folder that was copied in actually ships a backend.
-                            backend: false,
-                            backendDeclared: candidate.server === true,
-                            // 采纳新项目时默认常驻：我们手上还没有它的元数据，而这个目录里声明的正是
-                            // "我要常驻"，所以先跟着声明走；开关只在勾了后台之后才有意义。
-                            resident: true,
-                            busy: false,
-                          };
-                          bump();
-                        },
-                      },
-                      tr('candidateAdopt', 'Adopt'),
-                    ),
-                  ),
-                ),
-                // Filling in the manifest, rather than having one written behind the
-                // reader's back: the slug is what a template is addressed by, so it is a
-                // decision, not a detail.
-                state.adopt !== undefined && state.adopt.open === true
-                  ? h(
-                      'div',
-                      {
-                        style: {
-                          margin: '6px 0 2px',
-                          padding: '8px 10px',
-                          border: '1px solid var(--dsw-alias-border-l1, #ddd)',
-                          borderRadius: '10px',
-                          background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))',
-                        },
-                      },
-                      h(
-                        'div',
-                        { style: { fontSize: '12px', fontWeight: 600, marginBottom: '2px' } },
-                        `${state.adopt.existing === true ? tr('editTitle', 'Edit project details') : tr('adoptTitle', 'Project details for')} ${state.adopt.source}`,
-                      ),
-                      // The reader's own instruction: nothing is written before they say
-                      // so. This line belongs to adopting only — an existing project is
-                      // already on disk, and telling its owner otherwise would be a lie.
-                      state.adopt.existing === true
-                        ? h('div', { style: { fontSize: '11px', opacity: 0.7, marginBottom: '6px' } }, tr('editHint', 'These details are saved over the project’s manifest.'))
-                        : h(
-                            'div',
-                            { style: { fontSize: '11px', opacity: 0.7, marginBottom: '6px' } },
-                            tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
-                          ),
-                      ...[
-                        // The reader's order: the human name first, then the id that
-                        // `template=` takes, then what it is and where it opens.
-                        { key: 'name', label: tr('adoptName', 'Project name'), hint: '' },
-                        { key: 'slug', label: tr('adoptSlug', 'Process ID'), hint: tr('adoptSlugHint', 'lowercase letters, digits, dot, dash, underscore') },
-                        { key: 'description', label: tr('adoptDescription', 'Details'), hint: '' },
-                      ].map((field) =>
-                        h(
-                          'div',
-                          { key: field.key, style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' } },
-                          h('span', { style: { flex: '0 0 150px', fontSize: '11.5px' } }, field.label),
-                          h('input', {
-                            type: 'text',
-                            value: state.adopt[field.key],
-                            placeholder: field.hint,
-                            onChange: (event) => {
-                              state.adopt[field.key] = event.target.value;
-                              bump();
-                            },
-                            style: {
-                              flex: '1 1 auto',
-                              minWidth: '0',
-                              font: 'inherit',
-                              fontSize: SHEET_FIELD_FONT,
-                              padding: '3px 7px',
-                              borderRadius: '7px',
-                              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
-                              background: 'var(--dsw-alias-bg-base, #fff)',
-                              color: 'inherit',
-                            },
-                          }),
-                        ),
-                      ),
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' } },
-                        h('span', { style: { flex: '0 0 150px', fontSize: '11.5px' } }, tr('adoptPlacement', 'Where it opens')),
-                        h(
-                          'select',
-                          {
-                            value: state.adopt.placement,
-                            onChange: (event) => {
-                              state.adopt.placement = event.target.value;
-                              bump();
-                            },
-                            style: {
-                              flex: '1 1 auto',
-                              minWidth: '0',
-                              font: 'inherit',
-                              fontSize: SHEET_FIELD_FONT,
-                              padding: '3px 7px',
-                              borderRadius: '7px',
-                              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
-                              background: 'var(--dsw-alias-bg-base, #fff)',
-                              color: 'inherit',
-                            },
-                          },
-                          ...CREATE_PLACEMENTS.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.key, entry.fallback)} · ${entry.value}`)),
-                        ),
-                      ),
-                      // How much this project's documents may do. The default is what the
-                      // plugin has always done; a complete web project the reader imported
-                      // needs more, so they choose here — per project, with the consequence
-                      // spelled out.
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' } },
-                        h('span', { style: { flex: '0 0 150px', fontSize: '11.5px' } }, tr('adoptSecurity', 'Security level')),
-                        h(
-                          'select',
-                          {
-                            value: state.adopt.security,
-                            onChange: (event) => {
-                              state.adopt.security = event.target.value;
-                              bump();
-                            },
-                            style: {
-                              flex: '1 1 auto',
-                              minWidth: '0',
-                              font: 'inherit',
-                              fontSize: SHEET_FIELD_FONT,
-                              padding: '3px 7px',
-                              borderRadius: '7px',
-                              border: '1px solid var(--dsw-alias-border-l2, #ccc)',
-                              background: 'var(--dsw-alias-bg-base, #fff)',
-                              color: 'inherit',
-                            },
-                          },
-                          ...SECURITY_CHOICES.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.labelKey, entry.label)} · ${entry.value}`)),
-                        ),
-                      ),
-                      h(
-                        'div',
-                        {
-                          style: {
-                            fontSize: '11px',
-                            marginBottom: '8px',
-                            color:
-                              state.adopt.security === 'unsafe'
-                                ? 'var(--dsw-alias-state-error-primary, #c33)'
-                                : 'var(--dsw-alias-label-secondary, #888)',
-                          },
-                        },
-                        (() => {
-                          const chosen = SECURITY_CHOICES.find((entry) => entry.value === state.adopt.security) ?? SECURITY_CHOICES[0];
-                          return tr(chosen.hintKey, chosen.hint);
-                        })(),
-                      ),
-                      // The reader's own decision about code that runs in this process. It appears
-                      // only for a project that ships a backend, and the line under it says plainly
-                      // what granting means: this is the one switch in the plugin that hands a
-                      // project the same reach the plugin has.
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' } },
-                        state.adopt.backendDeclared === true
-                          ? h('input', {
-                              type: 'checkbox',
-                              checked: state.adopt.backend === true,
-                              onChange: (event) => {
-                                state.adopt.backend = event.target.checked;
-                                bump();
-                              },
-                              style: { marginTop: '2px', flex: '0 0 auto' },
-                            })
-                          : null,
-                        h(
-                          'div',
-                          { style: { minWidth: '0' } },
-                          h(
-                            'div',
-                            { style: { fontSize: '12px', fontWeight: state.adopt.backend === true ? 600 : 400 } },
-                            tr('adoptBackend', 'Run this project’s backend'),
-                          ),
-                          h(
-                            'div',
-                            {
-                              style: {
-                                fontSize: '11px',
-                                color:
-                                  state.adopt.backend === true
-                                    ? 'var(--dsw-alias-state-error-primary, #c33)'
-                                    : 'var(--dsw-alias-label-secondary, #888)',
-                              },
-                            },
-                            state.adopt.backendDeclared === true
-                              ? tr('adoptBackendHint', 'Its server.js runs inside the DSH process with this plugin’s privileges — as trusted as the plugin itself.')
-                              : tr('adoptBackendNone', 'No backend here: a server.js in the project folder, named by “backend” in meta.json, is what offers one.'),
-                          ),
-                        ),
-                      ),
-                      // 常驻: a second decision about the same process, so it lives under the first
-                      // and appears only once the first is answered. A project with no backend — or
-                      // one that has not been allowed to run — has nothing to keep resident, and a
-                      // switch here would promise a process that is never going to start.
-                      state.adopt.backendDeclared === true && state.adopt.backend === true
-                        ? h(
-                            'div',
-                            { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' } },
-                            h('input', {
-                              type: 'checkbox',
-                              checked: state.adopt.resident === true,
-                              onChange: (event) => {
-                                state.adopt.resident = event.target.checked;
-                                bump();
-                              },
-                              style: { marginTop: '2px', flex: '0 0 auto' },
-                            }),
-                            h(
-                              'div',
-                              { style: { minWidth: '0' } },
-                              h(
-                                'div',
-                                {
-                                  style: { fontSize: '12px', fontWeight: state.adopt.resident === true ? 600 : 400 },
-                                  // The explanation lives in the tooltip: as a wrapped sentence it
-                                  // made the form twice as tall on a phone, and the switch reads on
-                                  // its own. Stopping it is still said where the button is.
-                                  title: tr(
-                                    'residentHint',
-                                    'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close backend task in its manager row, or uncheck this switch — either unloads it right away.',
-                                  ),
-                                },
-                                tr('residentSwitch', 'Resident'),
-                              ),
-                            ),
-                          )
-                        : null,
-                      h(
-                        'div',
-                        { style: { display: 'flex', justifyContent: 'flex-end', gap: narrow ? MOBILE.footerGap : '6px' } },
-                        h(
-                          'button',
-                          {
-                            type: 'button',
-                            // The same phone shape as the create dialog's footer pair: on a sheet the two
-                            // actions in a row are one control, not two sizes of it. Cancel used to keep
-                            // the desktop button next to a thumb-sized confirm.
-                            style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}),
-                            onClick: () => {
-                              state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
-                              bump();
-                            },
-                          },
-                          tr('cancel', 'Cancel'),
-                        ),
-                        h(
-                          'button',
-                          {
-                            type: 'button',
-                            style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
-                            disabled: state.adopt.busy === true,
-                            onClick: () => {
-                              adoptTemplate(
-                                state.adopt.source,
-                                Object.assign(
-                                  {
-                                    slug: state.adopt.slug,
-                                    name: state.adopt.name,
-                                    description: state.adopt.description,
-                                    placement: state.adopt.placement,
-                                    security: state.adopt.security,
-                                  },
-                                  // Adopting a folder that ships a `server.js` is also where the
-                                  // project's manifest gets its declaration: the file is the
-                                  // evidence, and the switch is the reader's answer to it. Editing
-                                  // an existing project never rewrites that — the folder owns it.
-                                  state.adopt.backendDeclared === true && state.adopt.existing !== true
-                                    ? { backend: state.adopt.backend === true }
-                                    : {},
-                                ),
-                                // Only sent when the form offered the choice, so a project with no
-                                // backend can never end up allowed by accident.
-                                state.adopt.backendDeclared === true ? state.adopt.backend === true : undefined,
-                                // 常驻 follows the same rule, and one more: it only means anything for a
-                                // backend that may actually run, so a project whose backend is not
-                                // declared — the usual case when a folder is adopted before its
-                                // server.js is written — sends nothing at all rather than a setting
-                                // with nothing behind it.
-                                state.adopt.backendDeclared === true && state.adopt.backend === true ? state.adopt.resident === true : undefined,
-                              );
-                            },
-                          },
-                          state.adopt.busy === true
-                            ? tr('creating', 'Creating…')
-                            : state.adopt.existing === true
-                              ? tr('editConfirm', 'Save changes')
-                              : tr('adoptConfirm', 'Write the manifest'),
-                        ),
-                      ),
-                    )
-                  : null,
-              )
-            : null,
-          // The actions stay put while the rest scrolls. Without this the panel's own
-          // scrolling carries 取消 and 创建 off the bottom of the screen as soon as the
-          // catalogue or the candidate list grows, and the reader has to hunt for the
-          // button that finishes what they started.
+          // The four ways in, in their own ruled box with its own legend.
           h(
             'div',
-            {
-              style: {
-                position: 'sticky',
-                bottom: '-14px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '6px',
-                marginTop: '6px',
-                paddingTop: '8px',
-                paddingBottom: '14px',
-                background: 'var(--dsw-alias-bg-overlay, #fff)',
-                borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
-              },
-            },
+            { style: { position: 'relative', marginTop: '26px', border: BW.line, borderRadius: '4px', padding: narrow ? '16px 10px 10px' : '20px 18px 12px' } },
+            h('div', { style: legendStyle(narrow ? '12px' : '18px') }, tr('createPlacement', 'Where')),
+            h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: narrow ? '4px 8px' : '8px 20px' } }, ...placements),
+          ),
+          ),
+          // A background layer is unlike the four above: it belongs to no view, so it is still on
+          // screen after switching to the trajectory or the session page, and only goes away when
+          // it is closed from there. Said where the choice is made, because otherwise "it is
+          // still there" reads as a stray record. 该位置已从本菜单移除（入口未完善，功能保留在
+          // html_ui 工具与档案中），这一句留在这里是为了它回来时不用重新想一遍。
+          h(
+            'div',
+            { style: footerStyle },
             h(
-              'button',
-              {
-                type: 'button',
-                style: Object.assign({}, buttonStyle, { border: 'none', background: 'transparent', opacity: 0.7 }),
-                onClick: () => {
-                  state.create.open = false;
-                  toggleTemplates();
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => {
+                    state.create.open = false;
+                    toggleTemplates();
+                  },
+                  style: { font: 'inherit', fontSize: '13px', color: BW.muted, background: 'transparent', border: 'none', padding: '0', cursor: 'pointer', textDecoration: 'underline' },
                 },
-              },
-              tr('createMore', 'More template actions'),
-            ),
-            h(
-              'span',
-              {
-                style: { fontSize: '10.5px', fontFamily: 'ui-monospace, Consolas, monospace', color: 'var(--dsw-alias-label-secondary, #888)', opacity: 0.8 },
-                title: tr('buildTagHint', 'The browser half this page is running'),
-              },
-              CLIENT_VERSION,
+                tr('createMore', 'More template actions'),
+              ),
+              h(
+                'span',
+                { style: { fontSize: '11px', fontFamily: 'ui-monospace, Consolas, monospace', color: BW.muted }, title: tr('buildTagHint', 'The browser half this page is running') },
+                CLIENT_VERSION,
+              ),
             ),
             h(
               'div',
-              // On a phone the two actions split the row evenly and stand a thumb tall; the desktop
-              // keeps the compact pair it always had.
-              { style: { display: 'flex', gap: narrow ? MOBILE.footerGap : '6px' } },
+              { style: { display: 'flex', gap: '10px' } },
+              h('button', { type: 'button', style: bwButtonStyle(false, narrow), onClick: close }, tr('cancel', 'Cancel')),
               h(
                 'button',
                 {
                   type: 'button',
-                  style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}),
-                  onClick: close,
-                },
-                tr('cancel', 'Cancel'),
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  style: Object.assign({}, buttonStyle, narrow ? { height: MOBILE.buttonHeight, padding: MOBILE.footerButtonPadding, fontSize: MOBILE.buttonFont, flex: '1 1 0' } : {}, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
+                  style: bwButtonStyle(true, narrow),
                   disabled: state.create.busy === true || sessionId === undefined,
                   onClick: () => {
                     if (sessionId === undefined || state.create.busy === true) return;
@@ -5711,6 +5621,393 @@ window.__ModuleLoader__.load({
                 },
                 state.create.busy === true ? tr('creating', 'Creating…') : tr('create', 'Create'),
               ),
+            ),
+          ),
+        ),
+        ),
+        // ---------------------------------------------------------------- folder dialog
+        state.create.folderOpen === true
+          ? h(
+              'div',
+              {
+                style: { position: 'absolute', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.34)', padding: '20px' },
+                onClick: (event) => {
+                  if (event.target === event.currentTarget) {
+                    state.create.folderOpen = false;
+                    bump();
+                  }
+                },
+              },
+              h(
+                'div',
+                { style: subPanelStyle },
+                h('div', { style: subTitleStyle }, tr('createFolderTitle', 'Choose the project folder')),
+                h(
+                  'div',
+                  { style: { fontSize: '12.5px', color: BW.muted, marginBottom: '10px', lineHeight: 1.5 } },
+                  tr('createFolderHint', 'This is where the project list comes from: every folder in it that carries a meta.json becomes a project.'),
+                ),
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+                  h('input', {
+                    type: 'text',
+                    'data-dsh-htmlui-dir': '',
+                    value: state.create.dirInput !== undefined ? state.create.dirInput : dir ?? '',
+                    placeholder: tr('createDirPlaceholder', 'No directory chosen yet'),
+                    onChange: (event) => {
+                      state.create.dirInput = event.target.value;
+                      bump();
+                    },
+                    style: Object.assign({}, bwFieldStyle, { flex: '1 1 auto', minWidth: '0' }),
+                  }),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      style: Object.assign({}, bwButtonStyle(false, narrow), { flex: '0 0 auto' }),
+                      title: tr('createDirBrowseHint', 'Choose the folder with the system file browser'),
+                      onClick: () => {
+                        // The shell exposes a directory picker; typing a path by hand is the
+                        // fallback, not the way in.
+                        const workspace = props !== undefined && props.ctx !== undefined && typeof props.ctx.get === 'function' ? props.ctx.get('uiWorkspace') : undefined;
+                        if (workspace === undefined || typeof workspace.pickDirectory !== 'function') {
+                          state.templates.error = tr('createDirNoPicker', 'This build cannot open a folder picker; type the path instead.');
+                          bump();
+                          return;
+                        }
+                        workspace.pickDirectory().then(
+                          (chosen) => {
+                            if (typeof chosen !== 'string' || chosen.length === 0) return;
+                            state.create.dirInput = chosen;
+                            bump();
+                            saveTemplatesDir(chosen);
+                          },
+                          () => undefined,
+                        );
+                      },
+                    },
+                    tr('createDirBrowse', 'Browse…'),
+                  ),
+                ),
+                typeof dir === 'string' && dir.length > 0 ? null : h('div', { style: { fontSize: '12px', color: BW.muted, marginTop: '8px' } }, tr('createDirUnset', 'No directory yet: choose the folder that holds your HTML projects.')),
+                h(
+                  'div',
+                  { style: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' } },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      style: bwButtonStyle(false, narrow),
+                      onClick: () => {
+                        state.create.folderOpen = false;
+                        bump();
+                      },
+                    },
+                    tr('cancel', 'Cancel'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      style: bwButtonStyle(true, narrow),
+                      disabled: state.templates.savingDir === true,
+                      onClick: () => {
+                        const value = state.create.dirInput !== undefined ? state.create.dirInput : dir ?? '';
+                        saveTemplatesDir(value);
+                        state.create.folderOpen = false;
+                        bump();
+                      },
+                    },
+                    state.templates.savingDir === true ? tr('creating', 'Creating…') : tr('createDirSave', 'Use this directory'),
+                  ),
+                ),
+              ),
+            )
+          : null,
+        // ---------------------------------------------------------------- add-project dialog
+        state.create.addOpen === true
+          ? h(
+              'div',
+              {
+                style: { position: 'absolute', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.34)', padding: '20px' },
+                onClick: (event) => {
+                  if (event.target === event.currentTarget) {
+                    state.create.addOpen = false;
+                    bump();
+                  }
+                },
+              },
+              h(
+                'div',
+                { style: subPanelStyle },
+                h('div', { style: subTitleStyle }, tr('createAddTitle', 'Add a project')),
+                h(
+                  'div',
+                  { style: { fontSize: '12.5px', color: BW.muted, marginBottom: '10px', lineHeight: 1.5 } },
+                  tr('createAddHint', 'These are in the folder but carry no project manifest. Pick one and describe it once.'),
+                ),
+                ...candidates.map((candidate) =>
+                  h(
+                    'div',
+                    { key: candidate.name, style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', borderBottom: '1px solid #e6e6e6' } },
+                    projectGlyph({ slug: candidate.name, name: candidate.name }, 30),
+                    h('span', { style: { flex: '1 1 auto', minWidth: '0', fontSize: '14px', wordBreak: 'break-word' } }, candidate.name),
+                    h('span', { style: { fontSize: '11.5px', color: BW.muted } }, candidate.kind === 'dir' ? tr('candidateDir', 'folder') : tr('candidateFile', 'file')),
+                    h(
+                      'button',
+                      { type: 'button', style: Object.assign({}, bwButtonStyle(true, narrow), { height: '30px', padding: '0 14px', fontSize: '13px' }), onClick: () => startAdopt(candidate) },
+                      tr('candidateAdopt', 'Adopt'),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '14px' } },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      style: bwButtonStyle(false, narrow),
+                      onClick: () => {
+                        state.create.addOpen = false;
+                        bump();
+                      },
+                    },
+                    tr('cancel', 'Cancel'),
+                  ),
+                ),
+              ),
+            )
+          : null,
+        // ---------------------------------------------------------------- manifest form
+        adoptOpen === true ? h(HtmlUiManifestPanel, { narrow, props }) : null,
+      );
+    }
+
+    /**
+     * The manifest form, as its own black-and-white panel.
+     *
+     * It is shared by adopting a folder and editing an existing project, and it sits above the
+     * create panel rather than inside it: the list behind stays where it was, and closing the form
+     * returns to it instead of to a half-scrolled catalogue.
+     */
+    function HtmlUiManifestPanel(props) {
+      const { narrow } = props;
+      const adopt = state.adopt;
+      const legendStyle = (left) => ({
+        position: 'absolute',
+        top: '-13px',
+        left,
+        background: '#ffffff',
+        padding: '0 10px',
+        fontSize: narrow ? '15px' : '16px',
+        fontWeight: 700,
+        lineHeight: '26px',
+        color: BW.ink,
+        whiteSpace: 'nowrap',
+      });
+      const fieldRow = (label, control, key) =>
+        h(
+          'div',
+          { key, style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' } },
+          h('span', { style: { flex: '0 0 108px', fontSize: '12.5px', color: BW.ink } }, label),
+          h('div', { style: { flex: '1 1 auto', minWidth: '0' } }, control),
+        );
+      const closeForm = () => {
+        state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
+        bump();
+      };
+      const chosenSecurity = SECURITY_CHOICES.find((entry) => entry.value === adopt.security) ?? SECURITY_CHOICES[0];
+      // 背景层已不再出现在“生成位置”里；一个本来就声明了它的项目，编辑时仍要能看见并保住它，
+      // 所以只在这个值确实存在时补一项，而不是重新把它端出来。
+      const placements = CREATE_PLACEMENTS.slice();
+      if (adopt.placement === 'background') placements.push({ value: 'background', key: 'placementBackground', fallback: 'Background layer' });
+      return h(
+        'div',
+        {
+          style: { position: 'absolute', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.34)', padding: narrow ? '0' : '20px' },
+          onClick: (event) => {
+            if (event.target === event.currentTarget) closeForm();
+          },
+        },
+        h(
+          'div',
+          {
+            style: {
+              position: 'relative',
+              boxSizing: 'border-box',
+              width: narrow ? '100%' : 'min(560px, 92vw)',
+              maxHeight: '88vh',
+              overflow: 'auto',
+              background: '#ffffff',
+              color: BW.ink,
+              border: BW.line,
+              borderRadius: '6px',
+              padding: narrow ? '22px 14px 14px' : '26px 24px 18px',
+            },
+          },
+          h('div', { style: subTitleStyle }, `${adopt.existing === true ? tr('editTitle', 'Edit project details') : tr('adoptTitle', 'Project details for')} ${adopt.source}`),
+          h(
+            'div',
+            { style: { fontSize: '12px', color: BW.muted, marginBottom: '12px', lineHeight: 1.5 } },
+            adopt.existing === true
+              ? tr('editHint', 'These details are saved over the project’s manifest.')
+              : tr('adoptHint', 'Nothing is written yet: fill this in and the project is created with it.'),
+          ),
+          ...['name', 'slug', 'description'].map((key) =>
+            fieldRow(
+              key === 'name' ? tr('adoptName', 'Project name') : key === 'slug' ? tr('adoptSlug', 'Process ID') : tr('adoptDescription', 'Details'),
+              h('input', {
+                type: 'text',
+                value: adopt[key],
+                placeholder: key === 'slug' ? tr('adoptSlugHint', 'lowercase letters, digits, dot, dash, underscore') : '',
+                onChange: (event) => {
+                  state.adopt[key] = event.target.value;
+                  bump();
+                },
+                style: bwFieldStyle,
+              }),
+              key,
+            ),
+          ),
+          fieldRow(
+            tr('adoptPlacement', 'Where it opens'),
+            h(
+              'select',
+              {
+                value: adopt.placement,
+                onChange: (event) => {
+                  state.adopt.placement = event.target.value;
+                  bump();
+                },
+                style: bwFieldStyle,
+              },
+              ...placements.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.key, entry.fallback)} · ${entry.value}`)),
+            ),
+            'placement',
+          ),
+          fieldRow(
+            tr('adoptSecurity', 'Security level'),
+            h(
+              'select',
+              {
+                value: adopt.security,
+                onChange: (event) => {
+                  state.adopt.security = event.target.value;
+                  bump();
+                },
+                style: bwFieldStyle,
+              },
+              ...SECURITY_CHOICES.map((entry) => h('option', { key: entry.value, value: entry.value }, `${tr(entry.labelKey, entry.label)} · ${entry.value}`)),
+            ),
+            'security',
+          ),
+          h(
+            'div',
+            { style: { fontSize: '12px', color: adopt.security === 'unsafe' ? 'var(--dsw-alias-state-error-primary, #c33)' : BW.muted, margin: '2px 0 12px' } },
+            tr(chosenSecurity.hintKey, chosenSecurity.hint),
+          ),
+          // The reader's own decision about code that runs in this process. It appears
+          // only for a project that ships a backend, and the line under it says plainly
+          // what granting means: this is the one switch in the plugin that hands a
+          // project the same reach the plugin has.
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' } },
+            adopt.backendDeclared === true
+              ? h('input', {
+                  type: 'checkbox',
+                  checked: adopt.backend === true,
+                  onChange: (event) => {
+                    state.adopt.backend = event.target.checked;
+                    bump();
+                  },
+                  style: { marginTop: '3px', flex: '0 0 auto', accentColor: BW.ink },
+                })
+              : null,
+            h(
+              'div',
+              { style: { minWidth: '0' } },
+              h('div', { style: { fontSize: '13px', fontWeight: adopt.backend === true ? 600 : 400 } }, tr('adoptBackend', 'Run this project’s backend')),
+              h(
+                'div',
+                { style: { fontSize: '11.5px', lineHeight: 1.5, color: adopt.backend === true ? 'var(--dsw-alias-state-error-primary, #c33)' : BW.muted } },
+                adopt.backendDeclared === true
+                  ? tr('adoptBackendHint', 'Its server.js runs inside the DSH process with this plugin’s privileges — as trusted as the plugin itself.')
+                  : tr('adoptBackendNone', 'No backend here: a server.js in the project folder, named by “backend” in meta.json, is what offers one.'),
+              ),
+            ),
+          ),
+          // 常驻: a second decision about the same process, so it lives under the first
+          // and appears only once the first is answered.
+          adopt.backendDeclared === true && adopt.backend === true
+            ? h(
+                'div',
+                { style: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' } },
+                h('input', {
+                  type: 'checkbox',
+                  checked: adopt.resident === true,
+                  onChange: (event) => {
+                    state.adopt.resident = event.target.checked;
+                    bump();
+                  },
+                  style: { marginTop: '3px', flex: '0 0 auto', accentColor: BW.ink },
+                }),
+                h(
+                  'div',
+                  { style: { minWidth: '0' } },
+                  h(
+                    'div',
+                    {
+                      style: { fontSize: '13px', fontWeight: adopt.resident === true ? 600 : 400 },
+                      title: tr(
+                        'residentHint',
+                        'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close backend task in its manager row, or uncheck this switch — either unloads it right away.',
+                      ),
+                    },
+                    tr('residentSwitch', 'Resident'),
+                  ),
+                ),
+              )
+            : null,
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px' } },
+            h('button', { type: 'button', style: bwButtonStyle(false, narrow), onClick: closeForm }, tr('cancel', 'Cancel')),
+            h(
+              'button',
+              {
+                type: 'button',
+                style: bwButtonStyle(true, narrow),
+                disabled: adopt.busy === true,
+                onClick: () => {
+                  adoptTemplate(
+                    adopt.source,
+                    Object.assign(
+                      {
+                        slug: adopt.slug,
+                        name: adopt.name,
+                        description: adopt.description,
+                        placement: adopt.placement,
+                        security: adopt.security,
+                      },
+                      // Adopting a folder that ships a `server.js` is also where the
+                      // project's manifest gets its declaration: the file is the
+                      // evidence, and the switch is the reader's answer to it. Editing
+                      // an existing project never rewrites that — the folder owns it.
+                      adopt.backendDeclared === true && adopt.existing !== true ? { backend: adopt.backend === true } : {},
+                    ),
+                    // Only sent when the form offered the choice, so a project with no
+                    // backend can never end up allowed by accident.
+                    adopt.backendDeclared === true ? adopt.backend === true : undefined,
+                    // 常驻 follows the same rule, and one more: it only means anything for a
+                    // backend that may actually run.
+                    adopt.backendDeclared === true && adopt.backend === true ? adopt.resident === true : undefined,
+                  );
+                },
+              },
+              adopt.busy === true ? tr('creating', 'Creating…') : adopt.existing === true ? tr('editConfirm', 'Save changes') : tr('adoptConfirm', 'Write the manifest'),
             ),
           ),
         ),
