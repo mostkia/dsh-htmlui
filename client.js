@@ -257,7 +257,9 @@ window.__ModuleLoader__.load({
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
-      templates: { open: false, loaded: false, loadedAt: 0, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null },
+      // `armedDelete` is the project whose delete control has been pressed once: the two-step
+      // confirmation lives in the store so it survives a re-render of the row it belongs to.
+      templates: { open: false, loaded: false, loadedAt: 0, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null, armedDelete: '' },
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       /**
@@ -936,6 +938,11 @@ window.__ModuleLoader__.load({
         adoptIconTooLarge: 'An icon must weigh at most 64 KiB.',
         adoptIconUnreadable: 'That image could not be read.',
         adoptIconNotSaved: 'The project was saved, but its icon was not.',
+        deleteProject: 'Delete this project',
+        deleteProjectArmed: 'Press again to delete',
+        deleteProjectConfirm: 'Confirm',
+        deleteProjectHint: 'The folder is removed, and nothing can bring it back',
+        projectDeleted: 'The project was deleted.',
         adoptTitle: 'Project details for',
         adoptSlug: 'Process ID',
         adoptSlugHint: 'lowercase letters, digits, dot, dash, underscore',
@@ -1106,6 +1113,11 @@ window.__ModuleLoader__.load({
         adoptIconUnreadable: '这张图片读不出来。',
         adoptIconNotSaved: '项目已保存，但图标没写进去。',
         adoptTitle: '补全项目信息：',
+        deleteProject: '删除这个项目',
+        deleteProjectArmed: '再点一次删除',
+        deleteProjectConfirm: '确认',
+        deleteProjectHint: '项目文件夹会被删除，无法恢复',
+        projectDeleted: '项目已删除。',
         adoptSlug: '进程ID',
         adoptSlugHint: '仅支持小写英文数字或._-',
         adoptName: '项目名称',
@@ -1472,6 +1484,32 @@ window.__ModuleLoader__.load({
           bump();
           return false;
         });
+    }
+
+    /**
+     * Delete one project through the host, then put the page back in a state that fits.
+     *
+     * A selection or an open form that pointed at the deleted project cannot stay where it was:
+     * the catalogue no longer holds it, and a save from that form would answer 400. Both fall back
+     * to the blank canvas, which is always there.
+     */
+    function removeProject(slug) {
+      return postJson('/templates/remove', { slug }).then((value) => {
+        if (value === null || value.ok !== true) {
+          state.templates.error = (value !== null && value.error) || 'failed';
+          state.templates.notice = null;
+          bump();
+          return false;
+        }
+        state.templates.error = null;
+        state.templates.notice = tr('projectDeleted', 'The project was deleted.');
+        state.templates.armedDelete = '';
+        if (state.create.source === slug) state.create.source = 'blank';
+        if (state.adopt !== undefined && state.adopt.open === true && state.adopt.slug === slug) {
+          state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
+        }
+        return loadTemplates().then(() => true);
+      });
     }
 
     /** Tell the host the question has been put, so it is asked once and not every load. */
@@ -5042,6 +5080,7 @@ window.__ModuleLoader__.load({
       'dock-right': 'data:image/png;base64,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',
       float: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAARRQTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////SKzSWAAAAFp0Uk5TAAMVHhQWjtPh0o0C/ogB++TgOR3Z+Ac4QAgJDXe8wL0Pffx7yM4SGdj29+xcPT8+VujmJvnJv8fnLgbihJeWlaPz2xqu/TYMamlZHxPQGKChBCm19PW4KBE7H7eRVQAAAAFiS0dEW3S8lTQAAAAJcEhZcwAADsQAAA7EAZUrDhsAAAFHSURBVFjD7dZ3T4NAHIDhA7SCVkYZLVq1jmLVOqt1U/feu/f9P4hWjQnej9xAEyW8/5AQeELuOA6EUpgkK4x1SdD93bkelTGtVybv78th9vL9OgHIGgeANfIRFBVjw7Toz2+ZBsaqAgJmwaaPoF0wYwHgNFDMlRmAkO24rmMnALxiqVT0EgDs/SSg+wNs+ToIDJaHhtkaKVcgYNRgXn1j4wBQmeBYv9WABCZrb18Gd4redB5jSwEAB+OZ+uwcrfmFxci8RYClBv/Epw1IPIjM0xgHMPdrwPJKk7qSmqtuPLC2vkFdy15j8y+/Bxnw74BgazsMw9bOrijQOX62t58QOPATAYfVIyQCHNdPTt87O0dCwPcyIDWAyFc5AojsC19dXHLsTLUrEpCuOYCbW2Bw7u4fGPbmTo9Pz+DwvrSpPwcftQOUxl4Bobk8ZA0+nbIAAAAldEVYdGRhdGU6Y3JlYXRlADIwMjAtMDUtMjZUMTk6MDU6NDQrMDE6MDCBsX89AAAAJXRFWHRkYXRlOm1vZGlmeQAyMDIwLTA1LTI2VDE5OjA1OjQ0KzAxOjAw8OzHgQAAAEZ0RVh0c29mdHdhcmUASW1hZ2VNYWdpY2sgNi43LjgtOSAyMDE5LTAyLTAxIFExNiBodHRwOi8vd3d3LmltYWdlbWFnaWNrLm9yZ0F74sgAAAAYdEVYdFRodW1iOjpEb2N1bWVudDo6UGFnZXMAMaf/uy8AAAAYdEVYdFRodW1iOjpJbWFnZTo6aGVpZ2h0ADUxMsDQUFEAAAAXdEVYdFRodW1iOjpJbWFnZTo6V2lkdGgANTEyHHwD3AAAABl0RVh0VGh1bWI6Ok1pbWV0eXBlAGltYWdlL3BuZz+yVk4AAAAXdEVYdFRodW1iOjpNVGltZQAxNTkwNTE2MzQ0DUwAFgAAABN0RVh0VGh1bWI6OlNpemUAMy44NktCQvblhYUAAABKdEVYdFRodW1iOjpVUkkAZmlsZTovLy4vdXBsb2Fkcy81Ni9vQXVVbWo1LzIzODUvd2luZG93X3Jlc3RvcmVfaWNvbl8xNDQwMjcucG5nh5OUTgAAAABJRU5ErkJggg==',
       folder: 'data:image/png;base64,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',
+      delete: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAALpQTFRFAAAAEBggERggEBwdEBghHRgSERYhEBgfDxggEBkgDxcfDxceEBceEBcfEBggEBggEBggEBggERggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggERgfDxggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBggEBgg////XFA9dQAAADx0Uk5TAAAAAAAAAAAAAAAAAAABEx4RAWDP4c1YyxL75OA5HczKUhABARjX7TQ17gi6pzKtuXX+bcG7Lr68KhnY4nCmbgAAAAFiS0dEPdBtUVkAAAAJcEhZcwAA7DgAAOw4AXEryjgAAAF2SURBVFjD7ZZpb4MwDIbr3WcL26CktHRXoBvsgt3L//9dI2ylUYhJglRp0ng/NcZ5lNdOKg8GaxEMR44k92TDYv/m6ZknyR9vgTlg5LOGAmIBcLwmwHMsAZNwujz+NJx0AISzaFnAaBZ2AAgb5PUaAFLfqyPLFoQ1FxHvhdz3qmhyEYV1414o+66TeC+AzO0B564A2B77nqWCix0Qi0h4rSLHSFUeGUKjE+7llcGLw/J4J0xeHJpXdcLgxaF5ptcVzVN+KG8okf6JrAAqv3YAhV87gGFM/lA718QwwMp5ewwH1M7bYzjA8FcP6AE9oAf8CwAJfueP9hgOKOeVn/mjPYYC+LxCrkEfQwHWMTy5dt4VUDvvCFg57wpQ6C8DaMxYstADbm4Zi6kCkGblBH13r5tzFw9l2mOqAMBTzlie6IbshGcVsKs4G302nfRfqMrpHry+5Sbb8/cPUJZqHz6L7EtnIc4KClipDw5TqisiTY+OdZ2y0jdXgd+sIMQjDwAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAxOS0wMS0wMlQxNTo0ODoyMyswMTowMGwPo6IAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMTktMDEtMDJUMTU6NDg6MjMrMDE6MDAdUhseAAAARnRFWHRzb2Z0d2FyZQBJbWFnZU1hZ2ljayA2LjcuOC05IDIwMTYtMDYtMTYgUTE2IGh0dHA6Ly93d3cuaW1hZ2VtYWdpY2sub3Jn5r80tgAAABh0RVh0VGh1bWI6OkRvY3VtZW50OjpQYWdlcwAxp/+7LwAAABh0RVh0VGh1bWI6OkltYWdlOjpoZWlnaHQANTEywNBQUQAAABd0RVh0VGh1bWI6OkltYWdlOjpXaWR0aAA1MTIcfAPcAAAAGXRFWHRUaHVtYjo6TWltZXR5cGUAaW1hZ2UvcG5nP7JWTgAAABd0RVh0VGh1bWI6Ok1UaW1lADE1NDY0NDA1MDMtyw/hAAAAE3RFWHRUaHVtYjo6U2l6ZQA3LjE0S0JCpbMLbAAAAGV0RVh0VGh1bWI6OlVSSQBmaWxlOi8vLi91cGxvYWRzLzU2L1dXMldQSmIvMTc0NC8zNjQzNzI5LWJpbi1kZWxldGUtZ2FyYmFnZS1ydWJiaXNoLXRyYXNoLXdhc3RlXzExMzQyMS5wbmegMqRdAAAAAElFTkSuQmCC',
       fullscreen: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABABAMAAABYR2ztAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAACFQTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA////bW9u0wAAAAl0Uk5TAAECaqek36UE0/iVRgAAAAFiS0dECmjQ9FYAAAAJcEhZcwABOvYAATr2ATqxVzoAAABnSURBVEjHY2AYBYMMMCqBgQA6Gw6EXUOBIMQQnQ0HqjPBIAidTWcF6ciOLMOioALZm+1YFATh4w8NBcKuqJGDzgf5XQAffxRAAcGAIhjUgyE9UEUBwYxDMOsNePlAsBAjWAyOgkEAAIx1jun7jgK3AAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDE4LTAzLTA4VDEwOjAyOjM1KzAxOjAw7o4eQwAAACV0RVh0ZGF0ZTptb2RpZnkAMjAxOC0wMy0wOFQxMDowMjozNSswMTowMJ/Tpv8AAABGdEVYdHNvZnR3YXJlAEltYWdlTWFnaWNrIDYuNy44LTkgMjAxNi0wNi0xNiBRMTYgaHR0cDovL3d3dy5pbWFnZW1hZ2ljay5vcmfmvzS2AAAAGHRFWHRUaHVtYjo6RG9jdW1lbnQ6OlBhZ2VzADGn/7svAAAAGHRFWHRUaHVtYjo6SW1hZ2U6OmhlaWdodAA1MTLA0FBRAAAAF3RFWHRUaHVtYjo6SW1hZ2U6OldpZHRoADUxMhx8A9wAAAAZdEVYdFRodW1iOjpNaW1ldHlwZQBpbWFnZS9wbmc/slZOAAAAF3RFWHRUaHVtYjo6TVRpbWUAMTUyMDQ5OTc1NZp8PXkAAAATdEVYdFRodW1iOjpTaXplADEuODVLQkJzzztCAAAAQXRFWHRUaHVtYjo6VVJJAGZpbGU6Ly8uL3VwbG9hZHMvNTYvVUpnelpYRi8xMzY5Ly1mdWxsc2NyZWVuXzg5ODIyLnBuZ90gZoAAAAAASUVORK5CYII=',
       inline: 'data:image/png;base64,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/P8CzVYhza0+bmR+Gt8r4vJ3ipuY499Ni+c8y7iLre14NnsBurKO5Hlt7C7iIi5iIP4Ps3J17pbhfFsAAAAldEVYdGRhdGU6Y3JlYXRlADIwMTktMDEtMDJUMTU6NDg6MDkrMDE6MDCKWvuRAAAAJXRFWHRkYXRlOm1vZGlmeQAyMDE5LTAxLTAyVDE1OjQ4OjA5KzAxOjAw+wdDLQAAAEZ0RVh0c29mdHdhcmUASW1hZ2VNYWdpY2sgNi43LjgtOSAyMDE2LTA2LTE2IFExNiBodHRwOi8vd3d3LmltYWdlbWFnaWNrLm9yZ+a/NLYAAAAYdEVYdFRodW1iOjpEb2N1bWVudDo6UGFnZXMAMaf/uy8AAAAYdEVYdFRodW1iOjpJbWFnZTo6aGVpZ2h0ADUxMsDQUFEAAAAXdEVYdFRodW1iOjpJbWFnZTo6V2lkdGgANTEyHHwD3AAAABl0RVh0VGh1bWI6Ok1pbWV0eXBlAGltYWdlL3BuZz+yVk4AAAAXdEVYdFRodW1iOjpNVGltZQAxNTQ2NDQwNDg5BAUGwAAAABN0RVh0VGh1bWI6OlNpemUAMjEuNEtCQue7lNYAAABjdEVYdFRodW1iOjpVUkkAZmlsZTovLy4vdXBsb2Fkcy81Ni9XVzJXUEpiLzE3NDQvMzY0MzcyOC1iYWxsb29uLWNoYXQtY29udmVyc2F0aW9uLXNwZWFrLXdvcmRfMTEzNDEzLnBuZ1GHcY0AAAAASUVORK5CYII=',
       notepad: 'data:image/png;base64,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',
@@ -5127,9 +5166,11 @@ window.__ModuleLoader__.load({
             flex: '0 0 auto',
             border: blank ? `1.5px dashed ${BW.ink}` : 'none',
             borderRadius: '8px',
-            // A character sits on its baseline, and centring the line box leaves a `+` visibly
-            // low in the square. Two pixels up is what makes it look centred rather than measured.
-            transform: blank ? 'translateY(-2px)' : undefined,
+            // A character sits on its baseline, and centring the line box leaves a `+` visibly low
+            // in the square. The reader tuned this themselves: border-box plus a little padding at
+            // the bottom is what puts the glyph where the eye says the centre is.
+            boxSizing: blank ? 'border-box' : undefined,
+            paddingBottom: blank ? '7px' : undefined,
           },
         },
         emoji,
@@ -5164,7 +5205,7 @@ window.__ModuleLoader__.load({
      * row itself.
      */
     function createProjectRow(props) {
-      const { template, selected, onPick, onEdit, narrow } = props;
+      const { template, selected, onPick, onEdit, onDelete, narrow } = props;
       const backend = backendInfoOf(template);
       const declared = backend !== undefined && backend.declared === true;
       const running = backend !== undefined && backend.loaded === true;
@@ -5264,30 +5305,82 @@ window.__ModuleLoader__.load({
           template.slug === 'blank'
             ? null
             : h(
-            'button',
-            {
-              type: 'button',
-              // A language-independent handle: the pencil is an icon, so neither its text nor its
-              // label reads the same in two locales.
-              'data-edit-project': template.slug,
-              title: pencilTitle,
-              'aria-label': `${pencilTitle}: ${name}`,
-              onClick: (event) => {
-                // The pencil is inside the row, and the row is a source choice: editing a project
-                // must not silently also pick it in place of the one the reader was on.
-                event?.stopPropagation?.();
-                onEdit(template);
-              },
-              style: { padding: '2px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex' },
-            },
-            assetIcon('pencil', narrow ? 20 : 22),
-          ),
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: '2px' } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  // A language-independent handle: the pencil is an icon, so neither its text nor its
+                  // label reads the same in two locales.
+                  'data-edit-project': template.slug,
+                  title: pencilTitle,
+                  'aria-label': `${pencilTitle}: ${name}`,
+                  onClick: (event) => {
+                    // The pencil is inside the row, and the row is a source choice: editing a project
+                    // must not silently also pick it in place of the one the reader was on.
+                    event?.stopPropagation?.();
+                    onEdit(template);
+                  },
+                  style: { padding: '2px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex' },
+                },
+                assetIcon('pencil', narrow ? 20 : 22),
+              ),
+              h(ProjectDeleteButton, { slug: template.slug, name, narrow, onDelete }),
+            ),
           chips.length === 0
             ? null
             : narrow === true
               ? null
               : chipsNode,
         ),
+      );
+    }
+
+    /**
+     * One project's delete control, and its two-step confirmation.
+     *
+     * Deleting a project is deleting its folder: there is no recycle bin behind this, and the
+     * document it describes goes with it. So the first press only arms the control — it turns red
+     * and asks again — and the second press is the real answer. The armed project lives in the
+     * store rather than in this component, which keeps it through a re-render of the list and makes
+     * arming one row disarm the others.
+     */
+    function ProjectDeleteButton(props) {
+      const { slug, name, narrow, onDelete } = props;
+      const armed = state.templates.armedDelete === slug;
+      const label = armed === true ? tr('deleteProjectArmed', 'Press again to delete') : tr('deleteProject', 'Delete this project');
+      return h(
+        'button',
+        {
+          type: 'button',
+          'data-delete-project': slug,
+          title: armed === true ? tr('deleteProjectHint', 'The folder is removed, and nothing can bring it back') : label,
+          'aria-label': `${label}: ${name}`,
+          onClick: (event) => {
+            // The control sits inside the row, and the row is a source choice.
+            event?.stopPropagation?.();
+            if (armed !== true) {
+              state.templates.armedDelete = slug;
+              bump();
+              return;
+            }
+            state.templates.armedDelete = '';
+            onDelete(slug);
+          },
+          style: {
+            padding: '2px',
+            border: 'none',
+            borderRadius: '6px',
+            background: armed === true ? '#e53935' : 'transparent',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          },
+        },
+        assetIcon('delete', narrow ? 20 : 22, armed === true ? { filter: 'brightness(0) invert(1)' } : undefined),
+        armed === true ? h('span', { style: { fontSize: '11px', color: '#ffffff', whiteSpace: 'nowrap' } }, tr('deleteProjectConfirm', 'Confirm')) : null,
       );
     }
 
@@ -5632,6 +5725,9 @@ window.__ModuleLoader__.load({
                       bump();
                     },
                     onEdit: (edited) => openProjectEditor(edited),
+                    onDelete: (slug) => {
+                      removeProject(slug);
+                    },
                   }),
                 ),
           ),
@@ -6583,6 +6679,7 @@ window.__ModuleLoader__.load({
         loadTemplates,
         saveTemplatesDir,
         adoptTemplate,
+        removeProject,
         stopBackend,
         backendInfoOf,
         backendCatalogueStale,

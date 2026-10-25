@@ -894,6 +894,51 @@ function createStore(root) {
     return false;
   }
 
+  /**
+   * Delete one project outright: its folder, and the settings that were keyed to its id.
+   *
+   * The folder *is* the project, so this is what "delete" can mean here — there is no recycle bin
+   * behind it, which is why the dialog asks twice before calling. The directory is resolved the way
+   * the catalogue resolves it, by the slug in the manifest, and it must stay inside the templates
+   * directory: a manifest cannot point this at somewhere else on disk.
+   */
+  function deleteProject(slug) {
+    const input = String(slug ?? '');
+    if (!TEMPLATE_SLUG_RE.test(input)) return { ok: false, error: 'a valid project id is required' };
+    if (input === 'blank') return { ok: false, error: 'the blank canvas is not a project on disk' };
+    const root = templatesDir();
+    if (root === undefined) return { ok: false, error: 'no templates directory is set' };
+    const template = readTemplate(input);
+    if (template === undefined || typeof template.documentPath !== 'string') return { ok: false, error: `unknown project: ${input}` };
+    const base = resolve(root);
+    const documentPath = resolve(template.documentPath);
+    const dir = dirname(documentPath);
+    const inside = dir.startsWith(`${base}${sep}`);
+    if (inside) {
+      rmSync(dir, { recursive: true, force: true });
+    } else if (documentPath === join(base, `${input}.html`)) {
+      // A loose file in the directory is a project too, and it is deleted on its own.
+      rmSync(documentPath, { force: true });
+    } else {
+      return { ok: false, error: 'that project is outside the templates directory' };
+    }
+    // The settings keyed by the id go with it: a folder created again under the same id must not
+    // inherit an allowance its predecessor was given.
+    const settings = readSettings();
+    const residents = Object.assign({}, settings.backendResident);
+    delete residents[input];
+    const placements = Object.assign({}, settings.placementMemory);
+    delete placements[input];
+    writeSettings(
+      Object.assign({}, settings, {
+        backendProjects: settings.backendProjects.filter((entry) => entry !== input),
+        backendResident: residents,
+        placementMemory: placements,
+      }),
+    );
+    return { ok: true, slug: input };
+  }
+
   function listTemplates() {
     const out = [];
     const seen = new Set();
@@ -1378,6 +1423,7 @@ function createStore(root) {
     readTemplate,
     writeTemplate,
     removeTemplate,
+    deleteProject,
     listTemplates,
     listTemplateCandidates,
     adoptTemplateCandidate,
@@ -2785,6 +2831,20 @@ export function apply(ctx, config) {
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
 
+  /** Delete one project, folder and all. The dialog asks twice before it calls this. */
+  function handleTemplateRemove(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        const result = store.deleteProject(body.slug);
+        if (result.ok !== true) {
+          sendJson(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        sendJson(res, 200, { ok: true, slug: result.slug, count: store.listTemplates().length });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
   /** Give a project an icon of the reader's choosing, or take its icon away. */
   function handleTemplateIcon(req, res) {
     readJsonBody(req, MAX_BODY_BYTES)
@@ -3678,6 +3738,10 @@ export function apply(ctx, config) {
       if (path === `${ROUTE_PREFIX}/templates/icon`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTemplateIcon(req, res);
+      }
+      if (path === `${ROUTE_PREFIX}/templates/remove`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplateRemove(req, res);
       }
       if (path === `${ROUTE_PREFIX}/templates/backend`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

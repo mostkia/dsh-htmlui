@@ -463,6 +463,36 @@ test('an uploaded icon lands in the project folder and is named in its manifest'
   else writeFileSync(settingsPath, previous, 'utf8');
 });
 
+test('deleting a project takes its folder, and the blank canvas is not a project', async () => {
+  const settingsPath = join(process.env.DSH_HTMLUI_ROOT, 'settings.json');
+  const previous = existsSync(settingsPath) ? readFileSync(settingsPath, 'utf8') : undefined;
+  const dir = useTemplatesDir('delete');
+  const project = join(dir, 'gone');
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, 'index.html'), '<p>gone</p>', 'utf8');
+  writeFileSync(join(project, 'meta.json'), JSON.stringify({ slug: 'gone', name: 'Gone' }), 'utf8');
+  // An allowance the reader once gave, which must not outlive the project it was given to.
+  writeFileSync(settingsPath, JSON.stringify({ templatesDir: dir, templatesAsked: true, backendProjects: ['gone'], backendResident: { gone: true }, placementMemory: { gone: 'float' } }), 'utf8');
+
+  const url = '/plugins/@mostkia/dsh-htmlui/templates';
+  const removed = await callRoute(route(), { method: 'POST', url: `${url}/remove`, headers: { host: '127.0.0.1:3080' }, body: JSON.stringify({ slug: 'gone' }) });
+  const answer = JSON.parse(removed.text);
+  assert.equal(answer.ok, true);
+  assert.equal(existsSync(project), false, 'the folder is gone, not just its manifest');
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.deepEqual(settings.backendProjects, [], 'the allowance goes with it');
+  assert.equal(settings.backendResident.gone, undefined, 'and so does the residency answer');
+  assert.equal(settings.placementMemory.gone, undefined, 'and where it was last opened');
+
+  const blank = await callRoute(route(), { method: 'POST', url: `${url}/remove`, headers: { host: '127.0.0.1:3080' }, body: JSON.stringify({ slug: 'blank' }) });
+  assert.equal(JSON.parse(blank.text).ok, false, 'the blank canvas cannot be deleted');
+  const unknown = await callRoute(route(), { method: 'POST', url: `${url}/remove`, headers: { host: '127.0.0.1:3080' }, body: JSON.stringify({ slug: 'never-was' }) });
+  assert.equal(JSON.parse(unknown.text).ok, false, 'and neither can something that is not there');
+
+  if (previous === undefined) clearTemplatesDir();
+  else writeFileSync(settingsPath, previous, 'utf8');
+});
+
 test('the document route demands a capability token and injects the bridge', async () => {
   const created = await tool('html_ui').execute({ op: 'render', html: '<p>doc</p>' }, exec());
   const denied = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}` });

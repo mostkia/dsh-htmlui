@@ -4,6 +4,14 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ## 0.1.5
 
+### Added
+
+- A project can be deleted from the list, beside its pencil. Deleting a project deletes its folder —
+  there is no recycle bin behind it — so the control asks twice: the first press turns it red, the
+  second one removes the folder and the settings keyed to that id (the backend allowance, whether it
+  stayed resident, where it was last opened). A project created again under the same id therefore
+  starts from nothing. The blank canvas has no such control: it is not on disk.
+
 ### Changed
 
 - The create dialog is drawn in the frame it was designed from: a ruled panel, the folder standing
@@ -33,8 +41,9 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   and never read at creation — so a default chosen in the manifest form finally decides where that
   project opens. Once per opening: a place the reader picks by hand is not undone by the list
   refreshing itself.
-- The blank canvas's plus is centred in its dashed square; a character sits on its baseline, and
-  centring the line box left it visibly low.
+- The blank canvas's plus is centred in its dashed square. The reader tuned the two declarations
+  that do it — `border-box` plus a small padding at the bottom — because a character sits on its
+  baseline and centring the line box is not centring the glyph.
 - A `meta.json` written with a byte-order mark — what an editor on this platform writes by
   default — parsed as no manifest at all, so a project copied in and edited with Notepad appeared
   neither as a project nor as a candidate. The reader strips the mark.

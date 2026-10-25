@@ -1108,6 +1108,28 @@ test('choosing a project takes its own placement, and only when the menu can sho
   resetCreate();
 });
 
+test('every project carries a delete control, and the first press only arms it', () => {
+  // Deleting a project deletes its folder, so one press must not be enough — and the blank canvas
+  // is not a project on disk, so it gets no control at all.
+  resetStore();
+  resetCreate();
+  __internals.state.create.open = true;
+  __internals.state.templates.items = [
+    { slug: 'first', name: 'First' },
+    { slug: 'second', name: 'Second' },
+  ];
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const buttons = dialog.elements.filter((element) => typeof element.props?.['data-delete-project'] === 'string');
+  assert.equal(buttons.length, 2, 'one per project, none for the blank canvas');
+  __internals.state.templates.armedDelete = '';
+  buttons[0].props.onClick({ stopPropagation: () => {} });
+  assert.equal(__internals.state.templates.armedDelete, 'first', 'the first press only arms it');
+  buttons[1].props.onClick({ stopPropagation: () => {} });
+  assert.equal(__internals.state.templates.armedDelete, 'second', 'and arming another row moves the question');
+  resetCreate();
+  __internals.state.templates.armedDelete = '';
+});
+
 test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.

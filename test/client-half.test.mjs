@@ -500,6 +500,46 @@ test('opening the menu reads the chosen project’s placement, once', async () =
   }
 });
 
+test('deleting a project asks the host, and the page forgets what pointed at it', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.endsWith('/templates/remove')) return Promise.resolve({ json: () => Promise.resolve({ ok: true, slug: body.slug, count: 1 }) });
+    return Promise.resolve({
+      json: () => Promise.resolve({ ok: true, dir: '/opt/html-templates', configured: true, asked: true, candidates: [], templates: [{ slug: 'blank', name: 'Blank canvas' }] }),
+    });
+  };
+  try {
+    const { state } = __internals;
+    state.create = { open: true, source: 'gone', placement: 'dock-right', busy: false, placementBound: true };
+    state.adopt = { open: true, existing: true, slug: 'gone', name: 'Gone', source: 'gone', description: '', placement: 'dock-right', security: 'strict', busy: false };
+    const ok = await __internals.removeProject('gone');
+    assert.equal(ok, true);
+    assert.equal(calls[0].url.endsWith('/templates/remove'), true, 'the removal goes to its own route');
+    assert.deepEqual(calls[0].body, { slug: 'gone' });
+    assert.equal(state.create.source, 'blank', 'a selection that pointed at it falls back to the blank canvas');
+    assert.equal(state.adopt.open, false, 'and an open form on it is closed');
+
+    // A refusal leaves the page exactly where it was, and says why.
+    globalThis.fetch = (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return Promise.resolve({ json: () => Promise.resolve({ ok: false, error: 'unknown project: gone' }) });
+    };
+    state.create.source = 'kept';
+    const refused = await __internals.removeProject('gone');
+    assert.equal(refused, false);
+    assert.equal(state.create.source, 'kept', 'nothing is forgotten when the host says no');
+    assert.equal(state.templates.error, 'unknown project: gone');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.create = { open: false, source: 'blank', placement: 'dock-right', busy: false };
+    __internals.state.templates.error = null;
+    __internals.state.templates.notice = null;
+  }
+});
+
 test('a release that lands before the slot resolves still leaves the column clean', () => {
   // Creating and closing quickly used to strand a registration: the release ran while
   // the injection was still pending, and the callback registered afterwards with nobody
