@@ -374,6 +374,41 @@ test('templates save, render with variables, list, and remove', async () => {
   assert.equal(missing.ok, false);
 });
 
+test('a project may carry its own icon file, and only from inside its folder', async () => {
+  // This test switches the catalogue to a directory of its own, so the setting it found is kept
+  // and put back: the tests after it read the catalogue the earlier ones configured.
+  const settingsPath = join(process.env.DSH_HTMLUI_ROOT, 'settings.json');
+  const previous = existsSync(settingsPath) ? readFileSync(settingsPath, 'utf8') : undefined;
+  const dir = useTemplatesDir('icon');
+  const project = join(dir, 'card');
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, 'index.html'), '<p>card</p>', 'utf8');
+  // A byte-order mark, because that is what the editor here writes, and it must not stop the
+  // manifest from being read at all.
+  writeFileSync(join(project, 'meta.json'), `\uFEFF${JSON.stringify({ slug: 'card', name: 'Card', icon: 'icon.png' })}`, 'utf8');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  writeFileSync(join(project, 'icon.png'), png);
+
+  // A second project whose icon tries to point outside its own folder.
+  const escape = join(dir, 'escape');
+  mkdirSync(escape, { recursive: true });
+  writeFileSync(join(escape, 'index.html'), '<p>x</p>', 'utf8');
+  writeFileSync(join(dir, 'outside.png'), png);
+  writeFileSync(join(escape, 'meta.json'), JSON.stringify({ slug: 'escape', name: 'Escape', icon: '../outside.png' }), 'utf8');
+
+  const answer = await callRoute(route(), { method: 'POST', url: '/plugins/@mostkia/dsh-htmlui/templates', headers: { host: '127.0.0.1:3080' }, body: '{}' });
+  const catalogue = JSON.parse(answer.text);
+  assert.equal(catalogue.ok, true);
+  const card = catalogue.templates.find((template) => template.slug === 'card');
+  assert.ok(card !== undefined, 'a manifest with a byte-order mark is still a project');
+  assert.match(card.iconSrc, /^data:image\/png;base64,/u, 'the icon travels with the catalogue answer');
+  assert.equal(Buffer.from(card.iconSrc.split(',')[1], 'base64').length, png.length, 'and it is the file that was there');
+  const escaped = catalogue.templates.find((template) => template.slug === 'escape');
+  assert.equal(escaped.iconSrc, undefined, 'a path out of the folder is not read');
+  if (previous === undefined) clearTemplatesDir();
+  else writeFileSync(settingsPath, previous, 'utf8');
+});
+
 test('the document route demands a capability token and injects the bridge', async () => {
   const created = await tool('html_ui').execute({ op: 'render', html: '<p>doc</p>' }, exec());
   const denied = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}` });

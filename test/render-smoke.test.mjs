@@ -1034,6 +1034,40 @@ test('the create dialog asks what to start from and where to put it', () => {
   resetCreate();
 });
 
+test('a project row draws its own icon, a shipped one, or a page', () => {
+  resetStore();
+  resetCreate();
+  __internals.state.create.open = true;
+  __internals.state.templates.items = [
+    { slug: 'own', name: 'Own', iconSrc: 'data:image/png;base64,AAAA' },
+    { slug: 'named', name: 'Named', icon: 'camera' },
+    { slug: 'plain', name: 'Plain' },
+    { slug: 'emoji', name: 'Emoji', icon: '📷' },
+  ];
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const row = (slug) => {
+    const found = dialog.elements.find((element) => element.props?.['data-source'] === slug);
+    assert.ok(found !== undefined, `the ${slug} row is drawn`);
+    return found;
+  };
+  const glyphOf = (slug) => {
+    const child = row(slug).children[0];
+    assert.ok(child !== null && typeof child === 'object', `the ${slug} row starts with its glyph`);
+    return child;
+  };
+  const own = glyphOf('own');
+  assert.equal(own.type, 'img', 'a project with its own file is drawn as an image');
+  assert.equal(own.props.src, 'data:image/png;base64,AAAA', 'and it is the bytes the host handed over');
+  const named = glyphOf('named');
+  assert.equal(named.type, 'img', 'a named icon is drawn from the table the plugin ships');
+  assert.match(named.props.src, /^data:image\/png;base64,iVBOR/u, 'without asking a host route for it');
+  const plain = glyphOf('plain');
+  assert.equal(plain.children[0], '📄', 'a project with no icon is drawn with a page');
+  const emoji = glyphOf('emoji');
+  assert.equal(emoji.children[0], '📷', 'and a character is drawn as the character');
+  resetCreate();
+});
+
 test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.

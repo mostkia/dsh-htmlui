@@ -179,9 +179,15 @@ reads a file, or keeps a cache in memory possible at all.
 `"backend": true` means `server.js`; a string names a different file inside the project
 (`"backend": "lib/server.js"`).
 
-`"icon"` is optional and only affects the create dialog's list: a character (an emoji, `"📷"`) or
-one of the shipped names — `notepad`, `camera`, `calculator`. Without it a project is drawn with a
-page.
+`"icon"` is optional and only affects the create dialog's list. It may be:
+
+- a file beside the manifest — `"icon": "icon.png"` — which is where a project's own artwork
+  belongs: the folder is what gets copied around, so the icon travels with it. PNG, JPEG, GIF, WebP
+  or SVG, up to 64 KiB;
+- one of the names the plugin ships: `notepad`, `camera`, `calculator`;
+- a character, such as an emoji.
+
+Without it a project is drawn with a page.
 
 ```js
 // server.js — CommonJS, beside index.html

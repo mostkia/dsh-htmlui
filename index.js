@@ -36,7 +36,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -61,7 +61,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.4';
+const PLUGIN_VERSION = '0.1.5';
 
 /**
  * The origin a Desktop page runs on.
@@ -197,6 +197,47 @@ function readJson(path, fallback) {
     return JSON.parse(text);
   } catch {
     return fallback;
+  }
+}
+
+/** The image types a project icon may be, and the largest one worth carrying in a list answer. */
+const ICON_TYPES = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+]);
+const ICON_MAX_BYTES = 64 * 1024;
+
+/**
+ * A project's own icon, as a data URL.
+ *
+ * `icon` in `meta.json` may name a file beside it: a project is the folder that gets copied
+ * around, so its artwork travels with it. The catalogue answer carries the bytes, because the
+ * browser half cannot read into a project folder itself. A path that leaves the folder, a file
+ * that is too large, or a type that is not an image is simply not used — the dialog then draws its
+ * own default, which is better than a broken image.
+ *
+ * A name without an extension is not a file at all: it is one of the icons the plugin ships
+ * (`notepad`, `camera`, `calculator`), which the browser half resolves from its own table.
+ */
+function iconSourceFor(projectDir, meta) {
+  const icon = meta !== null && typeof meta === 'object' ? meta.icon : undefined;
+  if (typeof icon !== 'string' || icon.length === 0) return {};
+  if (!/\.(png|jpe?g|gif|webp|svg)$/iu.test(icon)) return {};
+  const base = resolve(projectDir);
+  const resolved = resolve(base, icon);
+  if (resolved !== base && !resolved.startsWith(`${base}${sep}`)) return {};
+  try {
+    const stat = statSync(resolved);
+    if (stat.isFile() !== true || stat.size > ICON_MAX_BYTES) return {};
+    const type = ICON_TYPES.get(extname(resolved).toLowerCase());
+    if (type === undefined) return {};
+    return { iconSrc: `data:${type};base64,${readFileSync(resolved).toString('base64')}` };
+  } catch {
+    return {};
   }
 }
 
@@ -868,7 +909,10 @@ function createStore(root) {
           const declared = typeof meta.slug === 'string' && TEMPLATE_SLUG_RE.test(meta.slug) ? meta.slug : undefined;
           const slug = declared ?? (TEMPLATE_SLUG_RE.test(entry.name) ? entry.name : undefined);
           if (slug === undefined || seen.has(slug)) continue;
-          out.push(bundled ? { ...meta, slug, bundled: true } : { ...meta, slug });
+          // The project's own artwork, carried in this answer: the dialog shows it, and the
+          // folder is the unit a reader copies around.
+          const icon = iconSourceFor(join(root, entry.name), meta);
+          out.push(bundled ? { ...meta, slug, ...icon, bundled: true } : { ...meta, slug, ...icon });
           seen.add(slug);
           continue;
         }
@@ -2639,6 +2683,11 @@ export function apply(ctx, config) {
             placementLast: placementMemory[String(template.slug ?? '')],
             security: securityOf(template),
             bundled: template.bundled === true,
+            // The project's icon: the name a manifest declared, and the file it named, already
+            // read into a data URL. A manifest may name one of the shipped icons instead, which
+            // the page resolves itself, so the name travels either way.
+            icon: typeof template.icon === 'string' ? template.icon : undefined,
+            iconSrc: typeof template.iconSrc === 'string' ? template.iconSrc : undefined,
             bytes: Number.isFinite(template.bytes) ? template.bytes : 0,
             // A backend is more than one fact, and the page shows them all: whether the project
             // ships one, whether the reader allowed it to run here, whether it stays loaded after

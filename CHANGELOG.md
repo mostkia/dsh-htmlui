@@ -2,7 +2,7 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.5
 
 ### Changed
 
@@ -11,10 +11,16 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   project carrying its icon, its process id, its process state and the pencil, and the four ways in
   as a 2×2 of glyphs. The blank canvas keeps its row, because a folder with nothing in it still
   has to be a way to start one.
-- A project may name its icon: `icon` in `meta.json`, either a character or one of the shipped
-  names (`notepad`, `camera`, `calculator`). A project without one is drawn with a page. The
-  artwork the dialog itself draws with travels inside the browser half, so the panel looks the
-  same on a host that predates this version.
+- A project may name its icon in `meta.json`: a file beside the manifest (`"icon": "icon.png"` — a
+  project is the folder that gets copied around, so its artwork travels with it), one of the
+  shipped names (`notepad`, `camera`, `calculator`), or a character such as an emoji. A file is
+  read by the host and carried in the catalogue answer as a data URL, up to 64 KiB and only from
+  inside the project folder. A project without one is drawn with a page. The artwork the dialog
+  itself draws with travels inside the browser half, so the panel looks the same on a host that
+  predates this version.
+- A `meta.json` written with a byte-order mark — what an editor on this platform writes by
+  default — parsed as no manifest at all, so a project copied in and edited with Notepad appeared
+  neither as a project nor as a candidate. The reader strips the mark.
 
 ### Removed
 
