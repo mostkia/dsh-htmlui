@@ -419,6 +419,57 @@ test('the create dialog creates without the model, at the chosen place', async (
   }
 });
 
+test('opening the menu announces what the folder holds but has not been added', async () => {
+  const originalFetch = globalThis.fetch;
+  let candidates = [{ kind: 'dir', name: 'new-one', html: 1 }];
+  globalThis.fetch = (url) =>
+    Promise.resolve({
+      json: () =>
+        Promise.resolve({
+          ok: true,
+          dir: '/opt/html-templates',
+          configured: true,
+          asked: true,
+          candidates,
+          templates: [{ slug: 'blank', name: 'Blank canvas' }],
+        }),
+    });
+  try {
+    const { state } = __internals;
+    state.create = { open: false, source: 'blank', placement: 'dock-right', busy: false };
+    await __internals.loadTemplates();
+    assert.equal(state.create.addOpen === true, false, 'a closed menu does not open a sub-dialog');
+
+    // Opening the panel is the moment: the badge is a small target, and the reader may never
+    // press it.
+    state.create.open = true;
+    state.create.autoShown = false;
+    await __internals.loadTemplates();
+    assert.equal(state.create.addOpen, true, 'the add list comes up with the panel');
+    assert.equal(state.create.autoShown, true, 'and only once per opening');
+
+    // Closing it and letting the catalogue refresh must not put it back in front of the reader.
+    state.create.addOpen = false;
+    await __internals.loadTemplates();
+    assert.equal(state.create.addOpen, false, 'a list the reader dismissed stays dismissed');
+
+    // The next opening announces again.
+    state.create.autoShown = false;
+    await __internals.loadTemplates();
+    assert.equal(state.create.addOpen, true, 'and the next opening announces again');
+
+    // Nothing waiting means nothing to announce.
+    candidates = [];
+    state.create.autoShown = false;
+    state.create.addOpen = false;
+    await __internals.loadTemplates();
+    assert.equal(state.create.addOpen, false, 'an empty folder opens nothing');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.create = { open: false, source: 'blank', placement: 'dock-right', busy: false };
+  }
+});
+
 test('a release that lands before the slot resolves still leaves the column clean', () => {
   // Creating and closing quickly used to strand a registration: the release ran while
   // the injection was still pending, and the callback registered afterwards with nobody

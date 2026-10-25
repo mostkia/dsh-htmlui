@@ -1085,6 +1085,52 @@ function createStore(root) {
     return { ok: true, name, slug, kind: 'file' };
   }
 
+  /**
+   * Put an image into a project's own folder and name it in the manifest.
+   *
+   * A project is the folder that gets copied around, so its icon belongs inside it rather than in
+   * a store of its own. The reader picks a file in the manifest form, the page hands the bytes
+   * here, and what lands on disk is exactly what an `"icon"` entry is expected to point at.
+   *
+   * `remove: true` takes the declaration away. The image itself is only deleted when its name is
+   * the one this function writes — a file the reader put there under another name is theirs.
+   */
+  function setProjectIcon(slug, dataUrl, options) {
+    const root = templatesDir();
+    if (root === undefined) return { ok: false, error: 'no templates directory is set' };
+    const template = readTemplate(slug);
+    if (template === undefined) return { ok: false, error: `unknown project: ${slug}` };
+    const dir = dirname(template.documentPath);
+    const metaPath = join(dir, 'meta.json');
+    const existing = readJson(metaPath, undefined);
+    const kept = existing !== null && typeof existing === 'object' && Array.isArray(existing) !== true ? existing : {};
+    const optionsFor = options !== null && typeof options === 'object' ? options : {};
+    if (optionsFor.remove === true) {
+      const next = Object.assign({}, kept);
+      delete next.icon;
+      writeJsonAtomic(metaPath, next);
+      const named = typeof kept.icon === 'string' ? kept.icon : '';
+      if (/^icon\.(png|jpg|jpeg|gif|webp|svg)$/iu.test(named)) {
+        try {
+          rmSync(join(dir, named), { force: true });
+        } catch {
+          /* a file we cannot delete is not a reason to fail the edit */
+        }
+      }
+      return { ok: true, icon: undefined };
+    }
+    const match = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,([A-Za-z0-9+/=]+)$/u.exec(String(dataUrl ?? ''));
+    if (match === null) return { ok: false, error: 'not an image' };
+    const extension = match[1] === 'jpeg' ? 'jpg' : match[1] === 'svg+xml' ? 'svg' : match[1];
+    const bytes = Buffer.from(match[2], 'base64');
+    if (bytes.length === 0) return { ok: false, error: 'the image is empty' };
+    if (bytes.length > ICON_MAX_BYTES) return { ok: false, error: `an icon must weigh at most ${Math.round(ICON_MAX_BYTES / 1024)} KiB` };
+    const fileName = `icon.${extension}`;
+    writeFileSync(join(dir, fileName), bytes);
+    writeJsonAtomic(metaPath, Object.assign({}, kept, { icon: fileName }));
+    return { ok: true, icon: fileName };
+  }
+
   function statePath(sessionId) {
     const key = String(sessionId ?? '').replace(/[^A-Za-z0-9._-]/gu, '_').slice(0, SESSION_ID_MAX);
     if (key.length === 0) throw new Error('missing session id');
@@ -1335,6 +1381,7 @@ function createStore(root) {
     listTemplates,
     listTemplateCandidates,
     adoptTemplateCandidate,
+    setProjectIcon,
     readSettings,
     setTemplatesDir,
     markTemplatesAsked,
@@ -2738,6 +2785,25 @@ export function apply(ctx, config) {
       .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
   }
 
+  /** Give a project an icon of the reader's choosing, or take its icon away. */
+  function handleTemplateIcon(req, res) {
+    readJsonBody(req, MAX_BODY_BYTES)
+      .then((body) => {
+        const slug = slugify(body.slug);
+        if (slug === undefined) {
+          sendJson(res, 400, { ok: false, error: 'a project id is required' });
+          return;
+        }
+        const result = store.setProjectIcon(slug, body.dataUrl, { remove: body.remove === true });
+        if (result.ok !== true) {
+          sendJson(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        sendJson(res, 200, { ok: true, slug, icon: result.icon });
+      })
+      .catch((error) => sendJson(res, 400, { ok: false, error: String(error?.message ?? error) }));
+  }
+
   /** Apply one template to a session straight from the page. */
   function handleTemplateRender(req, res) {
     readJsonBody(req, MAX_BODY_BYTES)
@@ -3608,6 +3674,10 @@ export function apply(ctx, config) {
       if (path === `${ROUTE_PREFIX}/templates/adopt`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleTemplatesAdopt(req, res);
+      }
+      if (path === `${ROUTE_PREFIX}/templates/icon`) {
+        if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleTemplateIcon(req, res);
       }
       if (path === `${ROUTE_PREFIX}/templates/backend`) {
         if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

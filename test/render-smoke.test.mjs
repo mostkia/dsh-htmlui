@@ -1068,6 +1068,23 @@ test('a project row draws its own icon, a shipped one, or a page', () => {
   resetCreate();
 });
 
+test('the folder badge opens the add list even for a single new project', () => {
+  // The list is not a shortcut around: adding one thing is still a decision about which one, and
+  // the list is where "this is in the folder but is not a project yet" is put into words.
+  resetStore();
+  resetCreate();
+  __internals.state.create.open = true;
+  __internals.state.templates.candidates = [{ kind: 'dir', name: 'only-one', html: 1 }];
+  __internals.state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', busy: false };
+  const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const badge = dialog.elements.find((element) => element.props?.['aria-label'] === 'Projects in the folder that have not been added yet');
+  assert.ok(badge !== undefined, 'the folder carries the count');
+  badge.props.onClick({ stopPropagation: () => {} });
+  assert.equal(__internals.state.create.addOpen, true, 'pressing it opens the list');
+  assert.equal(__internals.state.adopt.open, false, 'and it does not skip straight into the form');
+  resetCreate();
+});
+
 test('the session manager lists one row per program, with the controls that row owns', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.

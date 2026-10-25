@@ -409,6 +409,60 @@ test('a project may carry its own icon file, and only from inside its folder', a
   else writeFileSync(settingsPath, previous, 'utf8');
 });
 
+test('an uploaded icon lands in the project folder and is named in its manifest', async () => {
+  const settingsPath = join(process.env.DSH_HTMLUI_ROOT, 'settings.json');
+  const previous = existsSync(settingsPath) ? readFileSync(settingsPath, 'utf8') : undefined;
+  const dir = useTemplatesDir('icon-upload');
+  const project = join(dir, 'cam2');
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, 'index.html'), '<p>camera</p>', 'utf8');
+  const url = '/plugins/@mostkia/dsh-htmlui/templates';
+  const adopted = await callRoute(route(), {
+    method: 'POST',
+    url: `${url}/adopt`,
+    headers: { host: '127.0.0.1:3080' },
+    body: JSON.stringify({ name: 'cam2', meta: { slug: 'cam2', name: 'Cam' } }),
+  });
+  assert.equal(JSON.parse(adopted.text).ok, true, 'the folder becomes a project first');
+
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const upload = await callRoute(route(), {
+    method: 'POST',
+    url: `${url}/icon`,
+    headers: { host: '127.0.0.1:3080' },
+    body: JSON.stringify({ slug: 'cam2', dataUrl: `data:image/png;base64,${png.toString('base64')}` }),
+  });
+  assert.equal(JSON.parse(upload.text).ok, true);
+  assert.equal(readFileSync(join(project, 'icon.png')).length, png.length, 'the bytes are the ones that were sent');
+  assert.equal(JSON.parse(readFileSync(join(project, 'meta.json'), 'utf8')).icon, 'icon.png', 'and the manifest names the file');
+  const answer = await callRoute(route(), { method: 'POST', url, headers: { host: '127.0.0.1:3080' }, body: '{}' });
+  const entry = JSON.parse(answer.text).templates.find((template) => template.slug === 'cam2');
+  assert.match(entry.iconSrc, /^data:image\/png;base64,/u, 'the list carries it back');
+
+  // Too large is refused, and nothing on disk changes.
+  const big = Buffer.alloc(70 * 1024, 1);
+  const refused = await callRoute(route(), {
+    method: 'POST',
+    url: `${url}/icon`,
+    headers: { host: '127.0.0.1:3080' },
+    body: JSON.stringify({ slug: 'cam2', dataUrl: `data:image/png;base64,${big.toString('base64')}` }),
+  });
+  assert.equal(JSON.parse(refused.text).ok, false, 'an icon over the limit is refused');
+
+  // Removing takes the declaration away, and the file this route wrote with it.
+  await callRoute(route(), {
+    method: 'POST',
+    url: `${url}/icon`,
+    headers: { host: '127.0.0.1:3080' },
+    body: JSON.stringify({ slug: 'cam2', remove: true }),
+  });
+  assert.equal(JSON.parse(readFileSync(join(project, 'meta.json'), 'utf8')).icon, undefined, 'the manifest no longer names an icon');
+  assert.equal(existsSync(join(project, 'icon.png')), false, 'and the image is gone');
+
+  if (previous === undefined) clearTemplatesDir();
+  else writeFileSync(settingsPath, previous, 'utf8');
+});
+
 test('the document route demands a capability token and injects the bridge', async () => {
   const created = await tool('html_ui').execute({ op: 'render', html: '<p>doc</p>' }, exec());
   const denied = await callRoute(route(), { url: `/plugins/@mostkia/dsh-htmlui/ui/${created.uiId}` });

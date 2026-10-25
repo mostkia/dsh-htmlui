@@ -18,6 +18,17 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   inside the project folder. A project without one is drawn with a page. The artwork the dialog
   itself draws with travels inside the browser half, so the panel looks the same on a host that
   predates this version.
+- The manifest form can set a project's icon: pick an image, and the browser half sends the bytes
+  to a route that writes them into the project's own folder as `icon.<ext>` and names the file in
+  the manifest. *Remove* takes the declaration away, and takes the image with it when its name is
+  the one that route writes. Bounded to 64 KiB and to the types the list can draw; a refusal leaves
+  the project exactly as it was.
+- The add list is now the only way in: the folder's badge opens it even when a single thing is
+  waiting, because choosing one thing is still a choice, and the list is where "this is in the
+  folder but is not a project yet" is put into words.
+- Opening the menu while the folder holds something unadopted opens the add list with it, once per
+  opening. The badge is a small target on a corner, and a reader who never pressed it would believe
+  this menu had no way to add a project at all.
 - A `meta.json` written with a byte-order mark — what an editor on this platform writes by
   default — parsed as no manifest at all, so a project copied in and edited with Notepad appeared
   neither as a project nor as a candidate. The reader strips the mark.

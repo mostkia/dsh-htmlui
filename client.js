@@ -929,6 +929,13 @@ window.__ModuleLoader__.load({
         createBadgePick: 'Choose the folder your projects live in',
         createBlankPill: 'Always available',
         createBlankPillHint: 'A new interface with nothing in it yet',
+        adoptIcon: 'Project icon',
+        adoptIconPick: 'Choose an image…',
+        adoptIconRemove: 'Remove',
+        adoptIconHint: 'Kept in the project folder, so it travels with the project',
+        adoptIconTooLarge: 'An icon must weigh at most 64 KiB.',
+        adoptIconUnreadable: 'That image could not be read.',
+        adoptIconNotSaved: 'The project was saved, but its icon was not.',
         adoptTitle: 'Project details for',
         adoptSlug: 'Process ID',
         adoptSlugHint: 'lowercase letters, digits, dot, dash, underscore',
@@ -1091,6 +1098,13 @@ window.__ModuleLoader__.load({
         createBadgePick: '选择存放项目的文件夹',
         createBlankPill: '始终可用',
         createBlankPillHint: '一个还没有任何内容的新界面',
+        adoptIcon: '项目图标',
+        adoptIconPick: '选择图片…',
+        adoptIconRemove: '移除',
+        adoptIconHint: '保存在项目目录里，跟着项目一起走',
+        adoptIconTooLarge: '图标文件不能超过 64 KB。',
+        adoptIconUnreadable: '这张图片读不出来。',
+        adoptIconNotSaved: '项目已保存，但图标没写进去。',
         adoptTitle: '补全项目信息：',
         adoptSlug: '进程ID',
         adoptSlugHint: '仅支持小写英文数字或._-',
@@ -1254,6 +1268,14 @@ window.__ModuleLoader__.load({
           state.templates.dir = typeof value.dir === 'string' && value.dir.length > 0 ? value.dir : undefined;
           state.templates.configured = value.configured === true;
           state.templates.asked = value.asked === true;
+          // Opening the menu is also where new things in the folder are announced. The badge is a
+          // small target on a corner, and a reader who never presses it would believe this menu
+          // has no way to add a project at all — so the list comes up with the panel, once per
+          // opening, whenever the folder holds something that is not a project yet.
+          if (state.create.open === true && state.create.autoShown !== true && state.templates.candidates.length > 0) {
+            state.create.autoShown = true;
+            state.create.addOpen = true;
+          }
         } else {
           state.templates.error = (value !== null && value.error) || 'unavailable';
         }
@@ -1415,8 +1437,23 @@ window.__ModuleLoader__.load({
           if (allowBackend !== undefined) settings.allowed = allowBackend === true;
           if (resident !== undefined) settings.resident = resident === true;
           const asked = allowBackend === undefined && resident === undefined ? Promise.resolve(true) : postJson('/templates/backend', settings).then(() => true, () => false);
+          // The icon is a file inside the project folder, which the manifest route does not carry:
+          // the bytes go to their own route once the project exists — after an adopt, or right
+          // away for a project that was already there. Read before the form is cleared.
+          const icon =
+            state.adopt.iconRemoved === true
+              ? postJson('/templates/icon', { slug, remove: true })
+              : typeof state.adopt.iconData === 'string' && state.adopt.iconData.length > 0
+                ? postJson('/templates/icon', { slug, dataUrl: state.adopt.iconData })
+                : Promise.resolve({ ok: true });
           state.adopt = { open: false, existing: false, source: '', slug: '', name: '', description: '', placement: 'dock-right', security: 'strict', backend: false, backendDeclared: false, resident: false, busy: false };
-          return asked.then(() => loadTemplates()).then(() => true);
+          return Promise.all([icon.catch(() => ({ ok: false })), asked])
+            .then(([saved, granted]) => {
+              if (saved === null || saved.ok !== true) state.templates.notice = tr('adoptIconNotSaved', 'The project was saved, but its icon was not.');
+              return granted;
+            })
+            .then(() => loadTemplates())
+            .then(() => true);
         })
         .catch(() => {
           state.adopt.busy = false;
@@ -3743,6 +3780,8 @@ window.__ModuleLoader__.load({
                 state.create.open = true;
                 state.create.busy = false;
                 state.create.dirInput = undefined;
+                // A fresh opening is a fresh chance to announce what the folder holds.
+                state.create.autoShown = false;
                 bump();
                 loadTemplates();
               },
@@ -4935,6 +4974,9 @@ window.__ModuleLoader__.load({
       green: '#12a150',
     };
 
+    /** The largest icon the host will take; the form refuses earlier so the reason is immediate. */
+    const ICON_MAX_BYTES = 64 * 1024;
+
     /**
      * A sub-dialog's title.
      *
@@ -5285,6 +5327,7 @@ window.__ModuleLoader__.load({
         state.create.open = false;
         state.create.folderOpen = false;
         state.create.addOpen = false;
+        state.create.autoShown = false;
         bump();
       };
 
@@ -5322,13 +5365,18 @@ window.__ModuleLoader__.load({
 
       /** What the folder's badge says, and what pressing it does. */
       const badge = (() => {
-        if (candidates.length > 0) return { text: String(candidates.length), hint: tr('createBadgeNew', 'Projects in the folder that are not added yet'), action: () => {
-          if (candidates.length === 1) startAdopt(candidates[0]);
-          else {
-            state.create.addOpen = true;
-            bump();
-          }
-        } };
+        if (candidates.length > 0)
+          return {
+            text: String(candidates.length),
+            hint: tr('createBadgeNew', 'Projects in the folder that are not added yet'),
+            // Always the list, never a shortcut into the form: adding one thing is still a
+            // decision about which one, and the list is where "this is in the folder but is not a
+            // project yet" is said in words.
+            action: () => {
+              state.create.addOpen = true;
+              bump();
+            },
+          };
         if (typeof dir !== 'string' || dir.length === 0) return { text: '+', hint: tr('createBadgePick', 'Choose the folder your projects live in'), action: openFolder };
         return null;
       })();
@@ -5819,6 +5867,96 @@ window.__ModuleLoader__.load({
         bump();
       };
       const chosenSecurity = SECURITY_CHOICES.find((entry) => entry.value === adopt.security) ?? SECURITY_CHOICES[0];
+      // ---------------------------------------------------------------- the project's icon
+      //
+      // A project's icon is a file in its own folder, so the form carries the bytes and the host
+      // writes them beside the manifest. What this row shows, in order: a file just picked, the
+      // answer to "remove", then whatever the project already declares — a data URL the host read,
+      // a shipped icon, or a character.
+      const iconFileRef = useRef(null);
+      const catalogueEntry = Array.isArray(state.templates.items) ? state.templates.items.find((item) => item.slug === adopt.slug) : undefined;
+      const declaredIcon = catalogueEntry !== undefined && typeof catalogueEntry.icon === 'string' ? catalogueEntry.icon.trim() : '';
+      const declaredSrc =
+        catalogueEntry !== undefined && typeof catalogueEntry.iconSrc === 'string' && catalogueEntry.iconSrc.length > 0
+          ? catalogueEntry.iconSrc
+          : NAMED_PROJECT_ICONS.includes(declaredIcon)
+            ? ICONS[declaredIcon]
+            : undefined;
+      const pendingSrc =
+        typeof adopt.iconData === 'string' && adopt.iconData.length > 0 ? adopt.iconData : adopt.iconRemoved === true ? undefined : declaredSrc;
+      const pendingText =
+        pendingSrc === undefined && adopt.iconRemoved !== true && declaredIcon.length > 0 && !NAMED_PROJECT_ICONS.includes(declaredIcon) && !/\.(png|jpe?g|gif|webp|svg)$/iu.test(declaredIcon)
+          ? declaredIcon
+          : '';
+      const hasIcon = adopt.iconRemoved !== true && (pendingSrc !== undefined || pendingText.length > 0);
+      const pickIcon = (event) => {
+        const input = event.target;
+        const file = input.files !== null && input.files !== undefined && input.files.length > 0 ? input.files[0] : undefined;
+        // Cleared so picking the same file twice still fires a change.
+        input.value = '';
+        if (file === undefined) return;
+        if (file.size > ICON_MAX_BYTES) {
+          state.templates.error = tr('adoptIconTooLarge', 'An icon must weigh at most 64 KiB.');
+          bump();
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result !== 'string') return;
+          state.adopt.iconData = reader.result;
+          state.adopt.iconRemoved = false;
+          state.templates.error = null;
+          bump();
+        };
+        reader.onerror = () => {
+          state.templates.error = tr('adoptIconUnreadable', 'That image could not be read.');
+          bump();
+        };
+        reader.readAsDataURL(file);
+      };
+      const iconPicker = h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+        h(
+          'div',
+          {
+            title: tr('adoptIconHint', 'Kept in the project folder, so it travels with the project'),
+            style: { width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px dashed ${BW.ink}`, borderRadius: '8px', fontSize: '26px', flex: '0 0 auto' },
+          },
+          pendingSrc !== undefined
+            ? h('img', { src: pendingSrc, alt: '', style: { width: '44px', height: '44px', objectFit: 'contain' } })
+            : pendingText.length > 0
+              ? pendingText
+              : '📄',
+        ),
+        h('input', { ref: iconFileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif,image/svg+xml', style: { display: 'none' }, onChange: pickIcon }),
+        h(
+          'button',
+          {
+            type: 'button',
+            style: Object.assign({}, bwButtonStyle(false, narrow), { height: '30px', padding: '0 12px', fontSize: '13px' }),
+            onClick: () => {
+              if (iconFileRef.current !== null && iconFileRef.current !== undefined) iconFileRef.current.click();
+            },
+          },
+          tr('adoptIconPick', 'Choose an image…'),
+        ),
+        hasIcon
+          ? h(
+              'button',
+              {
+                type: 'button',
+                style: Object.assign({}, bwButtonStyle(false, narrow), { height: '30px', padding: '0 12px', fontSize: '13px' }),
+                onClick: () => {
+                  state.adopt.iconData = undefined;
+                  state.adopt.iconRemoved = true;
+                  bump();
+                },
+              },
+              tr('adoptIconRemove', 'Remove'),
+            )
+          : null,
+      );
       // 背景层已不再出现在“生成位置”里；一个本来就声明了它的项目，编辑时仍要能看见并保住它，
       // 所以只在这个值确实存在时补一项，而不是重新把它端出来。
       const placements = CREATE_PLACEMENTS.slice();
@@ -5871,6 +6009,7 @@ window.__ModuleLoader__.load({
               key,
             ),
           ),
+          fieldRow(tr('adoptIcon', 'Project icon'), iconPicker, 'icon'),
           fieldRow(
             tr('adoptPlacement', 'Where it opens'),
             h(
@@ -6154,6 +6293,7 @@ window.__ModuleLoader__.load({
             if (state.templates.asked === true || state.create.open === true) return undefined;
             state.create.open = true;
             state.create.dirInput = undefined;
+            state.create.autoShown = false;
             bump();
             return markTemplatesAsked();
           },
@@ -6177,6 +6317,7 @@ window.__ModuleLoader__.load({
             state.create.open = true;
             state.create.busy = false;
             state.create.dirInput = undefined;
+            state.create.autoShown = false;
             bump();
             // The source list is the catalogue, so ask for it as the dialog opens.
             loadTemplates();
