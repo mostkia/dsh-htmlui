@@ -101,6 +101,13 @@ test('the entries the loader resolves on its own exist', () => {
   assert.match(read(pkg.icon), /^<svg/u);
 });
 
+test('a portalled layer carries a page-level z-index, not the one it had inside the overlay layer', () => {
+  // The desktop number is a place *inside* the shell's overlay layer. Once the layer is portalled
+  // out of it, that number means nothing: the shell's own mobile header raises itself to z-index 30
+  // above the flow, and a fullscreen interface left at 5 had its close and minimize buttons
+  // underneath that bar — an interface that could not be left.
+  assert.match(read('client.js'), /zIndex: portalled \? 1200 : 5/u);
+});
 test('the browser half imports only what the shell runtime already carries', () => {
   const required = [...read('client.js').matchAll(/require\((['"])([^'"]+)\1\)/gu)].map((match) => match[2]);
   // `react` and `react-dom` are both resolved by the shell's own client runtime — the first-party

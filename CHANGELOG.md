@@ -18,6 +18,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Changed
 
+- On a phone, a fullscreen interface keeps its own chrome. The layer is portalled out of the shell's
+  overlay layer, and its z-index therefore belongs to the page instead of to that layer — but it kept
+  the number it had inside the layer (5). The shell's mobile header raises itself to `z-index: 30`
+  above the flow, so the interface's close and minimize buttons ended up underneath the top bar:
+  a fullscreen surface that could not be left, and a manager that stayed visible over it. A portalled
+  layer now carries the same number a modal does.
 - A modal is drawn at the document root now (`react-dom`'s `createPortal`). The shell mounts plugin
   surfaces in its overlay layer, and that layer sits below chrome that other plugins may draw above
   it — DSH's own mobile navigation is one example, at `z-index: 21` over a layer at `20`. A scrim

@@ -4777,6 +4777,12 @@ window.__ModuleLoader__.load({
       const titlebarInset = desktopTitlebarInset();
       for (const surface of records.filter((entry) => entry.placement === 'fullscreen')) {
         const active = fullscreenRecord !== undefined && fullscreenRecord.uiId === surface.uiId;
+        // On a phone the layer is drawn at the document root (see below), and then its z-index is
+        // read against the whole page rather than against the overlay layer's siblings. The shell's
+        // own mobile chrome is above that layer, so a fullscreen surface left at its desktop number
+        // ended up with its close and minimize buttons underneath the top bar — an interface that
+        // cannot be left.
+        const portalled = narrowViewport() === true;
         const fullscreenLayer = h(
             'div',
             {
@@ -4806,7 +4812,10 @@ window.__ModuleLoader__.load({
                 flexShrink: 0,
                 minWidth: narrowViewport() === true ? '100vw' : undefined,
                 height: titlebarInset > 0 ? `calc(100% - ${titlebarInset}px)` : '100%',
-                zIndex: 5,
+                // The desktop number is a place inside the overlay layer. Once the layer is outside
+                // it, that number means nothing: what it has to clear is the shell's chrome, and
+                // the same value the create sheet uses is what puts a modal above all of it.
+                zIndex: portalled ? 1200 : 5,
                 display: active ? 'flex' : 'none',
                 flexDirection: 'column',
                 pointerEvents: 'auto',
@@ -4823,7 +4832,7 @@ window.__ModuleLoader__.load({
           );
         // On a phone this layer is the screen, so it is drawn at the document root for the same
         // reason the create sheet is: the shell's own header sits above its overlay layer.
-        layers.push(narrowViewport() === true ? portalToBody(fullscreenLayer) : fullscreenLayer);
+        layers.push(portalled ? portalToBody(fullscreenLayer) : fullscreenLayer);
       }
 
       return layers;
