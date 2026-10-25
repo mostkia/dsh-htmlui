@@ -7,10 +7,14 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 ### Added
 
 - A project can be deleted from the list, beside its pencil. Deleting a project deletes its folder —
-  there is no recycle bin behind it — so the control asks twice: the first press turns it red, the
-  second one removes the folder and the settings keyed to that id (the backend allowance, whether it
-  stayed resident, where it was last opened). A project created again under the same id therefore
-  starts from nothing. The blank canvas has no such control: it is not on disk.
+  there is no recycle bin behind it — so the control asks twice, and answering "yes" is deliberately
+  hard: after the first press it turns red, says `Confirm?` and counts three seconds down, during
+  which it cannot be pressed at all. A double click therefore deletes nothing. If the question is
+  answered by moving — choosing another project, closing the panel — or by ten seconds of silence,
+  the control puts itself back to a plain bin. The delete itself removes the folder and the settings
+  keyed to that id (the backend allowance, whether it stayed resident, where it was last opened), so
+  a project created again under the same id starts from nothing. The blank canvas has no such
+  control: it is not on disk.
 
 ### Changed
 

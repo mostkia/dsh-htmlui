@@ -1118,16 +1118,41 @@ test('every project carries a delete control, and the first press only arms it',
     { slug: 'first', name: 'First' },
     { slug: 'second', name: 'Second' },
   ];
+  const buttonOf = (dialog, slug) => dialog.elements.find((element) => element.props?.['data-delete-project'] === slug);
   const dialog = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
   const buttons = dialog.elements.filter((element) => typeof element.props?.['data-delete-project'] === 'string');
   assert.equal(buttons.length, 2, 'one per project, none for the blank canvas');
+
   __internals.state.templates.armedDelete = '';
   buttons[0].props.onClick({ stopPropagation: () => {} });
   assert.equal(__internals.state.templates.armedDelete, 'first', 'the first press only arms it');
-  buttons[1].props.onClick({ stopPropagation: () => {} });
-  assert.equal(__internals.state.templates.armedDelete, 'second', 'and arming another row moves the question');
+  assert.equal(typeof __internals.state.templates.armedAt, 'number', 'and it remembers when it was pressed');
+
+  // Armed, but counting: the control says so and cannot be pressed.
+  const armed = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const counting = buttonOf(armed, 'first');
+  assert.equal(counting.props.disabled, true, 'the countdown blocks the press');
+  assert.equal(counting.props['data-delete-ready'], 'no');
+  assert.ok(armed.text.includes('Confirm?'), 'and the label asks, with the seconds beside it');
+  counting.props.onClick({ stopPropagation: () => {} });
+  assert.equal(__internals.state.templates.armedDelete, 'first', 'a press during the countdown changes nothing');
+
+  // Three seconds later it is a real confirmation.
+  __internals.state.templates.armedAt = Date.now() - 4000;
+  const ready = render(__internals.HtmlUiCreateDialog, { sessionId: 'session-1' });
+  const confirm = buttonOf(ready, 'first');
+  assert.equal(confirm.props.disabled, false);
+  assert.equal(confirm.props['data-delete-ready'], 'yes');
+  assert.equal(confirm.children[1].children[0], 'Confirm?', 'the countdown is gone, the question is not');
+
+  // Choosing another project answers the question: clicking the row, not its bin.
+  const otherRow = dialog.elements.find((element) => element.props?.['data-source'] === 'second');
+  otherRow.props.onClick();
+  assert.equal(__internals.state.templates.armedDelete, '', 'movement puts the bin back');
+
   resetCreate();
   __internals.state.templates.armedDelete = '';
+  __internals.state.templates.armedAt = 0;
 });
 
 test('the session manager lists one row per program, with the controls that row owns', () => {

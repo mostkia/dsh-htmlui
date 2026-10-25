@@ -540,6 +540,30 @@ test('deleting a project asks the host, and the page forgets what pointed at it'
   }
 });
 
+test('the delete control waits three seconds, and gives up after ten', () => {
+  // Two numbers about the hand: three seconds so a double click cannot delete a project, ten so a
+  // control left alone becomes a bin again instead of an armed question.
+  const { deleteArmedInfo } = __internals;
+  const t0 = 1_000_000;
+  assert.equal(deleteArmedInfo({ armedDelete: '' }, t0).armed, false, 'nothing armed, nothing to say');
+
+  const counting = deleteArmedInfo({ armedDelete: 'a', armedAt: t0 }, t0 + 500);
+  assert.equal(counting.armed, true);
+  assert.equal(counting.ready, false, 'half a second in, it is still counting');
+  assert.equal(counting.seconds, 3, 'and it says how many are left');
+
+  const edge = deleteArmedInfo({ armedDelete: 'a', armedAt: t0 }, t0 + 3000);
+  assert.equal(edge.ready, true, 'three seconds is enough');
+  assert.equal(edge.seconds, 0);
+  assert.equal(edge.expired, false, 'and it is still the project it was asked about');
+
+  assert.equal(deleteArmedInfo({ armedDelete: 'a', armedAt: t0 }, t0 + 9000).expired, false);
+  assert.equal(deleteArmedInfo({ armedDelete: 'a', armedAt: t0 }, t0 + 10001).expired, true, 'ten seconds of silence puts it back');
+
+  // A control armed without a timestamp — a replayed state, say — must not stay armed forever.
+  assert.equal(deleteArmedInfo({ armedDelete: 'a' }, t0).expired, true);
+});
+
 test('a release that lands before the slot resolves still leaves the column clean', () => {
   // Creating and closing quickly used to strand a registration: the release ran while
   // the injection was still pending, and the callback registered afterwards with nobody

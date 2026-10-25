@@ -259,7 +259,7 @@ window.__ModuleLoader__.load({
       /** The template drawer: what the catalogue holds and whether it is showing. */
       // `armedDelete` is the project whose delete control has been pressed once: the two-step
       // confirmation lives in the store so it survives a re-render of the row it belongs to.
-      templates: { open: false, loaded: false, loadedAt: 0, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null, armedDelete: '' },
+      templates: { open: false, loaded: false, loadedAt: 0, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null, armedDelete: '', armedAt: 0 },
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       /**
@@ -940,7 +940,9 @@ window.__ModuleLoader__.load({
         adoptIconNotSaved: 'The project was saved, but its icon was not.',
         deleteProject: 'Delete this project',
         deleteProjectArmed: 'Press again to delete',
-        deleteProjectConfirm: 'Confirm',
+        deleteProjectConfirm: 'Confirm?',
+        deleteProjectCooling: 'Confirm? {n}s',
+        deleteProjectCoolingHint: 'Wait for the countdown: it is there so a double click cannot delete a project',
         deleteProjectHint: 'The folder is removed, and nothing can bring it back',
         projectDeleted: 'The project was deleted.',
         adoptTitle: 'Project details for',
@@ -1115,7 +1117,9 @@ window.__ModuleLoader__.load({
         adoptTitle: '补全项目信息：',
         deleteProject: '删除这个项目',
         deleteProjectArmed: '再点一次删除',
-        deleteProjectConfirm: '确认',
+        deleteProjectConfirm: '确认？',
+        deleteProjectCooling: '确认？ {n}s',
+        deleteProjectCoolingHint: '等倒计时结束，这是为了防止双击误删',
         deleteProjectHint: '项目文件夹会被删除，无法恢复',
         projectDeleted: '项目已删除。',
         adoptSlug: '进程ID',
@@ -5028,6 +5032,33 @@ window.__ModuleLoader__.load({
     const ICON_MAX_BYTES = 64 * 1024;
 
     /**
+     * How the delete control's two-step confirmation behaves.
+     *
+     * The control sits where the pencil is, one press away from an irreversible act, so it is not
+     * enough for it to change colour: a double click is a plausible accident. It stays unusable for
+     * three seconds after arming and counts them down, and it gives up after ten seconds of no
+     * answer — both numbers are about the hand, not about the project.
+     */
+    const DELETE_COOLDOWN_MS = 3000;
+    const DELETE_ARM_MS = 10000;
+
+    /**
+     * What the delete control should say and allow, as of `now`.
+     *
+     * Pure on purpose: the countdown is a function of two timestamps, so it can be tested without a
+     * clock, and the button, the timer and the tests all read the same answer.
+     */
+    function deleteArmedInfo(templates, now) {
+      const slug = templates !== null && templates !== undefined && typeof templates.armedDelete === 'string' ? templates.armedDelete : '';
+      if (slug.length === 0) return { slug: '', armed: false, ready: false, coolMs: 0, leftMs: 0, expired: false, seconds: 0 };
+      const armedAt = templates !== null && templates !== undefined && Number.isFinite(templates.armedAt) ? templates.armedAt : now - DELETE_ARM_MS * 2;
+      const since = Math.max(0, now - armedAt);
+      const coolMs = Math.max(0, DELETE_COOLDOWN_MS - since);
+      const leftMs = Math.max(0, DELETE_ARM_MS - since);
+      return { slug, armed: true, ready: coolMs === 0, coolMs, leftMs, expired: leftMs === 0, seconds: Math.ceil(coolMs / 1000) };
+    }
+
+    /**
      * A sub-dialog's title.
      *
      * Those panels are narrower than the main one and scroll inside themselves, so they carry a
@@ -5348,39 +5379,61 @@ window.__ModuleLoader__.load({
      */
     function ProjectDeleteButton(props) {
       const { slug, name, narrow, onDelete } = props;
-      const armed = state.templates.armedDelete === slug;
-      const label = armed === true ? tr('deleteProjectArmed', 'Press again to delete') : tr('deleteProject', 'Delete this project');
+      const info = deleteArmedInfo(state.templates, Date.now());
+      const armed = info.armed === true && info.slug === slug;
+      const ready = armed === true && info.ready === true;
+      // What the control says, in the three states it can be in. The countdown is part of the
+      // label because that is where the eye already is; there is no room beside a row for a hint.
+      const text =
+        armed !== true
+          ? null
+          : ready === true
+            ? tr('deleteProjectConfirm', 'Confirm?')
+            : tr('deleteProjectCooling', 'Confirm? {n}s').replace('{n}', String(info.seconds));
+      const title =
+        armed !== true
+          ? tr('deleteProject', 'Delete this project')
+          : ready === true
+            ? tr('deleteProjectHint', 'The folder is removed, and nothing can bring it back')
+            : tr('deleteProjectCoolingHint', 'Wait for the countdown: it is there so a double click cannot delete a project');
       return h(
         'button',
         {
           type: 'button',
           'data-delete-project': slug,
-          title: armed === true ? tr('deleteProjectHint', 'The folder is removed, and nothing can bring it back') : label,
-          'aria-label': `${label}: ${name}`,
+          'data-delete-ready': armed === true ? (ready === true ? 'yes' : 'no') : undefined,
+          // While the cooldown runs the control is not a button: it is the countdown that says so.
+          disabled: armed === true && ready !== true,
+          title,
+          'aria-label': `${title}: ${name}`,
           onClick: (event) => {
             // The control sits inside the row, and the row is a source choice.
             event?.stopPropagation?.();
             if (armed !== true) {
               state.templates.armedDelete = slug;
+              state.templates.armedAt = Date.now();
               bump();
               return;
             }
+            // Still counting: the second press does nothing at all, not even disarm.
+            if (ready !== true) return;
             state.templates.armedDelete = '';
+            state.templates.armedAt = 0;
             onDelete(slug);
           },
           style: {
             padding: '2px',
             border: 'none',
             borderRadius: '6px',
-            background: armed === true ? '#e53935' : 'transparent',
-            cursor: 'pointer',
+            background: armed === true ? (ready === true ? '#e53935' : '#f2a2a0') : 'transparent',
+            cursor: armed === true && ready !== true ? 'default' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '4px',
           },
         },
         assetIcon('delete', narrow ? 20 : 22, armed === true ? { filter: 'brightness(0) invert(1)' } : undefined),
-        armed === true ? h('span', { style: { fontSize: '11px', color: '#ffffff', whiteSpace: 'nowrap' } }, tr('deleteProjectConfirm', 'Confirm')) : null,
+        text === null ? null : h('span', { style: { fontSize: '11px', color: '#ffffff', whiteSpace: 'nowrap' } }, text),
       );
     }
 
@@ -5431,6 +5484,20 @@ window.__ModuleLoader__.load({
     function HtmlUiCreateDialog(props) {
       useStore();
       const sessionId = resolveSessionId(props);
+      // The delete control counts down and gives up by itself, so something has to move while it
+      // waits. Nothing else in this panel needs a clock, and this one only runs while it is armed.
+      useEffect(() => {
+        if (state.templates.armedDelete === '') return undefined;
+        const tick = () => {
+          if (deleteArmedInfo(state.templates, Date.now()).expired === true) {
+            state.templates.armedDelete = '';
+            state.templates.armedAt = 0;
+          }
+          bump();
+        };
+        const timer = setInterval(tick, 250);
+        return () => clearInterval(timer);
+      });
       if (state.create.open !== true) return null;
       const items = Array.isArray(state.templates.items) ? state.templates.items : [];
       // The blank canvas is the way in for a reader whose folder is empty, and the host always
@@ -5450,6 +5517,9 @@ window.__ModuleLoader__.load({
         state.create.addOpen = false;
         state.create.autoShown = false;
         state.create.placementBound = false;
+        // An armed delete is about this list; closing it answers the question.
+        state.templates.armedDelete = '';
+        state.templates.armedAt = 0;
         bump();
       };
 
@@ -5707,6 +5777,10 @@ window.__ModuleLoader__.load({
                     narrow,
                     onPick: (picked) => {
                       state.create.source = picked.slug;
+                      // Choosing a project is movement: whatever the delete control was asking is
+                      // no longer the subject, so it goes back to being a bin.
+                      state.templates.armedDelete = '';
+                      state.templates.armedAt = 0;
                       // The tiles read the project's own default: `placement` in its manifest is
                       // what the reader chose when they made it, and choosing a project is the
                       // moment that answer applies. Until now it was written down and never read.
@@ -6680,6 +6754,7 @@ window.__ModuleLoader__.load({
         saveTemplatesDir,
         adoptTemplate,
         removeProject,
+        deleteArmedInfo,
         stopBackend,
         backendInfoOf,
         backendCatalogueStale,
