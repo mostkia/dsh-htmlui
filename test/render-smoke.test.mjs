@@ -1318,14 +1318,24 @@ test('a float remembers where it was left, and a touch brings it to the front', 
   assert.equal(box.top, '260px', 'and the remembered top edge');
   assert.equal(box.width, '420px', 'as are its remembered dimensions');
 
-  // Stacking: untouched windows sit at the base, and the one touched comes forward.
-  const base = render(__internals.HtmlUiFrame, { record: second, theme: 'light', variant: 'float' });
+  // Stacking: untouched windows sit at the base, and the one touched comes forward. The base comes
+  // from the caller, because only the caller knows whether this window is a child of the shell's
+  // overlay layer (2) or drawn at the page root on a phone (900).
+  const zOf = (uiId) => __internals.surfaceZ('float', false, __internals.state.floatZ.get(uiId) ?? 0);
+  const base = render(__internals.HtmlUiFrame, { record: second, theme: 'light', variant: 'float', zBase: zOf(second.uiId) });
   const baseBox = base.elements.map((element) => element.props?.style ?? {}).find((style) => style.position === 'fixed');
   assert.equal(baseBox.zIndex, 2, 'an untouched window sits at the base of the stack');
   __internals.raiseFloat(second.uiId);
-  const raised = render(__internals.HtmlUiFrame, { record: second, theme: 'light', variant: 'float' });
+  const raised = render(__internals.HtmlUiFrame, { record: second, theme: 'light', variant: 'float', zBase: zOf(second.uiId) });
   const raisedBox = raised.elements.map((element) => element.props?.style ?? {}).find((style) => style.position === 'fixed');
   assert.ok(raisedBox.zIndex > baseBox.zIndex, 'the touched window is drawn above');
+  // And on a phone the whole stack moves up to the page level, by exactly the difference the table
+  // states — not by a second number written next to it.
+  assert.equal(
+    __internals.surfaceZ('float', true, 0) - __internals.surfaceZ('float', false, 0),
+    __internals.SURFACE_Z.float.page - __internals.SURFACE_Z.float.inline,
+    'the page-level base is the same table entry',
+  );
   resetStore();
 });
 

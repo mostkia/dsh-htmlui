@@ -164,13 +164,49 @@ window.__ModuleLoader__.load({
     const SHEET_ID = 'dsh-htmlui-sheet';
 
     /**
-     * Where a portalled floating window starts on a phone.
+     * What a plugin surface starts at, in the two regimes it can be drawn in.
      *
-     * Above the shell's own chrome (its mobile header is `z-index: 30`) and below the interfaces
-     * this plugin draws as modals (`1200`), so a window can be dragged over the header while a
-     * dialog still covers everything.
+     * Inside the shell's overlay layer a surface is one of several children of a stacking context,
+     * so its number is a place among siblings — above them and below everything outside. On a phone
+     * the surfaces that must clear the shell's own chrome are drawn at the document root instead,
+     * because that chrome is above the layer and nothing inside a stacking context can rise out of
+     * it. There the same number is read against the whole page.
+     *
+     * One table, because three numbers in three places is how they drift apart. The order is the
+     * only thing that matters and it is global: a window clears the chrome, a fullscreen interface
+     * covers a window, a dialog covers both.
      */
-    const FLOAT_PAGE_Z = 900;
+    const SURFACE_Z = {
+      float: { inline: 2, page: 900 },
+      fullscreen: { inline: 5, page: 1200 },
+      // The create sheet is a dialog and is always drawn at the root; it has no layer-internal place.
+      sheet: { page: 1200 },
+    };
+
+    /**
+     * The index one surface starts at, in whichever regime it is drawn.
+     *
+     * `stack` is the bring-to-front counter a floating window carries, and it is the only number
+     * here that changes while the page is open.
+     */
+    function surfaceZ(kind, pageLevel, stack) {
+      const entry = SURFACE_Z[kind] ?? SURFACE_Z.sheet;
+      const base = pageLevel === true ? entry.page : (entry.inline ?? entry.page);
+      return base + (Number.isFinite(stack) ? stack : 0);
+    }
+
+    /**
+     * Draw a surface at the document root unless it is explicitly told to stay in its seat.
+     *
+     * The default is deliberate. These surfaces are dialogs and windows, and keeping one inside the
+     * overlay layer is the exception — a wide screen, where that layer is already above the shell's
+     * chrome. A caller that forgets the argument gets the safe answer rather than a dialog that
+     * cannot reach past a header; this exact omission, during a refactor, is what put the create
+     * sheet back under the overlay layer.
+     */
+    function placeSurface(node, pageLevel) {
+      return pageLevel === false ? node : portalToBody(node);
+    }
 
     /**
      * The size of a text control inside that sheet, on both branches: the form's fields are the same
@@ -2361,7 +2397,7 @@ window.__ModuleLoader__.load({
 
     /** The frame plus, for every variant but `background`, a slim host chrome row. */
     function HtmlUiFrame(props) {
-      const { record, theme, variant, bare } = props;
+      const { record, theme, variant, bare, zBase } = props;
       const [url, setUrl] = useState(undefined);
       const [status, setStatus] = useState('loading');
       const [attempt, setAttempt] = useState(0);
@@ -2636,14 +2672,9 @@ window.__ModuleLoader__.load({
               background: 'var(--dsw-alias-bg-overlay, #fff)',
               boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
               // The last window touched is drawn on top of the others, which is what a
-              // click on a floating window is normally asking for.
-              //
-              // The base is the interesting part. On a wide screen the window is a child of the
-              // shell's overlay layer, and "above my siblings in it" starts at 2. On a phone the
-              // window is portalled to the document root — it has to be, or it can never be dragged
-              // over the conversation header, which the shell raises to a layer of its own — and
-              // there the base has to be a page-level number: above the chrome, below a modal.
-              zIndex: (narrowViewport() === true ? FLOAT_PAGE_Z : 2) + (state.floatZ.get(record.uiId) ?? 0),
+              // click on a floating window is normally asking for. The base comes from the caller:
+              // it knows whether this window is a child of the overlay layer or a page-level one.
+              zIndex: Number.isFinite(zBase) ? zBase : 2,
             },
             onPointerDownCapture: () => raiseFloat(record.uiId),
           },
@@ -4709,6 +4740,10 @@ window.__ModuleLoader__.load({
     function overlayLayers(records, fullscreenRecord, dismiss) {
       const floats = records.filter((record) => record.placement === 'float');
       const backgrounds = records.filter((record) => record.placement === 'background');
+      // One answer for the whole group, because the two surfaces below have to agree about it: on a
+      // phone everything that must clear the shell's chrome is drawn at the document root, and on a
+      // wide screen nothing is. Asking twice is how one of them ends up on the wrong side.
+      const pageLevel = narrowViewport() === true;
 
       const leaveFullscreen = (uiId) => {
         state.fullscreen = null;
@@ -4770,6 +4805,7 @@ window.__ModuleLoader__.load({
             record,
             theme: state.theme,
             variant: 'float',
+            zBase: surfaceZ('float', pageLevel, state.floatZ.get(record.uiId) ?? 0),
             onMinimize: (uiId) => {
               state.hidden.add(uiId);
               bump();
@@ -4777,10 +4813,7 @@ window.__ModuleLoader__.load({
             onDismiss: dismiss,
           }),
         );
-        // A window is dragged, and on a phone the conversation header is drawn above the overlay
-        // layer this would otherwise live in. Portalling it is what lets it be dragged to the top
-        // of the screen at all; the frame gives it a page-level base z-index to match.
-        layers.push(narrowViewport() === true ? portalToBody(floatWindow) : floatWindow);
+        layers.push(placeSurface(floatWindow, pageLevel));
       }
 
       // Every fullscreen surface stays mounted, and only the active one is shown. Rendering
@@ -4794,12 +4827,6 @@ window.__ModuleLoader__.load({
       const titlebarInset = desktopTitlebarInset();
       for (const surface of records.filter((entry) => entry.placement === 'fullscreen')) {
         const active = fullscreenRecord !== undefined && fullscreenRecord.uiId === surface.uiId;
-        // On a phone the layer is drawn at the document root (see below), and then its z-index is
-        // read against the whole page rather than against the overlay layer's siblings. The shell's
-        // own mobile chrome is above that layer, so a fullscreen surface left at its desktop number
-        // ended up with its close and minimize buttons underneath the top bar — an interface that
-        // cannot be left.
-        const portalled = narrowViewport() === true;
         const fullscreenLayer = h(
             'div',
             {
@@ -4829,10 +4856,7 @@ window.__ModuleLoader__.load({
                 flexShrink: 0,
                 minWidth: narrowViewport() === true ? '100vw' : undefined,
                 height: titlebarInset > 0 ? `calc(100% - ${titlebarInset}px)` : '100%',
-                // The desktop number is a place inside the overlay layer. Once the layer is outside
-                // it, that number means nothing: what it has to clear is the shell's chrome, and
-                // the same value the create sheet uses is what puts a modal above all of it.
-                zIndex: portalled ? 1200 : 5,
+                zIndex: surfaceZ('fullscreen', pageLevel),
                 display: active ? 'flex' : 'none',
                 flexDirection: 'column',
                 pointerEvents: 'auto',
@@ -4849,7 +4873,7 @@ window.__ModuleLoader__.load({
           );
         // On a phone this layer is the screen, so it is drawn at the document root for the same
         // reason the create sheet is: the shell's own header sits above its overlay layer.
-        layers.push(portalled ? portalToBody(fullscreenLayer) : fullscreenLayer);
+        layers.push(placeSurface(fullscreenLayer, pageLevel));
       }
 
       return layers;
@@ -5818,7 +5842,7 @@ window.__ModuleLoader__.load({
         padding: narrow ? '22px 14px 14px' : '24px 22px 18px',
       };
 
-      return portalToBody(
+      return placeSurface(
         h(
           'div',
           {
@@ -5829,7 +5853,7 @@ window.__ModuleLoader__.load({
               // that wants to cap this box is not answered here: a global styling problem belongs
               // in the stylesheet layer, not in every dialog defending itself against rules it
               // cannot see.
-              zIndex: 1200,
+              zIndex: surfaceZ('sheet', true),
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -6188,6 +6212,7 @@ window.__ModuleLoader__.load({
         // ---------------------------------------------------------------- manifest form
         adoptOpen === true ? h(HtmlUiManifestPanel, { narrow, props }) : null,
         ),
+        true,
       );
     }
 
@@ -6969,6 +6994,9 @@ window.__ModuleLoader__.load({
         ensureRightPaneTab,
         releaseRightPaneTab,
         raiseFloat,
+        surfaceZ,
+        placeSurface,
+        SURFACE_Z,
         HtmlUiRightPane,
         HtmlUiFrame,
         // The two-step close and the fullscreen chrome that carries it are exported for the same

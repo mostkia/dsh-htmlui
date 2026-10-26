@@ -101,16 +101,36 @@ test('the entries the loader resolves on its own exist', () => {
   assert.match(read(pkg.icon), /^<svg/u);
 });
 
-test('a portalled layer carries a page-level z-index, not the one it had inside the overlay layer', () => {
-  // The desktop number is a place *inside* the shell's overlay layer. Once the layer is portalled
-  // out of it, that number means nothing: the shell's own mobile header raises itself to z-index 30
-  // above the flow, and a fullscreen interface left at 5 had its close and minimize buttons
-  // underneath that bar — an interface that could not be left.
-  assert.match(read('client.js'), /zIndex: portalled \? 1200 : 5/u);
-  // The same trap for a floating window: a child of the overlay layer starts at 2, but a phone
-  // portals it out, where 2 means nothing next to the shell's chrome.
-  assert.match(read('client.js'), /const FLOAT_PAGE_Z = 900;/u);
-  assert.match(read('client.js'), /narrowViewport\(\) === true \? FLOAT_PAGE_Z : 2/u);
+test('every surface that must clear the shell is placed and indexed the same way', () => {
+  // The bug this closes, twice: a surface's z-index inside the shell's overlay layer is a place
+  // among siblings, and it means nothing once the surface is drawn at the document root. On a phone
+  // the shell's own header is above that layer (z-index 30), so a fullscreen interface left at 5
+  // had its close button underneath the top bar, and a floating window left at 2 could not be
+  // dragged over it. Both now go through the same two helpers and the same table, so the next
+  // surface cannot repeat it by forgetting one half.
+  const source = read('client.js');
+  assert.match(source, /const SURFACE_Z = \{/u);
+  assert.match(source, /function surfaceZ\(kind, pageLevel, stack\)/u);
+  assert.match(source, /function placeSurface\(node, pageLevel\)/u);
+  // The default has to be "at the document root": a forgotten argument is how the create sheet went
+  // back under the overlay layer during exactly this refactor.
+  assert.ok(source.includes('return pageLevel === false ? node : portalToBody(node);'), 'only an explicit false keeps a surface in its seat');
+  assert.match(source, /const pageLevel = narrowViewport\(\) === true;/u);
+  for (const kind of ['float', 'fullscreen']) {
+    assert.ok(source.includes(`surfaceZ('${kind}'`), `${kind} takes its index from the table`);
+    assert.ok(source.includes(`placeSurface(${kind === 'float' ? 'floatWindow' : 'fullscreenLayer'}, pageLevel)`), `${kind} is placed by the same helper`);
+  }
+  // The order the numbers encode: a window clears the chrome, a fullscreen interface covers a
+  // window, a dialog covers both.
+  const table = source.slice(source.indexOf('const SURFACE_Z = {'));
+  const page = (kind) => Number(new RegExp(`${kind}: \\{ (?:inline: \\d+, )?page: (\\d+) \\}`, 'u').exec(table)?.[1]);
+  const floatPage = page('float');
+  const fullPage = page('fullscreen');
+  const sheetPage = page('sheet');
+  assert.ok(Number.isFinite(floatPage) && Number.isFinite(fullPage) && Number.isFinite(sheetPage), 'all three are stated');
+  assert.ok(floatPage > 30, 'a window clears the shell\'s mobile header');
+  assert.ok(floatPage < fullPage, 'a fullscreen interface covers a window');
+  assert.ok(fullPage <= sheetPage, 'a dialog covers both');
 });
 test('the browser half imports only what the shell runtime already carries', () => {
   const required = [...read('client.js').matchAll(/require\((['"])([^'"]+)\1\)/gu)].map((match) => match[2]);
