@@ -107,6 +107,10 @@ test('a portalled layer carries a page-level z-index, not the one it had inside 
   // above the flow, and a fullscreen interface left at 5 had its close and minimize buttons
   // underneath that bar — an interface that could not be left.
   assert.match(read('client.js'), /zIndex: portalled \? 1200 : 5/u);
+  // The same trap for a floating window: a child of the overlay layer starts at 2, but a phone
+  // portals it out, where 2 means nothing next to the shell's chrome.
+  assert.match(read('client.js'), /const FLOAT_PAGE_Z = 900;/u);
+  assert.match(read('client.js'), /narrowViewport\(\) === true \? FLOAT_PAGE_Z : 2/u);
 });
 test('the browser half imports only what the shell runtime already carries', () => {
   const required = [...read('client.js').matchAll(/require\((['"])([^'"]+)\1\)/gu)].map((match) => match[2]);

@@ -18,6 +18,11 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Changed
 
+- On a phone, a floating window can be dragged to the top of the screen. It is a child of the shell's
+  overlay layer, and the shell draws its own mobile header *above* that layer, so the window could
+  never pass it however far it was dragged. A phone now portals the window like the other modal
+  surfaces, and it starts at a page-level index: above the chrome, below the dialogs this plugin
+  draws.
 - On a phone, a fullscreen interface keeps its own chrome. The layer is portalled out of the shell's
   overlay layer, and its z-index therefore belongs to the page instead of to that layer — but it kept
   the number it had inside the layer (5). The shell's mobile header raises itself to `z-index: 30`

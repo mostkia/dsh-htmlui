@@ -164,6 +164,15 @@ window.__ModuleLoader__.load({
     const SHEET_ID = 'dsh-htmlui-sheet';
 
     /**
+     * Where a portalled floating window starts on a phone.
+     *
+     * Above the shell's own chrome (its mobile header is `z-index: 30`) and below the interfaces
+     * this plugin draws as modals (`1200`), so a window can be dragged over the header while a
+     * dialog still covers everything.
+     */
+    const FLOAT_PAGE_Z = 900;
+
+    /**
      * The size of a text control inside that sheet, on both branches: the form's fields are the same
      * fields whether it is drawn as a dialog or as a bottom sheet. The one exception is the directory
      * row, which is compact on a phone (`MOBILE.inputFont`).
@@ -2628,7 +2637,13 @@ window.__ModuleLoader__.load({
               boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
               // The last window touched is drawn on top of the others, which is what a
               // click on a floating window is normally asking for.
-              zIndex: 2 + (state.floatZ.get(record.uiId) ?? 0),
+              //
+              // The base is the interesting part. On a wide screen the window is a child of the
+              // shell's overlay layer, and "above my siblings in it" starts at 2. On a phone the
+              // window is portalled to the document root — it has to be, or it can never be dragged
+              // over the conversation header, which the shell raises to a layer of its own — and
+              // there the base has to be a page-level number: above the chrome, below a modal.
+              zIndex: (narrowViewport() === true ? FLOAT_PAGE_Z : 2) + (state.floatZ.get(record.uiId) ?? 0),
             },
             onPointerDownCapture: () => raiseFloat(record.uiId),
           },
@@ -4748,22 +4763,24 @@ window.__ModuleLoader__.load({
         // position, the whole runtime state — while also paying for the reload. `display:
         // none` keeps the document alive and costs nothing to show again.
         const hidden = state.hidden.has(record.uiId);
-        layers.push(
-          h(
-            'div',
-            { key: record.uiId, style: { display: hidden ? 'none' : 'contents' } },
-            h(HtmlUiFrame, {
-              record,
-              theme: state.theme,
-              variant: 'float',
-              onMinimize: (uiId) => {
-                state.hidden.add(uiId);
-                bump();
-              },
-              onDismiss: dismiss,
-            }),
-          ),
+        const floatWindow = h(
+          'div',
+          { key: record.uiId, style: { display: hidden ? 'none' : 'contents' } },
+          h(HtmlUiFrame, {
+            record,
+            theme: state.theme,
+            variant: 'float',
+            onMinimize: (uiId) => {
+              state.hidden.add(uiId);
+              bump();
+            },
+            onDismiss: dismiss,
+          }),
         );
+        // A window is dragged, and on a phone the conversation header is drawn above the overlay
+        // layer this would otherwise live in. Portalling it is what lets it be dragged to the top
+        // of the screen at all; the frame gives it a page-level base z-index to match.
+        layers.push(narrowViewport() === true ? portalToBody(floatWindow) : floatWindow);
       }
 
       // Every fullscreen surface stays mounted, and only the active one is shown. Rendering
