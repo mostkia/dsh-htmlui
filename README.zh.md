@@ -23,7 +23,7 @@ dsh-htmlui支持将HTML插入到会话流中、窗口化运行、右侧窗口分
 
 | 支持HTML会话管理（多开也能轻松管理） | 导入项目并设定权限 |
 |---|---|
-| ![session manager](docs/images/05-session-manager.png) | ![import and permissions](docs/images/06-import-and-permissions.png) |
+| ![session manager](docs/images/05-session-manager.png) | ![创建项目](docs/images/06a-create-project.png)<br>![设定权限](docs/images/06b-set-permissions.png) |
 
 | 输入框一键创建 | 支持承载复杂项目，这里是展示流式输出 Live2D |
 |---|---|

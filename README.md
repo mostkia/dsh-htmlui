@@ -29,7 +29,7 @@ more than two.
 
 | HTML session management (several open, still manageable) | Import a project and set its permissions |
 |---|---|
-| ![session manager](docs/images/05-session-manager.png) | ![import and permissions](docs/images/06-import-and-permissions.png) |
+| ![session manager](docs/images/05-session-manager.png) | ![create a project](docs/images/06a-create-project.png)<br>![set its permissions](docs/images/06b-set-permissions.png) |
 
 | One click from the composer | A project can carry anything — here, Live2D streaming |
 |---|---|
