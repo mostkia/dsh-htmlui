@@ -20,6 +20,14 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   disabled **Create**, the drawer's 套用/空白画布 controls carry the same card, and the render path
   itself refuses — so a caller added later cannot reintroduce it. Sending the first message turns
   everything back on in the same page: the shell's Session catalogue is followed, not polled.
+- A fullscreen interface follows the sidebar now. The layer covers the conversation column and never
+  the user's sidebar, and its edges are measured from a seat inside that column — but only a window
+  resize used to re-measure them. Collapsing the sidebar hands the column its width back without
+  resizing anything, so the layer kept its old left edge and left the space the sidebar gave up
+  showing the page underneath (measured: sidebar 56, layer still at 280 — a 224px strip); expanding
+  it again hung the layer over the sidebar instead. The seat's own box is watched now, so the layer
+  follows the layout in both directions, and a right column opening or closing moves it the same
+  way.
 
 ## 0.1.5
 

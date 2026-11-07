@@ -4493,6 +4493,30 @@ window.__ModuleLoader__.load({
       return base.includes('dock-right') && rightPaneReady() ? [] : base;
     }
 
+    /**
+     * Read the conversation column's edges off the dock's own seat.
+     *
+     * The fullscreen layer covers the column and not the frame — the sidebar is the user's, and
+     * covering it would hide their sessions — so it is drawn from this rectangle. The seat is a
+     * full-width child of the column, which makes it the one honest source: reading another
+     * plugin's DOM to find the column is not an option, and a fixed guess is wrong on every
+     * window.
+     *
+     * @param node - the seat element.
+     * @returns whether the measurement moved (and the page was asked to re-render).
+     */
+    function syncColumnFrom(node) {
+      if (node === null || node === undefined || typeof node.getBoundingClientRect !== 'function') return false;
+      const rect = node.getBoundingClientRect();
+      const left = Math.round(rect.left);
+      const width = Math.round(rect.width);
+      if (width <= 0) return false;
+      if (state.column.left === left && state.column.width === width) return false;
+      state.column = { left, width };
+      bump();
+      return true;
+    }
+
     function HtmlUiDock(props) {
       useStore();
       const sessionId = resolveSessionId(props);
@@ -4514,19 +4538,28 @@ window.__ModuleLoader__.load({
         state.composerSeat = node;
         scheduleInlineSync();
         const apply = () => {
-          const rect = node.getBoundingClientRect();
-          const left = Math.round(rect.left);
-          const width = Math.round(rect.width);
-          if (width > 0 && (state.column.left !== left || state.column.width !== width)) {
-            state.column = { left, width };
-            bump();
-          }
+          syncColumnFrom(node);
           scheduleInlineSync();
         };
         apply();
         window.addEventListener('resize', apply);
+        // A window resize is not the only thing that moves the column. Collapsing the sidebar
+        // hands its width back without resizing anything, and the fullscreen layer is drawn from
+        // this measurement — so it kept the old left edge and width and left the space the
+        // sidebar gave up uncovered (expanding it again hung the layer over the sidebar). The
+        // seat lives inside the column, so its own box is the signal; `ResizeObserver` hears it.
+        let observer;
+        if (typeof ResizeObserver === 'function') {
+          try {
+            observer = new ResizeObserver(apply);
+            observer.observe(node);
+          } catch {
+            observer = undefined;
+          }
+        }
         return () => {
           window.removeEventListener('resize', apply);
+          if (observer !== undefined && observer !== null) observer.disconnect();
           if (state.composerSeat === node) state.composerSeat = null;
         };
       }, []);
@@ -7358,6 +7391,10 @@ window.__ModuleLoader__.load({
         creationBlocked,
         draftSessionIdsOf,
         wireSessionCatalogue,
+        // The column the fullscreen layer covers is measured from the dock's seat; the
+        // measurement is exported because "it follows the sidebar" is a product rule, not an
+        // implementation detail.
+        syncColumnFrom,
         // The hint card a blocked control opens: the component itself, and the placement it
         // uses (pure, so the clamping is asserted without a browser).
         BlockedControl,

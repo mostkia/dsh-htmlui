@@ -1475,3 +1475,25 @@ test('a draft Session refuses a render at the sink too', async () => {
     __internals.state.sessionDrafts = new Set();
   }
 });
+
+test('the fullscreen column follows its seat, not the window', () => {
+  // The fullscreen layer is drawn from the conversation column's measured edges. A window
+  // resize used to be the only trigger — but collapsing the sidebar hands width back
+  // without resizing anything, so the layer kept the old left edge and width and left the
+  // space the sidebar gave up uncovered. The measurement is what a ResizeObserver on the
+  // seat drives; this is the rule it applies.
+  const seat = (left, width) => ({ getBoundingClientRect: () => ({ left, width }) });
+  __internals.state.column = { left: 280, width: 993 };
+  assert.equal(__internals.syncColumnFrom(seat(56, 1217)), true, 'a new seat rectangle is taken');
+  assert.deepEqual(__internals.state.column, { left: 56, width: 1217 });
+
+  const revision = __internals.state.revision;
+  assert.equal(__internals.syncColumnFrom(seat(56, 1217)), false, 'the same rectangle is a no-op');
+  assert.equal(__internals.state.revision, revision, 'and re-renders nothing');
+
+  assert.equal(__internals.syncColumnFrom(seat(56, 0)), false, 'a seat with no width is not a measurement');
+  assert.deepEqual(__internals.state.column, { left: 56, width: 1217 }, 'so it cannot collapse the layer');
+  assert.equal(__internals.syncColumnFrom(undefined), false, 'and a seat that is not mounted is not either');
+
+  __internals.state.column = { left: 0, width: 0 };
+});
