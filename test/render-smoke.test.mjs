@@ -1385,6 +1385,50 @@ test('the window menu offers minimize for every form that has one, and none for 
   resetStore();
 });
 
+test('a front-end program keeps its project tile and name', () => {
+  // The row's icon, name and remembered position all come from the catalogue entry its record
+  // names — and that entry used to be attached only to projects with a backend, so a pure
+  // front-end program fell through to the "no project" placeholder (📄) while a backend one wore
+  // its own artwork. The gate that skips unknown projects is about *creating* a row, not about
+  // reading the one that exists.
+  setCatalogue([
+    { slug: 'tetris', name: '俄罗斯方块', description: '', bytes: 1, iconSrc: 'data:image/png;base64,AAAA', icon: 'icon.png' },
+  ]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-tile0001', sessionId: 'session-1', title: '俄罗斯方块', placement: 'inline', template: 'tetris', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const [row] = __internals.managerRowsFor('session-1');
+  assert.equal(row.template.iconSrc, 'data:image/png;base64,AAAA', 'a project with no backend still yields its catalogue entry');
+  const view = render(__internals.HtmlUiManagerRow, { row, sessionId: 'session-1', onStatus: () => {}, props: {} });
+  assert.equal(
+    view.elements.filter((element) => element.type === 'img' && element.props?.src === 'data:image/png;base64,AAAA').length,
+    1,
+    'so the row draws the project’s own picture',
+  );
+  assert.ok(!view.text.includes('📄'), 'and not the placeholder');
+  resetStore();
+  state.templates.items = [];
+});
+
+test('the gear closes the window menu it opened', () => {
+  // A second press on the gear is the one gesture a reader tries when a popover is in the way:
+  // before 0.1.6 it re-opened the menu (a no-op) and the only way out was a tap somewhere else.
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-gear0001', sessionId: 'session-1', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
+  ]);
+  const [row] = __internals.managerRowsFor('session-1');
+  const page = renderStateful(__internals.HtmlUiManagerRow, { row, sessionId: 'session-1', onStatus: () => {}, props: {} });
+  const gear = () => page.elements.find((element) => element.type === 'button' && element.props?.['aria-haspopup'] === 'menu');
+  assert.ok(gear() !== undefined, 'the row carries the gear');
+  gear().props.onClick();
+  page.rerender();
+  assert.ok(page.text.includes('Floating window'), 'the first press opens the menu');
+  gear().props.onClick();
+  page.rerender();
+  assert.ok(!page.text.includes('Floating window'), 'the second press closes it');
+  resetStore();
+});
+
 test('every surface keeps one hook order, records or not', () => {
   // React error #310 in the live page came from exactly this: hooks placed after an
   // early return. The count only changed once a seat actually had records, so no test
@@ -1589,6 +1633,14 @@ test('the drawer keeps the project marks and only the drawer, and the manager ro
     );
     for (const mark of ['未授权', '未加载', '跟随面板']) {
       assert.ok(!manager.text.includes(mark), `and a project with no declared backend shows no ${mark}`);
+    }
+    // The same rule on the other card: a pure front-end program carries no process marks at all,
+    // now that its catalogue entry is attached for its icon and name (a project with no backend
+    // used to fall through to "follows the panel / not loaded", which read as a broken program).
+    const local = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    assert.ok(local.text.includes('平静'), 'the front-end program is on the session card, under its project name');
+    for (const mark of ['未授权', '未加载', '跟随面板', '已加载', '已授权']) {
+      assert.ok(!local.text.includes(mark), `and shows no backend mark (${mark})`);
     }
     // One row per program, and no separate process list: the same project never gets two rows.
     assert.equal(__internals.managerRowsFor('session-1').length, 3, 'three programs, three rows');

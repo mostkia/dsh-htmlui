@@ -46,13 +46,24 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   in the host) — and one table under them headed `程序名(AID)` / `程序状态`. A row carries the
   project's tile, its `名称（slug）` and chips, a single status — `前台运行` (green) while an interface
   is on screen, `后台运行` (blue) once it is away or gone — and exactly two controls: a gear and a dark
-  `关闭` pill. The gear opens `重新设置视窗状态`: the four positions the create dialog offers (the one
-  it is drawn in marked) plus `最小化`/`恢复显示` for the forms that can hide. That replaces the row's
-  four buttons (minimize/maximize, close UI, restart UI, close backend task, close session), and
-  `关闭` now means one thing — the program ends, its interfaces close and its process stops — after a
-  second press, instead of asking the reader to tell two destructive actions apart. On a phone the
-  cards stack, the table heading is dropped, the status joins the chips under the name and the tap
-  targets grow.
+  `关闭` pill. The gear opens `重新设置视窗`: the four positions the create dialog offers (the one
+  it is drawn in marked), with `最小化`/`恢复显示` in that panel's title bar for the forms that can
+  hide; pressing the gear a second time closes the panel. That replaces the row's four buttons
+  (minimize/maximize, close UI, restart UI, close backend task, close session), and `关闭` now means
+  one thing — the program ends, its interfaces close and its process stops — after a second press,
+  instead of asking the reader to tell two destructive actions apart. The two cards are capped at
+  320px rather than each taking half of a wide column. On a phone the cards stack, the table heading
+  is dropped, the status joins the chips under the name and the tap targets grow.
+
+### Fixed
+
+- A pure front-end program keeps its own tile and name in the manager. The catalogue entry a row
+  reads its icon (and remembered position) from was attached only to projects that declare a
+  backend, so every interface of a plain page fell through to the "no project" placeholder — a 📄
+  where the project's picture belongs — while backend programs looked right. The gate that skips a
+  project with no interface is about *creating* a row, not about reading the one that exists.
+  A project that declares no backend also no longer wears the process chips (`跟随面板` /
+  `未加载`), which it only started to once its entry was attached.
 
 ## 0.1.5
 

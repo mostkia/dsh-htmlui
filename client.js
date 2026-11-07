@@ -1036,7 +1036,7 @@ window.__ModuleLoader__.load({
         managerColumnStatus: 'Status',
         managerStatusForeground: 'Running in front',
         managerStatusBackground: 'Running in background',
-        managerViewportTitle: 'Set the window again',
+        managerViewportTitle: 'Set the window',
         managerViewportMinimize: 'Minimize',
         managerViewportRestore: 'Show it again',
         managerViewportReloadNote: 'Choosing a position reloads the interface.',
@@ -1215,7 +1215,7 @@ window.__ModuleLoader__.load({
         managerColumnStatus: '程序状态',
         managerStatusForeground: '前台运行',
         managerStatusBackground: '后台运行',
-        managerViewportTitle: '重新设置视窗状态',
+        managerViewportTitle: '重新设置视窗',
         managerViewportMinimize: '最小化',
         managerViewportRestore: '恢复显示',
         managerViewportReloadNote: '切换位置会重新加载界面。',
@@ -3807,20 +3807,23 @@ window.__ModuleLoader__.load({
       for (const template of items) {
         const slug = typeof template.slug === 'string' ? template.slug : '';
         if (slug.length === 0) continue;
+        const row = rows.get(slug);
+        // A program that has an interface here takes the catalogue entry whatever it is: the
+        // row's icon, its name and its remembered position all come from it, and a front-end
+        // project has no backend to gate on. The gate below is only about *creating* a row.
+        if (row !== undefined) {
+          row.template = template;
+          continue;
+        }
         const backend = backendInfoOf(template);
         if (backend === undefined || backend.declared !== true) continue;
-        const row = rows.get(slug);
-        if (row === undefined) {
-          // No interface in this session, so the row exists only because the process does. Two
-          // cases, and both are honest: the catalogue says it is loaded right now, or this session
-          // closed its interface on purpose (which is remembered until the process is really gone).
-          // A project that is merely declared, never opened here and not running, is somebody
-          // else's — listing it in every session's manager would be a row this session cannot act on.
-          if (!managerBackendLive(backend) && !state.dismissedTemplates.has(slug)) continue;
-          rows.set(slug, { key: slug, slug, template, records: [] });
-        } else {
-          row.template = template;
-        }
+        // No interface in this session, so the row exists only because the process does. Two
+        // cases, and both are honest: the catalogue says it is loaded right now, or this session
+        // closed its interface on purpose (which is remembered until the process is really gone).
+        // A project that is merely declared, never opened here and not running, is somebody
+        // else's — listing it in every session's manager would be a row this session cannot act on.
+        if (!managerBackendLive(backend) && !state.dismissedTemplates.has(slug)) continue;
+        rows.set(slug, { key: slug, slug, template, records: [] });
       }
       return Array.from(rows.values());
     }
@@ -4031,7 +4034,7 @@ window.__ModuleLoader__.load({
     /**
      * One program's row: what it is, what it is doing, and the two controls it owns.
      *
-     * The gear opens 「重新设置视窗状态」 — where the interface is drawn, or put away — and the
+     * The gear opens 「重新设置视窗」 — where the interface is drawn, or put away — and the
      * dark pill ends the program. Those are the row's whole interface: the four buttons this row
      * used to carry asked the reader to know which of two destructive actions they wanted, and
      * the confirmation lives on the pill now, in the same two-step the old controls had.
@@ -4141,7 +4144,7 @@ window.__ModuleLoader__.load({
               {
                 ref: floating.panelRef,
                 role: 'menu',
-                'aria-label': tr('managerViewportTitle', 'Set the window again'),
+                'aria-label': tr('managerViewportTitle', 'Set the window'),
                 'data-dsh-htmlui-window-menu': '',
                 style: {
                   position: 'fixed',
@@ -4165,15 +4168,56 @@ window.__ModuleLoader__.load({
                 'div',
                 {
                   style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
                     background: BW.ink,
                     color: '#ffffff',
-                    fontSize: '12.5px',
-                    fontWeight: 600,
-                    lineHeight: '18px',
-                    padding: '7px 12px',
+                    padding: '5px 8px 5px 12px',
                   },
                 },
-                tr('managerViewportTitle', 'Set the window again'),
+                h(
+                  'span',
+                  {
+                    style: {
+                      flex: '1 1 auto',
+                      minWidth: '0',
+                      fontSize: '12.5px',
+                      fontWeight: 600,
+                      lineHeight: '18px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    },
+                  },
+                  tr('managerViewportTitle', 'Set the window'),
+                ),
+                // 最小化 lives in the title bar, where the design puts it: it is a property of
+                // the window this menu is about, not a fifth position to pick.
+                canHide === true
+                  ? h(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => shift('minimize'),
+                        'data-window-minimize': '',
+                        style: {
+                          font: 'inherit',
+                          fontSize: '11.5px',
+                          lineHeight: '1',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid rgba(255, 255, 255, 0.4)',
+                          background: 'transparent',
+                          color: '#ffffff',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          flex: '0 0 auto',
+                        },
+                      },
+                      hidden ? tr('managerViewportRestore', 'Show it again') : tr('managerViewportMinimize', 'Minimize'),
+                    )
+                  : null,
               ),
               h(
                 'div',
@@ -4210,28 +4254,6 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                 ),
-                canHide === true
-                  ? h(
-                      'button',
-                      {
-                        type: 'button',
-                        role: 'menuitem',
-                        onClick: () => shift('minimize'),
-                        style: {
-                          font: 'inherit',
-                          fontSize: '12px',
-                          lineHeight: '18px',
-                          padding: '1px 2px',
-                          border: 'none',
-                          background: 'transparent',
-                          color: BW.ink,
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                        },
-                      },
-                      hidden ? tr('managerViewportRestore', 'Show it again') : tr('managerViewportMinimize', 'Minimize'),
-                    )
-                  : null,
                 // Said where the choice is made: this build restarts the interface at the chosen
                 // position, so a page that held something in memory loses it. Moving the same
                 // interface without reloading is the next step, and until then the menu says so.
@@ -4288,7 +4310,10 @@ window.__ModuleLoader__.load({
               narrow ? h('span', { style: { fontSize: '12px', color: status.colour, whiteSpace: 'nowrap' } }, status.label) : null,
               hasBackend ? chip(tr('backendBadge', 'Backend'), 'badge') : null,
               hasBackend ? chip(tr('backendAllowed', 'Allowed'), 'allowed') : null,
-              ...(backend === undefined ? [] : backendChips(backend, false)),
+              // Only a project that *declares* a backend has a process whose state could be
+              // marked: a pure front-end page has nothing to load, and 「跟随面板 / 未加载」 on
+              // one reads as a broken program rather than "there is nothing to start here".
+              ...(hasBackend && backend !== undefined ? backendChips(backend, false) : []),
             ),
           ),
         ),
@@ -4305,9 +4330,9 @@ window.__ModuleLoader__.load({
               type: 'button',
               'aria-haspopup': 'menu',
               'aria-expanded': menuOpen === true,
-              'aria-label': `${tr('managerViewportTitle', 'Set the window again')}: ${title}`,
-              title: tr('managerViewportTitle', 'Set the window again'),
-              onClick: () => setMenuOpen(true),
+              'aria-label': `${tr('managerViewportTitle', 'Set the window')}: ${title}`,
+              title: tr('managerViewportTitle', 'Set the window'),
+              onClick: () => setMenuOpen(!menuOpen),
               style: {
                 width: narrow ? MOBILE.iconButton : '30px',
                 height: narrow ? MOBILE.iconButton : '30px',
@@ -4442,6 +4467,9 @@ window.__ModuleLoader__.load({
             onClick: () => setTabState(id),
             style: {
               flex: narrow ? '1 1 auto' : '1 1 0',
+              // Two cards share the width on a wide screen, and 50% each made a 300px card in a
+              // 600px column — wide enough to read as a banner. The design's cards are compact.
+              maxWidth: narrow ? undefined : '320px',
               minWidth: '0',
               textAlign: 'left',
               display: 'flex',
