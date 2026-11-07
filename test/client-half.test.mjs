@@ -1384,21 +1384,37 @@ test('creation waits for a Session that has a message', () => {
 
 test('the composer entry is greyed out and says why until the Session can hold an interface', () => {
   // The second half: the control the reader actually presses. A disabled button shows no
-  // tooltip of its own in any current browser, so the sentence rides on a wrapper and the
-  // button is not a pointer target — that is what makes the hint readable at all.
+  // tooltip of its own in any current browser, and a phone has no hover at all, so the
+  // sentence is drawn as a card by a wrapper — the button is not a pointer target, which is
+  // what makes the card reachable by a pointer, a thumb and a keyboard alike.
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () => Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
   try {
     __internals.state.sessionDrafts = new Set(['session-draft']);
     const blocked = __internals.HtmlUiTemplateButton({ sessionId: 'session-draft' });
-    assert.equal(blocked.type, 'span', 'the hint wraps the entry');
-    assert.equal(blocked.props.title, __internals.MESSAGES.en.createNeedsSession, 'and carries the reason');
+    assert.equal(blocked.type, __internals.BlockedControl, 'the hint card wraps the entry');
+    assert.equal(blocked.props.hint, __internals.MESSAGES.en.createNeedsSession, 'and carries the reason');
+    assert.equal(blocked.props.hintTitle, __internals.MESSAGES.en.createNeedsSessionTitle);
     const control = blocked.children[0];
     assert.equal(control.type, 'button');
     assert.equal(control.props.disabled, true, 'the entry cannot be pressed');
     assert.equal(control.props['aria-disabled'], 'true');
-    assert.equal(control.props.style.pointerEvents, 'none', 'so the wrapper owns the pointer and the tooltip');
-    assert.equal(control.props.title, __internals.MESSAGES.en.createNeedsSession);
+    assert.equal(control.props.style.pointerEvents, 'none', 'so the wrapper owns the pointer and the card');
+
+    // The wrapper itself is keyboard-reachable and opens the card on every one of the three
+    // gestures: hover, tap and focus.
+    const wrapper = __internals.BlockedControl(blocked.props === undefined ? {} : { ...blocked.props, children: control });
+    assert.equal(wrapper.type, 'span');
+    assert.equal(wrapper.props.role, 'button');
+    assert.equal(wrapper.props.tabIndex, 0, 'a keyboard can reach it');
+    assert.equal(wrapper.props['aria-disabled'], 'true');
+    assert.equal(wrapper.props['aria-label'], __internals.MESSAGES.en.createNeedsSession);
+    assert.equal(wrapper.props['data-dsh-htmlui-blocked'], '');
+    for (const handler of ['onMouseEnter', 'onClick', 'onFocus']) {
+      assert.equal(typeof wrapper.props[handler], 'function', `${handler} opens the card`);
+    }
+    assert.equal(wrapper.children[0], control, 'the disabled control still renders inside it');
+    assert.equal(wrapper.children[1], null, 'and no card is shown until it is asked for');
 
     // A Session with a conversation gets the plain button back, and pressing it opens the sheet.
     __internals.state.sessionDrafts = new Set();
@@ -1414,6 +1430,29 @@ test('the composer entry is greyed out and says why until the Session can hold a
     __internals.state.create.open = false;
     __internals.state.sessionDrafts = new Set();
   }
+});
+
+test('the hint card stays inside the viewport', () => {
+  // The card is positioned once, from measured rectangles, so the arithmetic is what decides
+  // whether a phone can read it at all. A composer entry sits near the right edge and near
+  // the bottom of the screen — the exact pair of edges that clamps.
+  const card = { width: 260, height: 72 };
+  const desktop = { width: 1280, height: 800 };
+  // Normal case: above the control, right edges aligned.
+  assert.deepEqual(
+    __internals.hintCardPosition({ left: 1140, right: 1200, top: 700, bottom: 726 }, card, desktop),
+    { left: 940, top: 618 },
+  );
+  // No room above: the card goes below, still inside the viewport.
+  assert.deepEqual(
+    __internals.hintCardPosition({ left: 40, right: 100, top: 20, bottom: 46 }, card, desktop),
+    { left: 8, top: 56 },
+  );
+  // A phone: opening leftwards from the control's right edge keeps it on screen.
+  assert.deepEqual(
+    __internals.hintCardPosition({ left: 300, right: 380, top: 700, bottom: 724 }, card, { width: 390, height: 844 }),
+    { left: 120, top: 618 },
+  );
 });
 
 test('a draft Session refuses a render at the sink too', async () => {

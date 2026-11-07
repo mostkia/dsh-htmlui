@@ -152,6 +152,10 @@ window.__ModuleLoader__.load({
       inputPadding: '0 9px',
       inputRadius: '8px',
       inputFont: '11.5px',
+      /** The hint card a blocked control opens: a thumb reads it, so it is a size up. */
+      hintCardPadding: '12px 14px',
+      hintTitleFont: '14px',
+      hintBodyFont: '12.5px',
     };
 
     /**
@@ -1063,6 +1067,7 @@ window.__ModuleLoader__.load({
         // 「新建会话」 opens a Session before it has any messages, and an interface made there
         // cannot be reached again — the HTML manager is a view of the conversation, and a
         // Session with no messages has no conversation yet.
+        createNeedsSessionTitle: 'No session yet',
         createNeedsSession: 'Send one message first: an HTML project needs a session that exists.',
         createSource: 'New HTML project',
         createDirPlaceholder: 'No directory chosen yet',
@@ -1245,6 +1250,7 @@ window.__ModuleLoader__.load({
         // 输入框入口和新建面板共用这一句。规则来自实测：「新建会话」立刻产生一个会话，
         // 但发消息之前它还没有对话视图，HTML 管理器正是对话视图里的一个页签 —— 在那里
         // 建的界面没有任何入口能再找回来（最小化的浮动窗口会永远停在那里）。
+        createNeedsSessionTitle: '还没法新建 HTML',
         createNeedsSession: '会话建好之后才能新建 HTML 项目：请先发一条消息。',
         createSource: '新建HTML项目',
         createDirPlaceholder: '还没有选择目录',
@@ -1980,24 +1986,184 @@ window.__ModuleLoader__.load({
     /**
      * The grey a control wears while this Session has no messages yet.
      *
-     * `pointerEvents: none` is not decoration: it is what lets the wrapper below own the
-     * pointer, and therefore the tooltip. A disabled button shows no tooltip of its own in
-     * any current browser, and "greyed out with no reason" is the one thing worse than
-     * "greyed out".
+     * `pointerEvents: none` is not decoration: it is what lets the wrapper own the pointer, and
+     * therefore the card below. A disabled button shows no tooltip of its own in any current
+     * browser, and "greyed out with no reason" is the one thing worse than "greyed out".
      */
     const blockedControlStyle = Object.assign({}, disabledStyle, { pointerEvents: 'none' });
 
     /**
-     * Wrap a control that is blocked, so hovering it says why.
+     * Where the hint card sits relative to the control it explains.
      *
-     * @param control - the button, already disabled and wearing `blockedControlStyle`.
-     * @param hint - the sentence the pointer reads; also the wrapper's accessible name.
+     * Above when there is room, below when the control is too close to the top, and never
+     * outside the viewport: a phone's composer sits a few pixels from the edge, and a card that
+     * runs off it is a card nobody can read. Pure, so the clamping is testable without a browser.
+     *
+     * @param anchor - the control's rectangle.
+     * @param card - the card's own size, measured after it is laid out.
+     * @param viewport - the window's size.
      */
-    function blockedControl(control, hint) {
+    function hintCardPosition(anchor, card, viewport) {
+      const gap = 10;
+      const margin = 8;
+      const width = Math.max(0, viewport.width);
+      const height = Math.max(0, viewport.height);
+      // The card's right edge follows the control's, so a composer entry near the right edge
+      // gets a card that opens leftwards instead of off the screen.
+      const left = Math.max(margin, Math.min(anchor.right - card.width, width - card.width - margin));
+      const above = anchor.top - card.height - gap;
+      const below = anchor.bottom + gap;
+      const top = above >= margin ? above : Math.max(margin, Math.min(below, height - card.height - margin));
+      return { left, top };
+    }
+
+    /**
+     * A control that cannot be pressed yet: the grey, and a card that says why.
+     *
+     * A disabled button shows no tooltip of its own, and a phone has no hover at all — so the
+     * sentence is drawn here instead: on hover for a pointer, on tap for a thumb, and on focus
+     * for a keyboard. The card is portalled to the document root and placed against the
+     * control's own rectangle, because the composer row clips what it contains and the shell's
+     * overlay layer is drawn under its own chrome.
+     *
+     * Dismissal is any tap that is not on the control, Escape, or any scroll — the card is
+     * positioned once, and a page that moved underneath it would leave it pointing at nothing.
+     * A tap on the card itself is a dismissal too: it is the nearest thing to press.
+     *
+     * @param props.hintTitle - the card's heading, already resolved through `tr`.
+     * @param props.hint - its sentence.
+     * @param props.children - the disabled control; it must wear `blockedControlStyle`.
+     */
+    function BlockedControl(props) {
+      const [open, setOpen] = useState(false);
+      const [layout, setLayout] = useState(null);
+      const wrapRef = useRef(null);
+      const cardRef = useRef(null);
+      const narrow = narrowViewport();
+      const show = useCallback(() => setOpen(true), []);
+      const hide = useCallback(() => setOpen(false), []);
+
+      // Measured after layout, before paint: the first render is the measurement, so the card
+      // never appears at the origin for a frame.
+      useLayoutEffect(() => {
+        if (!open) {
+          setLayout(null);
+          return;
+        }
+        const wrap = wrapRef.current;
+        const card = cardRef.current;
+        if (wrap === null || wrap === undefined || card === null || card === undefined) return;
+        const anchor = wrap.getBoundingClientRect();
+        const box = card.getBoundingClientRect();
+        const viewport = {
+          width: typeof window === 'object' && Number.isFinite(window?.innerWidth) ? window.innerWidth : 1024,
+          height: typeof window === 'object' && Number.isFinite(window?.innerHeight) ? window.innerHeight : 768,
+        };
+        setLayout(
+          hintCardPosition(
+            { left: anchor.left, right: anchor.right, top: anchor.top, bottom: anchor.bottom },
+            { width: box.width, height: box.height },
+            viewport,
+          ),
+        );
+      }, [open]);
+
+      useEffect(() => {
+        if (!open) return undefined;
+        const closeIfOutside = (event) => {
+          const wrap = wrapRef.current;
+          if (wrap !== null && wrap !== undefined && typeof wrap.contains === 'function' && wrap.contains(event.target)) return;
+          setOpen(false);
+        };
+        const closeOnEscape = (event) => {
+          if (event.key === 'Escape') setOpen(false);
+        };
+        const closeOnMove = () => setOpen(false);
+        document.addEventListener('pointerdown', closeIfOutside, true);
+        window.addEventListener('keydown', closeOnEscape);
+        window.addEventListener('scroll', closeOnMove, true);
+        window.addEventListener('resize', closeOnMove);
+        return () => {
+          document.removeEventListener('pointerdown', closeIfOutside, true);
+          window.removeEventListener('keydown', closeOnEscape);
+          window.removeEventListener('scroll', closeOnMove, true);
+          window.removeEventListener('resize', closeOnMove);
+        };
+      }, [open]);
+
+      const card = open
+        ? portalToBody(
+            h(
+              'div',
+              {
+                ref: cardRef,
+                role: 'tooltip',
+                'data-dsh-htmlui-hint': '',
+                style: {
+                  position: 'fixed',
+                  // Above every surface this plugin draws, including the create sheet — the
+                  // drawer's own blocked controls live inside it.
+                  zIndex: SURFACE_Z.sheet.page + 10,
+                  left: layout === null ? 0 : layout.left,
+                  top: layout === null ? 0 : layout.top,
+                  visibility: layout === null ? 'hidden' : 'visible',
+                  boxSizing: 'border-box',
+                  maxWidth: 'min(280px, calc(100vw - 24px))',
+                  padding: narrow ? MOBILE.hintCardPadding : '10px 12px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--dsw-alias-border-l1, #e2e2e2)',
+                  background: 'var(--dsw-alias-bg-layer-1, #ffffff)',
+                  color: 'var(--dsw-alias-label-primary, #1a1a1a)',
+                  boxShadow: '0 10px 28px rgba(0, 0, 0, 0.20)',
+                  pointerEvents: 'auto',
+                },
+                // A tap on the card puts it away: it is the nearest thing to press, and the
+                // card itself offers no action.
+                onPointerDown: (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setOpen(false);
+                },
+              },
+              h(
+                'div',
+                { style: { fontSize: narrow ? MOBILE.hintTitleFont : '12.5px', fontWeight: 600, lineHeight: '1.35' } },
+                props.hintTitle,
+              ),
+              h(
+                'div',
+                { style: { marginTop: '4px', fontSize: narrow ? MOBILE.hintBodyFont : '12px', lineHeight: '1.5', color: 'var(--dsw-alias-label-secondary, #666)' } },
+                props.hint,
+              ),
+            ),
+          )
+        : null;
+
       return h(
         'span',
-        { title: hint, 'aria-label': hint, style: { display: 'inline-flex', flex: '0 0 auto', cursor: 'not-allowed' }, 'data-dsh-htmlui-blocked': '' },
-        control,
+        {
+          ref: wrapRef,
+          // The control inside is disabled, so this wrapper is what a pointer, a thumb and a
+          // keyboard actually reach; `title` is not used because the card is the same sentence
+          // on every device, and two hints for one control is one too many.
+          role: 'button',
+          tabIndex: 0,
+          'aria-disabled': 'true',
+          'aria-label': props.hint,
+          'aria-haspopup': 'true',
+          'data-dsh-htmlui-blocked': '',
+          style: { display: 'inline-flex', flex: '0 0 auto', cursor: 'not-allowed' },
+          onMouseEnter: show,
+          onMouseLeave: hide,
+          onFocus: show,
+          onBlur: hide,
+          onClick: (event) => {
+            event.preventDefault();
+            show();
+          },
+        },
+        props.children,
+        card,
       );
     }
 
@@ -6687,6 +6853,7 @@ window.__ModuleLoader__.load({
       // The drawer opens from the create sheet's footer, so it can be showing in a Session that
       // has no messages yet — the sheet has just said so. Its own create buttons say it too.
       const blocked = creationBlocked(sessionId);
+      const needsSessionTitle = tr('createNeedsSessionTitle', 'No session yet');
       const needsSession = tr('createNeedsSession', 'Send one message first: an HTML project needs a session that exists.');
       const items = state.templates.items;
       const rowStyle = {
@@ -6716,7 +6883,7 @@ window.__ModuleLoader__.load({
           },
           label,
         );
-        return blocked ? blockedControl(control, needsSession) : control;
+        return blocked ? h(BlockedControl, { hintTitle: needsSessionTitle, hint: needsSession }, control) : control;
       };
       const applyButton = (template) => createControl(tr('apply', 'Apply'), tr('applyHint', 'Apply to this session (no model round trip)'), () => applyTemplateInto(template.slug, sessionId));
       const rows = items.slice(0, 40).map((template) =>
@@ -6845,6 +7012,7 @@ window.__ModuleLoader__.load({
       const hint = blocked
         ? tr('createNeedsSession', 'Send one message first: an HTML project needs a session that exists.')
         : tr('templatesTooltip', 'New HTML interface, or reuse a saved template');
+      const hintTitle = tr('createNeedsSessionTitle', 'No session yet');
       const button = h(
         'button',
         {
@@ -6874,7 +7042,7 @@ window.__ModuleLoader__.load({
         },
         narrow ? '⟨+⟩' : tr('templatesButton', '⟨+⟩ New HTML'),
       );
-      return blocked ? blockedControl(button, hint) : button;
+      return blocked ? h(BlockedControl, { hintTitle, hint }, button) : button;
     }
 
     // -------------------------------------------------------------------- apply
@@ -7190,6 +7358,10 @@ window.__ModuleLoader__.load({
         creationBlocked,
         draftSessionIdsOf,
         wireSessionCatalogue,
+        // The hint card a blocked control opens: the component itself, and the placement it
+        // uses (pure, so the clamping is asserted without a browser).
+        BlockedControl,
+        hintCardPosition,
         argsOf,
         metaOf,
       },

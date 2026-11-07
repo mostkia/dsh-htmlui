@@ -302,14 +302,17 @@ model sees it in `html_ui op=list`, and can update or close it.
 immediately, but until the first message is sent it has no conversation — and the HTML
 manager is a view of that conversation, so an interface created there cannot be found
 again (a minimized float has no list to restore it from). Until then the entry is greyed
-out, and hovering it says to send one message first; the create dialog, the drawer's
-apply/blank controls and the render path itself refuse the same thing. The first message
-turns all of it back on without a reload.
+out, and **hovering or tapping it opens a small card** saying to send one message first —
+a card rather than a tooltip, because a phone has no hover and a disabled button shows no
+tooltip of its own. The card sits above the control (below it when there is no room),
+never leaves the viewport, and goes away on a tap, Escape, or a scroll. The create dialog,
+the drawer's apply/blank controls and the render path itself refuse the same thing. The
+first message turns all of it back on without a reload.
 
 ## Development
 
 ```sh
-npm test        # 168 assertions: package integrity 13 + doc contract 10 + host 45 + browser 41 + bridge 13 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
+npm test        # 169 assertions: package integrity 13 + doc contract 10 + host 45 + browser 42 + bridge 13 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
 npm run check   # syntax-checks the three shipped scripts, then runs the tests
 ```
 
