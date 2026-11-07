@@ -79,6 +79,7 @@ function createClientContext(options = {}) {
   if (options.controller !== undefined) services.sidebarRight = options.controller;
   if (options.locale !== undefined) services.locale = options.locale;
   if (options.uiWorkspace !== undefined) services.uiWorkspace = options.uiWorkspace;
+  if (options.sessions !== undefined) services.sessions = options.sessions;
   const context = {
     registrations,
     injections,
@@ -131,7 +132,7 @@ function createClientContext(options = {}) {
       }
       callback(scope);
     },
-    sessions: {
+    sessions: services.sessions ?? {
       list: {
         getSnapshot: () => ({ current: 'session-1', byId: {} }),
         subscribe: () => () => {},
@@ -1325,4 +1326,113 @@ test('the fullscreen layer opens by itself and honours minimizing it', () => {
   assert.equal(__internals.state.fullscreen, null);
   assert.equal(__internals.state.fullscreenDismissed.has('ui-bbbb0002'), false);
   assert.equal(__internals.activeFullscreen([first]), undefined, 'the one still dismissed stays dismissed');
+});
+
+// ------------------------------------------------- creating before a Session exists
+
+test('creation waits for a Session that has a message', () => {
+  // 「新建会话」 opens a real Session at once, and the shell lists it with `blank: true`
+  // until the first message arrives. Creating an interface there produced one the reader
+  // could not reach again: the HTML manager is a view of the conversation, and a Session
+  // with no messages has no conversation. This is the first half of the guard — knowing
+  // which Sessions are still drafts, and hearing when one stops being one.
+  let snapshot = {
+    phase: 'ready',
+    byId: {
+      'session-draft': { id: 'session-draft', blank: true },
+      'session-real': { id: 'session-real', blank: false },
+    },
+  };
+  const listeners = [];
+  const store = {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.push(listener);
+      return () => {};
+    },
+  };
+  const context = createClientContext({ sessions: { list: store } });
+  const disposes = [];
+  __internals.wireSessionCatalogue(context, disposes);
+
+  assert.equal(__internals.creationBlocked('session-draft'), true, 'a Session with no message cannot create');
+  assert.equal(__internals.creationBlocked('session-real'), false, 'a Session with a conversation can');
+  assert.equal(__internals.creationBlocked(undefined), true, 'and no Session at all certainly cannot');
+  assert.equal(
+    __internals.creationBlocked('session-unheard-of'),
+    false,
+    'a row this page has not heard of is not called a draft: a stale catalogue must not lock a real Session out',
+  );
+
+  // The first message flips `blank`; the catalogue's own notification is what turns the
+  // controls back on, in the same page, without a reload.
+  const before = __internals.state.revision;
+  snapshot = {
+    phase: 'ready',
+    byId: {
+      'session-draft': { id: 'session-draft', blank: false },
+      'session-real': { id: 'session-real', blank: false },
+    },
+  };
+  for (const listener of listeners) listener();
+  assert.equal(__internals.creationBlocked('session-draft'), false, 'the first message enables creation');
+  assert.ok(__internals.state.revision > before, 'and the page is told to re-render');
+
+  for (const dispose of disposes) dispose();
+  __internals.state.sessionDrafts = new Set();
+});
+
+test('the composer entry is greyed out and says why until the Session can hold an interface', () => {
+  // The second half: the control the reader actually presses. A disabled button shows no
+  // tooltip of its own in any current browser, so the sentence rides on a wrapper and the
+  // button is not a pointer target — that is what makes the hint readable at all.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
+  try {
+    __internals.state.sessionDrafts = new Set(['session-draft']);
+    const blocked = __internals.HtmlUiTemplateButton({ sessionId: 'session-draft' });
+    assert.equal(blocked.type, 'span', 'the hint wraps the entry');
+    assert.equal(blocked.props.title, __internals.MESSAGES.en.createNeedsSession, 'and carries the reason');
+    const control = blocked.children[0];
+    assert.equal(control.type, 'button');
+    assert.equal(control.props.disabled, true, 'the entry cannot be pressed');
+    assert.equal(control.props['aria-disabled'], 'true');
+    assert.equal(control.props.style.pointerEvents, 'none', 'so the wrapper owns the pointer and the tooltip');
+    assert.equal(control.props.title, __internals.MESSAGES.en.createNeedsSession);
+
+    // A Session with a conversation gets the plain button back, and pressing it opens the sheet.
+    __internals.state.sessionDrafts = new Set();
+    __internals.state.create.open = false;
+    const enabled = __internals.HtmlUiTemplateButton({ sessionId: 'session-real' });
+    assert.equal(enabled.type, 'button');
+    assert.equal(enabled.props.disabled, false);
+    assert.equal(enabled.props.title, __internals.MESSAGES.en.templatesTooltip);
+    enabled.props.onClick();
+    assert.equal(__internals.state.create.open, true, 'pressing it opens the create sheet');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.create.open = false;
+    __internals.state.sessionDrafts = new Set();
+  }
+});
+
+test('a draft Session refuses a render at the sink too', async () => {
+  // Every control is guarded, but the refusal must be true even for a caller added later:
+  // the render path itself declines, and nothing reaches the host.
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => {
+    calls += 1;
+    return Promise.resolve({ json: () => Promise.resolve({ ok: false }) });
+  };
+  try {
+    __internals.state.sessionDrafts = new Set(['session-draft']);
+    const before = __internals.state.templates.error;
+    assert.equal(await __internals.applyTemplateInto('blank', 'session-draft'), false);
+    assert.equal(calls, 0, 'nothing reached the host');
+    assert.equal(__internals.state.templates.error, before, 'and the refusal is not reported as a host failure');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __internals.state.sessionDrafts = new Set();
+  }
 });

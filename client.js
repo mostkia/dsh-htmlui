@@ -58,7 +58,7 @@ window.__ModuleLoader__.load({
      * constant is the only place the client states its version, and `package.test.mjs` holds it
      * to the packaged one.
      */
-    const CLIENT_VERSION = '0.1.5';
+    const CLIENT_VERSION = '0.1.6';
     const CLIENT_ACTIVE_LINE = `[dsh-htmlui] client active (${CLIENT_VERSION})`;
     /**
      * One line per frame mount and unmount. A frame that is remounted loses its
@@ -330,6 +330,17 @@ window.__ModuleLoader__.load({
       // `armedDelete` is the project whose delete control has been pressed once: the two-step
       // confirmation lives in the store so it survives a re-render of the row it belongs to.
       templates: { open: false, loaded: false, loadedAt: 0, items: [], candidates: [], error: null, dir: undefined, configured: false, asked: true, savingDir: false, adopting: '', notice: null, armedDelete: '', armedAt: 0 },
+      /**
+       * Session ids the shell has opened but nobody has spoken in yet.
+       *
+       * 「新建会话」 creates a real Session immediately, and the shell lists it with `blank:
+       * true` until the first message arrives. Such a Session has an id — so the composer
+       * control below is drawn for it — but it has no conversation view, and the HTML
+       * manager is one of that view's tabs. An interface created there could not be reached
+       * again: a minimized float stayed hidden with no list to bring it back. Creation
+       * therefore waits for the first message, and this set is how every control asks.
+       */
+      sessionDrafts: new Set(),
       /** The user's own create flow: what to start from, and where it should go. */
       create: { open: false, source: 'blank', placement: 'dock-right', busy: false, dirInput: undefined },
       /**
@@ -852,6 +863,76 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The Sessions the shell has opened but nobody has spoken in yet.
+     *
+     * The shell's own catalogue carries the answer as `blank`: true from the moment 「新建
+     * 会话」 creates the Session until the first message is sent. Reading it here keeps that
+     * decision in one place, and lets a control ask about *its* Session instead of about
+     * the page's mood.
+     *
+     * A Session this page has not heard of is deliberately **not** a draft: a row can lag
+     * its log after an unclean exit, and guessing "blank" there would lock a perfectly real
+     * Session out of every control.
+     */
+    function draftSessionIdsOf(store) {
+      const ids = new Set();
+      try {
+        const snapshot = typeof store?.getSnapshot === 'function' ? store.getSnapshot() : undefined;
+        const byId = snapshot?.byId ?? {};
+        for (const id of Object.keys(byId)) {
+          const row = byId[id];
+          if (row !== undefined && row !== null && row.blank === true) ids.add(id);
+        }
+      } catch {
+        /* an unfamiliar catalogue shape simply reports no drafts */
+      }
+      return ids;
+    }
+
+    /**
+     * Whether an interface may be created for this Session right now.
+     *
+     * `false` for the Sessions above, and for no Session at all. The reason is the same one
+     * in both cases: an interface created where the HTML manager cannot be opened is an
+     * interface nothing can get back — a minimized float stays minimized forever, which is
+     * exactly what a reader reported after creating a page in a Session that had no
+     * messages yet.
+     */
+    function creationBlocked(sessionId) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return true;
+      return state.sessionDrafts.has(sessionId);
+    }
+
+    /**
+     * Follow the Session catalogue, so a draft Session whose first message was just sent
+     * enables these controls again — same page, same Session, one message later.
+     *
+     * The answer is kept in the store rather than read at render time because rendering it
+     * directly would subscribe every surface to the catalogue, and the catalogue changes on
+     * every turn. One subscription, one compare, one `bump()` when the set really moved.
+     */
+    function wireSessionCatalogue(ctx, disposers) {
+      const store = ctx?.sessions?.list;
+      if (store === undefined || store === null) return;
+      const refresh = () => {
+        const next = draftSessionIdsOf(store);
+        const previous = state.sessionDrafts;
+        const same = next.size === previous.size && [...next].every((id) => previous.has(id));
+        if (same) return;
+        state.sessionDrafts = next;
+        bump();
+      };
+      refresh();
+      if (typeof store.subscribe !== 'function') return;
+      try {
+        const stop = store.subscribe(refresh);
+        if (typeof stop === 'function') disposers.push(stop);
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: the Session catalogue was not followed', error);
+      }
+    }
+
+    /**
      * Whether a tool card still carries the current document for its id. After an
      * `op=update` the earlier card in the transcript would otherwise keep a second
      * live copy of the same interface on screen.
@@ -978,6 +1059,11 @@ window.__ModuleLoader__.load({
         creating: 'Creating…',
         createTitle: 'New HTML interface',
         createHint: 'Nothing here goes through the model; the interface is created in this session right away.',
+        // Shown on the composer entry and again in the create sheet. The rule exists because
+        // 「新建会话」 opens a Session before it has any messages, and an interface made there
+        // cannot be reached again — the HTML manager is a view of the conversation, and a
+        // Session with no messages has no conversation yet.
+        createNeedsSession: 'Send one message first: an HTML project needs a session that exists.',
         createSource: 'New HTML project',
         createDirPlaceholder: 'No directory chosen yet',
         createDirBrowse: 'Browse…',
@@ -1156,6 +1242,10 @@ window.__ModuleLoader__.load({
         creating: '正在创建…',
         createTitle: '新建 HTML 界面',
         createHint: '整个过程不经过模型：界面会立刻在本会话里建好。',
+        // 输入框入口和新建面板共用这一句。规则来自实测：「新建会话」立刻产生一个会话，
+        // 但发消息之前它还没有对话视图，HTML 管理器正是对话视图里的一个页签 —— 在那里
+        // 建的界面没有任何入口能再找回来（最小化的浮动窗口会永远停在那里）。
+        createNeedsSession: '会话建好之后才能新建 HTML 项目：请先发一条消息。',
         createSource: '新建HTML项目',
         createDirPlaceholder: '还没有选择目录',
         createDirBrowse: '浏览…',
@@ -1615,6 +1705,11 @@ window.__ModuleLoader__.load({
       if (typeof slug !== 'string' || slug.length === 0 || typeof sessionId !== 'string' || sessionId.length === 0) {
         return Promise.resolve(false);
       }
+      // A Session with no message yet has no conversation view, so an interface created
+      // there has no HTML manager to come back from — see `creationBlocked`. Every control
+      // says this in its own tooltip; this line is what makes the refusal true even for a
+      // caller added later.
+      if (state.sessionDrafts.has(sessionId)) return Promise.resolve(false);
       const body = { template: slug, sessionId };
       if (typeof placement === 'string' && placement.length > 0) body.placement = placement;
       return postJson('/templates/render', body).then((value) => {
@@ -1881,6 +1976,30 @@ window.__ModuleLoader__.load({
 
     /** A control that cannot do anything right now: dimmed, and not a pointer. */
     const disabledStyle = { opacity: 0.5, cursor: 'default' };
+
+    /**
+     * The grey a control wears while this Session has no messages yet.
+     *
+     * `pointerEvents: none` is not decoration: it is what lets the wrapper below own the
+     * pointer, and therefore the tooltip. A disabled button shows no tooltip of its own in
+     * any current browser, and "greyed out with no reason" is the one thing worse than
+     * "greyed out".
+     */
+    const blockedControlStyle = Object.assign({}, disabledStyle, { pointerEvents: 'none' });
+
+    /**
+     * Wrap a control that is blocked, so hovering it says why.
+     *
+     * @param control - the button, already disabled and wearing `blockedControlStyle`.
+     * @param hint - the sentence the pointer reads; also the wrapper's accessible name.
+     */
+    function blockedControl(control, hint) {
+      return h(
+        'span',
+        { title: hint, 'aria-label': hint, style: { display: 'inline-flex', flex: '0 0 auto', cursor: 'not-allowed' }, 'data-dsh-htmlui-blocked': '' },
+        control,
+      );
+    }
 
     /**
      * Whether a programme's backend is running right now, as one pill.
@@ -5655,6 +5774,9 @@ window.__ModuleLoader__.load({
     function HtmlUiCreateDialog(props) {
       useStore();
       const sessionId = resolveSessionId(props);
+      // The sheet can outlive the Session it was opened in — 新建会话 is one click behind it —
+      // so the refusal is decided here too, not only by the control that opened the sheet.
+      const blocked = creationBlocked(sessionId);
       // The delete control counts down and gives up by itself, so something has to move while it
       // waits. Nothing else in this panel needs a clock, and this one only runs while it is armed.
       useEffect(() => {
@@ -6006,6 +6128,15 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+              // Said in the footer, beside the button it explains: a modal that opens and then
+              // does nothing is worse than no modal.
+              blocked === true
+                ? h(
+                    'span',
+                    { style: { fontSize: '12.5px', color: 'var(--dsw-alias-state-warning-primary, #b26a00)', maxWidth: '100%' } },
+                    tr('createNeedsSession', 'Send one message first: an HTML project needs a session that exists.'),
+                  )
+                : null,
               h(
                 'button',
                 {
@@ -6032,10 +6163,15 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
-                  style: bwButtonStyle(true, narrow),
-                  disabled: state.create.busy === true || sessionId === undefined,
+                  // The grey the entry wears too: creating is not possible in a Session that has
+                  // no messages yet, and the footer sentence next to it says why.
+                  style:
+                    blocked === true
+                      ? Object.assign({}, bwButtonStyle(true, narrow), { background: '#dcdcdc', borderColor: '#dcdcdc', color: '#8a8a8a', cursor: 'not-allowed' })
+                      : bwButtonStyle(true, narrow),
+                  disabled: state.create.busy === true || blocked === true,
                   onClick: () => {
-                    if (sessionId === undefined || state.create.busy === true) return;
+                    if (sessionId === undefined || blocked === true || state.create.busy === true) return;
                     state.create.busy = true;
                     bump();
                     // The reader asked for it, so the column opens for it — `applyTemplateInto`
@@ -6548,6 +6684,10 @@ window.__ModuleLoader__.load({
       const sessionId = resolveSessionId(props);
       if (state.templates.open !== true) return null;
 
+      // The drawer opens from the create sheet's footer, so it can be showing in a Session that
+      // has no messages yet — the sheet has just said so. Its own create buttons say it too.
+      const blocked = creationBlocked(sessionId);
+      const needsSession = tr('createNeedsSession', 'Send one message first: an HTML project needs a session that exists.');
       const items = state.templates.items;
       const rowStyle = {
         display: 'flex',
@@ -6556,6 +6696,29 @@ window.__ModuleLoader__.load({
         padding: '5px 8px',
         borderTop: '1px solid var(--dsw-alias-border-l1, #eee)',
       };
+      /**
+       * One create control: the same button, greyed and explained while the Session has no
+       * messages yet. `blocked` is decided once for the whole drawer.
+       */
+      const createControl = (label, hint, act) => {
+        const control = h(
+          'button',
+          {
+            type: 'button',
+            style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }, blocked ? blockedControlStyle : null),
+            title: blocked ? needsSession : hint,
+            'aria-disabled': blocked ? 'true' : undefined,
+            disabled: blocked,
+            onClick: () => {
+              if (blocked) return;
+              act();
+            },
+          },
+          label,
+        );
+        return blocked ? blockedControl(control, needsSession) : control;
+      };
+      const applyButton = (template) => createControl(tr('apply', 'Apply'), tr('applyHint', 'Apply to this session (no model round trip)'), () => applyTemplateInto(template.slug, sessionId));
       const rows = items.slice(0, 40).map((template) =>
         h(
           'div',
@@ -6563,16 +6726,7 @@ window.__ModuleLoader__.load({
             key: template.slug,
             style: rowStyle,
           },
-          h(
-            'button',
-            {
-              type: 'button',
-              style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
-              title: tr('applyHint', 'Apply to this session (no model round trip)'),
-              onClick: () => applyTemplateInto(template.slug, sessionId),
-            },
-            tr('apply', 'Apply'),
-          ),
+          applyButton(template),
           h(
             'button',
             {
@@ -6621,17 +6775,8 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: Object.assign({}, rowStyle, { borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)' }) },
-          h(
-            'button',
-            {
-              type: 'button',
-              style: Object.assign({}, buttonStyle, { flex: '0 0 auto' }),
-              title: tr('newBlankHint', 'Start an empty interface in the right column (no model round trip)'),
-              // The copy above promises the right column: the reveal is what makes it true.
-              onClick: () => applyTemplateInto('blank', sessionId),
-            },
-            tr('newBlank', 'Blank canvas'),
-          ),
+          // The copy above promises the right column: the reveal is what makes it true.
+          createControl(tr('newBlank', 'Blank canvas'), tr('newBlankHint', 'Start an empty interface in the right column (no model round trip)'), () => applyTemplateInto('blank', sessionId)),
           h('span', { style: Object.assign({}, titleStyle, { flex: '0 0 auto' }) }, tr('newTitle', 'New')),
           h(
             'span',
@@ -6665,10 +6810,17 @@ window.__ModuleLoader__.load({
      */
     function HtmlUiTemplateButton(props) {
       useStore();
+      const sessionId = resolveSessionId(props);
+      // A Session the shell has opened but nobody has spoken in yet has no conversation view,
+      // and the HTML manager is one of that view's tabs: anything created here would be an
+      // interface with no way back. The control is therefore greyed out and says why, before
+      // the create sheet can be opened at all.
+      const blocked = creationBlocked(sessionId);
       // First activation asks where the templates live, once: the catalogue is a
       // directory, and a reader who has one should not have to be told that a box
-      // somewhere can point at it.
+      // somewhere can point at it. A blocked entry asks nothing: it cannot create yet.
       useEffect(() => {
+        if (blocked) return undefined;
         let live = true;
         loadTemplates().then(
           () => {
@@ -6686,18 +6838,30 @@ window.__ModuleLoader__.load({
         return () => {
           live = false;
         };
-      }, []);
+      }, [blocked]);
       // A phone's composer row has no width to spare, so the entry collapses to its mark there. The
       // action is the same one; only the label is shorter, and the accessible name stays complete.
       const narrow = narrowViewport();
-      return h(
+      const hint = blocked
+        ? tr('createNeedsSession', 'Send one message first: an HTML project needs a session that exists.')
+        : tr('templatesTooltip', 'New HTML interface, or reuse a saved template');
+      const button = h(
         'button',
         {
           type: 'button',
-          style: Object.assign({}, buttonStyle, { height: narrow ? MOBILE.entryHeight : '26px', padding: narrow ? MOBILE.entryPadding : '0 8px' }),
-          title: tr('templatesTooltip', 'New HTML interface, or reuse a saved template'),
-          'aria-label': tr('templatesTooltip', 'New HTML interface, or reuse a saved template'),
+          style: Object.assign(
+            {},
+            buttonStyle,
+            { height: narrow ? MOBILE.entryHeight : '26px', padding: narrow ? MOBILE.entryPadding : '0 8px' },
+            // Grey, not a pointer: the same shape it always had, saying it cannot be pressed.
+            blocked ? blockedControlStyle : null,
+          ),
+          title: hint,
+          'aria-label': hint,
+          'aria-disabled': blocked ? 'true' : undefined,
+          disabled: blocked,
           onClick: () => {
+            if (blocked) return;
             state.create.open = true;
             state.create.busy = false;
             state.create.dirInput = undefined;
@@ -6710,6 +6874,7 @@ window.__ModuleLoader__.load({
         },
         narrow ? '⟨+⟩' : tr('templatesButton', '⟨+⟩ New HTML'),
       );
+      return blocked ? blockedControl(button, hint) : button;
     }
 
     // -------------------------------------------------------------------- apply
@@ -6720,6 +6885,15 @@ window.__ModuleLoader__.load({
       // A fresh activation must not inherit a binding from a previous one.
       translateRef = null;
       localeRef = null;
+
+      // Which Sessions are still drafts, followed for as long as this activation lives: the
+      // create controls are decided by it, and the first message of a Session has to turn
+      // them on without a page reload.
+      try {
+        wireSessionCatalogue(ctx, disposers);
+      } catch (error) {
+        logWarn(ctx, 'dsh-htmlui: the Session catalogue was not followed', error);
+      }
 
       // Visible text: register this plugin's dictionary with the Client locale
       // service and bind it. The service is optional — `ctx.get("locale")` is the
@@ -7010,6 +7184,12 @@ window.__ModuleLoader__.load({
         resolveViewedSessionId,
         sessionIdOf,
         resolveSessionId,
+        // The draft-Session rule is a product decision, not an implementation detail: a test
+        // drives it with a fake catalogue and with no catalogue at all, and asserts that the
+        // composer entry follows it.
+        creationBlocked,
+        draftSessionIdsOf,
+        wireSessionCatalogue,
         argsOf,
         metaOf,
       },

@@ -61,7 +61,7 @@ export const name = 'dsh-htmlui';
 const PKG = '@mostkia/dsh-htmlui';
 const ROUTE_PREFIX = `/plugins/${PKG}`;
 const BRIDGE_FILE = 'bridge.js';
-const PLUGIN_VERSION = '0.1.5';
+const PLUGIN_VERSION = '0.1.6';
 
 /**
  * The origin a Desktop page runs on.

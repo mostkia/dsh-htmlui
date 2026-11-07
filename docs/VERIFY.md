@@ -123,6 +123,16 @@ Two constraints of the host layout, worth knowing before judging a failure:
 
 The composer carries a `⟨+⟩ New HTML` (中文 `⟨+⟩ 新建 HTML`) control. Open it and check:
 
+- **It is grey and refuses while the Session has no messages.** Press 「新建会话」: the
+  Session exists at once, but nothing has been sent in it. Until one message is sent the
+  entry is dimmed, the pointer shows `会话建好之后才能新建 HTML 项目：请先发一条消息。`
+  (*Send one message first: an HTML project needs a session that exists.*), and pressing
+  it does nothing. If the create sheet was already open — it can outlive the Session
+  switch — its **Create** is grey too and the footer carries the same sentence. Send one
+  message, without reloading: the entry comes back enabled. What the old behaviour cost
+  is the 0.1.6 fix: an interface created there had no HTML manager to return from, so a
+  minimized float was unreachable.
+
 - The catalogue lists the blank canvas (marked bundled / 自带) plus whatever is in the
   templates directory you pointed the plugin at, and nothing else.
 - **套用** puts a surface in the session immediately — no model turn, no message

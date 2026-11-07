@@ -2,6 +2,22 @@
 
 All notable changes to this package. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.6
+
+### Fixed
+
+- Nothing can be created in a Session that has no messages yet. 「新建会话」 opens a real Session
+  immediately, and the shell catalogs it as `blank` until the first message; the composer entry was
+  drawn for it, so a page created there looked fine — but the HTML manager is a view of the
+  conversation, and a Session with no conversation has no manager. A minimized float stayed hidden
+  with no list to bring it back: the interface was, in the reader's words, lost. The composer entry
+  is now greyed out in that state, its tooltip says to send one message first (the hint sits on a
+  wrapper, because a disabled button shows no tooltip of its own), the create sheet explains the
+  same thing beside a disabled **Create**, the drawer's 套用/空白画布 controls and the manager's
+  restart path follow, and the render path itself refuses — so a caller added later cannot
+  reintroduce it. Sending the first message turns everything back on in the same page: the shell's
+  Session catalogue is followed, not polled.
+
 ## 0.1.5
 
 ### Added

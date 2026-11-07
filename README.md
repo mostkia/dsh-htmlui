@@ -298,10 +298,18 @@ with no model round trip at all**, and offers the create flow for a blank canvas
 project, or a folder you just copied in. What it creates is an ordinary record: the
 model sees it in `html_ui op=list`, and can update or close it.
 
+**The entry waits for a session that has a message.** 「新建会话」 opens a Session
+immediately, but until the first message is sent it has no conversation — and the HTML
+manager is a view of that conversation, so an interface created there cannot be found
+again (a minimized float has no list to restore it from). Until then the entry is greyed
+out, and hovering it says to send one message first; the create dialog, the drawer's
+apply/blank controls and the render path itself refuse the same thing. The first message
+turns all of it back on without a reload.
+
 ## Development
 
 ```sh
-npm test        # 165 assertions: package integrity 13 + doc contract 10 + host 45 + browser 38 + bridge 13 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
+npm test        # 168 assertions: package integrity 13 + doc contract 10 + host 45 + browser 41 + bridge 13 + shallow render 29 + adversarial input 10 + packed artefact 2 + harness schema 5
 npm run check   # syntax-checks the three shipped scripts, then runs the tests
 ```
 
