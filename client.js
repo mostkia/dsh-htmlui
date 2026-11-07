@@ -156,6 +156,8 @@ window.__ModuleLoader__.load({
       hintCardPadding: '12px 14px',
       hintTitleFont: '14px',
       hintBodyFont: '12.5px',
+      /** The manager row's icon-only control (the window menu): a thumb needs a square to hit. */
+      iconButton: '34px',
     };
 
     /**
@@ -1017,35 +1019,31 @@ window.__ModuleLoader__.load({
         toModelHint: 'Put the instruction in the composer instead',
         collapse: 'Hide',
         managerView: 'HTML manager',
-        // 管理器现在分区显示：标题要同时罩住「跨会话的后台程序」和「本会话的界面」，
-        // 再叫「本会话的 HTML 程序」就名不副实了。
-        managerTitle: 'HTML programs',
-        // 分区一：后台活着的项目。host 只报告「加载了没有」，不报告属于哪个会话，
-        // 所以一个进程不属于本会话也可能出现在这里 —— 这正是「带后台能跨会话」。
+        // 管理器现在是设计稿里的「Web任务管理器」：一张表、两张分组卡片（本会话的界面 / 带后台），
+        // 行内只有齿轮（视窗菜单）和黑色「关闭」。
+        managerTitle: 'Web task manager',
         managerGroupCross: 'Backend programs (cross-session)',
         managerGroupCrossHint: 'Their process runs inside the DSH host, not in a conversation: it stays up after this session closes, which is why a program you never opened here can be listed.',
         // 分区二：本会话的界面记录，纯前端页和有界面开着的项目都在这里。
         managerGroupSession: 'Interfaces in this session',
         managerGroupSessionHint: 'Every interface recorded in this session: plain front-end pages, and projects whose backend is running with an interface open.',
         managerGroupSessionEmpty: 'This session has no interface open.',
-        // 行的按钮：最小化/最大化是同一个按钮，文案跟着界面自己的隐藏状态走；其余两个
-        // 各做一件不可逆的事（关界面 / 结束进程），所以第一次点击只变成一句确认。
-        managerMinimize: 'Minimize',
-        managerMaximize: 'Maximize',
-        managerCloseUi: 'Close UI',
-        managerCloseUiHint: 'Destroys this interface; anything it held in memory goes with it. The process keeps running.',
-        managerRestartUi: 'Restart UI',
-        managerCloseBackend: 'Close backend task',
-        managerCloseSession: 'Close session',
-        managerConfirmCloseUi: 'Close it? Unsaved runtime state is lost',
-        managerConfirmCloseBackend: 'End the process? Its interfaces close too',
-        managerConfirmCloseSession: 'Close it? This cannot be undone',
-        managerUiClosed: 'UI closed',
-        managerUiClosedHint: 'The backend is still loaded; restart the UI to get the interface back.',
-        managerUiHiddenHint: 'Hidden by the interface’s own hide control — this is the same state.',
-        managerPlacementTitle: 'Show it again as',
-        managerHintHide: 'is the same hide the interface’s own control does.',
-        managerHintRest: 'Closing the interface throws it away and keeps its process; ending the process takes the interfaces with it.',
+        managerCardLocalHint: 'Plain front-end pages (nothing crosses sessions)',
+        managerCardCross: 'With a backend',
+        managerCardCrossHint: 'Backend programs from other sessions appear here',
+        managerCrossEmpty: 'No backend program running elsewhere.',
+        managerColumnName: 'Program (AID)',
+        managerColumnStatus: 'Status',
+        managerStatusForeground: 'Running in front',
+        managerStatusBackground: 'Running in background',
+        managerViewportTitle: 'Set the window again',
+        managerViewportMinimize: 'Minimize',
+        managerViewportRestore: 'Show it again',
+        managerViewportReloadNote: 'Choosing a position reloads the interface.',
+        managerEndProgram: 'Close',
+        managerConfirmEnd: 'Confirm?',
+        managerEndProgramHint: 'Ends this program: its interfaces close and its backend process stops.',
+        managerConfirmEndHint: 'Click again to end the program; this cannot be undone.',
         // 界面自身的关闭按钮：和管理器行一样的两步确认。第一次点击只把按钮换成这句话，
         // 第二次才真的执行 —— 关掉之后文档就被销毁了，没有任何办法恢复。
         closeConfirmUi: 'Close it? The interface is destroyed and cannot be recovered',
@@ -1055,7 +1053,6 @@ window.__ModuleLoader__.load({
       managerRestoreUiDone: 'Interface restored.',
       managerRestoreUiFailed: 'Could not restore that interface.',
         closeFailed: 'The host refused to remove it; it is still attached.',
-        managerHidden: 'hidden',
         minimize: 'Minimize',
         managerEmpty: 'This session has no HTML program.',
         managerNew: 'New HTML project',
@@ -1120,7 +1117,7 @@ window.__ModuleLoader__.load({
       // all, then whether it survives the panel. Both are about the same process, so both
       // live in the same form, and the hint names every way to stop it.
       residentSwitch: 'Resident',
-      residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close backend task in its manager row, or uncheck this switch — either unloads it right away.',
+      residentHint: 'Checked: once loaded it is not unloaded when idle, so it keeps running after the panel closes. To end it, use Close in its manager row, or uncheck this switch — either unloads it right away.',
       backendBadge: 'Backend',
       backendWillIdle: 'Unloads on its own',
       backendPillRunning: 'Running',
@@ -1201,35 +1198,31 @@ window.__ModuleLoader__.load({
         toModelHint: '把指令放进输入框，交给模型',
         collapse: '收起',
         managerView: 'HTML管理器',
-        // 管理器现在分区显示：标题要同时罩住「跨会话的后台程序」和「本会话的界面」，
-        // 再叫「本会话的 HTML 程序」就名不副实了。
-        managerTitle: 'HTML 程序',
-        // 分区一：后台活着的项目。宿主只报告「加载了没有」，不报告它属于哪个会话，
-        // 所以一个进程没在本会话开界面也可能出现在这里 —— 这正是「带后台能跨会话」的来源。
+        // 管理器现在是设计稿里的「Web任务管理器」：一张表、两张分组卡片（本会话的界面 / 带后台），
+        // 行内只有齿轮（视窗菜单）和黑色「关闭」。
+        managerTitle: 'Web任务管理器',
         managerGroupCross: '跨会话的后台程序',
         managerGroupCrossHint: '它们跑在 DSH 宿主进程里，不属于任何会话：本会话关掉了它还在，所以这里可能出现你从没在本会话打开过的项目。',
         // 分区二：本会话的界面记录，纯前端页和有界面开着的项目都在这里。
         managerGroupSession: '本会话的界面',
         managerGroupSessionHint: '本会话里记录着的每一个界面：无后台的纯前端页，以及后台在跑、界面也开着的项目。',
         managerGroupSessionEmpty: '本会话没有开着的界面。',
-        // 一行的按钮：最小化/最大化共用一个位置，文案跟着界面自身的隐藏状态走；另外两个
-        // 各自做一件不可逆的事（关界面 / 结束进程），所以第一次点击只变成一句确认。
-        managerMinimize: '最小化',
-        managerMaximize: '最大化',
-        managerCloseUi: '关闭UI界面',
-        managerCloseUiHint: '销毁这个界面，它内存里的内容一并丢失；后台进程继续跑。',
-        managerRestartUi: '重启UI界面',
-        managerCloseBackend: '关闭后台任务',
-        managerCloseSession: '关闭会话',
-        managerConfirmCloseUi: '确认关闭界面？未保存的运行信息会丢',
-        managerConfirmCloseBackend: '确认结束进程？界面一起消失',
-        managerConfirmCloseSession: '确认关闭？无法恢复',
-        managerUiClosed: '界面已关闭',
-        managerUiClosedHint: '后台进程还加载着：点「重启UI界面」就能把界面找回来。',
-        managerUiHiddenHint: '这是界面自己的隐藏按钮造成的状态，两边就是同一个状态。',
-        managerPlacementTitle: '重新显示为',
-        managerHintHide: '和界面自身那个隐藏按钮是同一个状态。',
-        managerHintRest: '关闭界面丢掉界面、留下进程；结束进程会把界面一并带走。',
+        managerCardLocalHint: '纯前端程序(内容不会跨会话)',
+        managerCardCross: '带后台',
+        managerCardCrossHint: '带后台的跨会话程序会显示在此',
+        managerCrossEmpty: '没有跨会话的后台程序。',
+        managerColumnName: '程序名(AID)',
+        managerColumnStatus: '程序状态',
+        managerStatusForeground: '前台运行',
+        managerStatusBackground: '后台运行',
+        managerViewportTitle: '重新设置视窗状态',
+        managerViewportMinimize: '最小化',
+        managerViewportRestore: '恢复显示',
+        managerViewportReloadNote: '切换位置会重新加载界面。',
+        managerEndProgram: '关闭',
+        managerConfirmEnd: '确认关闭？',
+        managerEndProgramHint: '结束这个程序：界面关闭，后台进程停止。',
+        managerConfirmEndHint: '再点一次结束整个程序，无法恢复。',
         // 界面自身的关闭按钮：和管理器行一样的两步确认。第一次点击只把按钮换成这句话，
         // 第二次才真的执行 —— 关掉之后文档就被销毁了，没有任何办法恢复。
         closeConfirmUi: '确认关闭？界面会被销毁且无法恢复',
@@ -1239,7 +1232,6 @@ window.__ModuleLoader__.load({
         managerRestoreUiDone: '界面已恢复。',
         managerRestoreUiFailed: '界面恢复失败。',
         closeFailed: '宿主拒绝移除，这个界面仍然挂着。',
-        managerHidden: '已隐藏',
         minimize: '最小化',
         managerEmpty: '本会话没有 HTML 程序。',
         managerNew: '新建 HTML 项目',
@@ -1300,7 +1292,7 @@ window.__ModuleLoader__.load({
         adoptBackendHint: '项目目录里的 server.js 会在 DSH 进程内运行，权限与本插件相同——等于完全信任它。',
         adoptBackendNone: '该项目没有后台：在项目目录放一个 server.js，并在 meta.json 里用 backend 字段指认它。',
         residentSwitch: '常驻',
-        residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想结束它：用管理器行里的「关闭后台任务」，或取消勾选这个开关 —— 两者都会当场卸载。',
+        residentHint: '勾上：加载后不参与空闲卸载，关掉面板也会继续跑。想结束它：用管理器行里的「关闭」，或取消勾选这个开关 —— 两者都会当场卸载。',
         backendBadge: '带后台',
         backendWillIdle: '空闲后自动卸载',
         backendPillRunning: '运行中',
@@ -3872,31 +3864,193 @@ window.__ModuleLoader__.load({
       return { rows, cross, local, interfaces: local.reduce((total, row) => total + row.records.length, 0) };
     }
 
+    /** The two states this page shows, and the colours the design gives them. */
+    const PROGRAM_FOREGROUND = 'var(--dsw-alias-state-success-primary, #12a150)';
+    const PROGRAM_BACKGROUND = 'var(--dsw-alias-state-business-primary, #247bbf)';
+
     /**
-     * One row's two-step confirmation.
+     * The columns the manager's heading and its rows share.
      *
-     * No modal: the confirmation is the button itself, which is where the reader is already
-     * looking and which cannot be missed behind an overlay. Three seconds of no second press
-     * restores the original label, because a control left saying 「确认…」 forever is a trap.
+     * One string for both, because a heading that sits a hundred pixels away from the column it
+     * labels is worse than no heading: the actions column is a fixed width for the same reason —
+     * an `auto` column is as wide as its buttons, and the heading's cell has none.
+     */
+    const MANAGER_COLUMNS = 'minmax(0, 1fr) 116px 104px';
+
+    /**
+     * A program's state, in the two words this page uses.
+     *
+     * 前台运行 while one of its interfaces is on screen; 后台运行 for everything else the page
+     * lists — a surface the reader put away, or a process whose interface is gone. There is no
+     * third state here on purpose: a program that is not running is not listed at all, because
+     * ending it takes its row with it (that is what 「关闭」 does now).
+     */
+    function managerStatusOf(row) {
+      const records = row !== undefined && Array.isArray(row.records) ? row.records : [];
+      const visible = records.some((record) => !recordHidden(record));
+      return visible
+        ? { key: 'foreground', label: tr('managerStatusForeground', 'Running in front'), colour: PROGRAM_FOREGROUND }
+        : { key: 'background', label: tr('managerStatusBackground', 'Running in background'), colour: PROGRAM_BACKGROUND };
+    }
+
+    /** A program's tile: the project's own artwork, on the soft square the design puts it on. */
+    function programGlyph(row, size) {
+      const template = row.template ?? { slug: row.slug === undefined ? '' : row.slug };
+      return h(
+        'span',
+        {
+          style: {
+            width: `${size}px`,
+            height: `${size}px`,
+            borderRadius: '9px',
+            background: 'var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.10))',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flex: '0 0 auto',
+            overflow: 'hidden',
+          },
+        },
+        projectGlyph(template, Math.round(size * 0.62)),
+      );
+    }
+
+    /** The gear: drawn, because a text glyph wears whatever emoji font the platform has. */
+    function gearGlyph(size) {
+      // A cog outline with a hub, at a 24-unit scale: long spokes read as a sun at 16px.
+      return h(
+        'svg',
+        { width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': 'true', style: { display: 'block' } },
+        h('circle', { cx: 12, cy: 12, r: 3.1, fill: 'none', stroke: 'currentColor', strokeWidth: 1.7 }),
+        h('path', {
+          d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.7,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+      );
+    }
+
+    /** The page's own mark: a window, which is what this page is about. */
+    function managerGlyph(size) {
+      return h(
+        'svg',
+        { width: size, height: size, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+        h('rect', { x: 1.5, y: 2.5, width: 13, height: 11, rx: 2, fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 }),
+        h('path', { d: 'M1.5 6h13', stroke: 'currentColor', strokeWidth: 1.3 }),
+        h('circle', { cx: 4, cy: 4.3, r: 0.8, fill: 'currentColor' }),
+      );
+    }
+
+    /** The two cards' marks: a page, and a monitor that keeps running by itself. */
+    function cardGlyph(kind, size) {
+      if (kind === 'cross') {
+        return h(
+          'svg',
+          { width: size, height: size, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+          h('rect', { x: 1.8, y: 2.4, width: 12.4, height: 8.6, rx: 1.6, fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 }),
+          h('path', { d: 'M6 13.6h4M8 11v2.6', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round' }),
+        );
+      }
+      return h(
+        'svg',
+        { width: size, height: size, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+        h('rect', { x: 2.2, y: 2.2, width: 11.6, height: 11.6, rx: 2.2, fill: 'currentColor' }),
+        h('path', { d: 'M5.2 6.4h5.6M5.2 9.1h3.6', stroke: '#ffffff', strokeWidth: 1.3, strokeLinecap: 'round' }),
+      );
+    }
+
+    /**
+     * The placement and dismissal a popover in this page shares.
+     *
+     * Portalled to the document root and measured against the control it belongs to: above it
+     * when there is room, below when there is not, and never outside the viewport. It closes on
+     * a pointer anywhere else, on Escape, and on any scroll — it is positioned once, so a page
+     * that moved underneath it would leave it pointing at nothing.
+     *
+     * @param open - whether the popover is showing.
+     * @param onClose - what to call when one of those gestures happens.
+     * @returns the two refs it needs, and the measured position (`null` until measured).
+     */
+    function useFloatingPanel(open, onClose) {
+      const [layout, setLayout] = useState(null);
+      const anchorRef = useRef(null);
+      const panelRef = useRef(null);
+
+      useLayoutEffect(() => {
+        if (!open) {
+          setLayout(null);
+          return;
+        }
+        const anchor = anchorRef.current;
+        const panel = panelRef.current;
+        if (anchor === null || anchor === undefined || panel === null || panel === undefined) return;
+        const a = anchor.getBoundingClientRect();
+        const p = panel.getBoundingClientRect();
+        const viewport = {
+          width: typeof window === 'object' && Number.isFinite(window?.innerWidth) ? window.innerWidth : 1024,
+          height: typeof window === 'object' && Number.isFinite(window?.innerHeight) ? window.innerHeight : 768,
+        };
+        setLayout(
+          hintCardPosition(
+            { left: a.left, right: a.right, top: a.top, bottom: a.bottom },
+            { width: p.width, height: p.height },
+            viewport,
+          ),
+        );
+      }, [open]);
+
+      useEffect(() => {
+        if (!open) return undefined;
+        const inside = (node, target) => node !== null && node !== undefined && typeof node.contains === 'function' && node.contains(target);
+        const closeIfOutside = (event) => {
+          if (inside(anchorRef.current, event.target) || inside(panelRef.current, event.target)) return;
+          onClose();
+        };
+        const closeOnEscape = (event) => {
+          if (event.key === 'Escape') onClose();
+        };
+        const closeOnMove = () => onClose();
+        document.addEventListener('pointerdown', closeIfOutside, true);
+        window.addEventListener('keydown', closeOnEscape);
+        window.addEventListener('scroll', closeOnMove, true);
+        window.addEventListener('resize', closeOnMove);
+        return () => {
+          document.removeEventListener('pointerdown', closeIfOutside, true);
+          window.removeEventListener('keydown', closeOnEscape);
+          window.removeEventListener('scroll', closeOnMove, true);
+          window.removeEventListener('resize', closeOnMove);
+        };
+      }, [open, onClose]);
+
+      return { anchorRef, panelRef, layout };
+    }
+
+    /**
+     * One program's row: what it is, what it is doing, and the two controls it owns.
+     *
+     * The gear opens 「重新设置视窗状态」 — where the interface is drawn, or put away — and the
+     * dark pill ends the program. Those are the row's whole interface: the four buttons this row
+     * used to carry asked the reader to know which of two destructive actions they wanted, and
+     * the confirmation lives on the pill now, in the same two-step the old controls had.
      */
     function HtmlUiManagerRow(props) {
       const { row, sessionId, onStatus } = props;
       // Local by design: a confirmation belongs to the row in front of the reader, and it must
       // not survive a re-render of the page or leak into another project's row.
       const [armedState, setArmedState] = useState(null);
-      const [pickingState, setPickingState] = useState(false);
-      // Which placement a chosen restart actually used. Kept so the last choice stays marked
-      // while the host tears the old records down and the new surface comes up.
-      const [placementPicked, setPlacementPicked] = useState(null);
-      // `armed` and `placementPicking` as props override the row's own state: the three-step
-      // machine (idle → 确认 → act) and the placement question are then readable from one shallow
-      // render each, with no timer and no second mount. The live page never passes either.
+      const [menuState, setMenuState] = useState(false);
+      // `armed` and `menuOpen` as props override the row's own state: the confirmation and the
+      // window menu are then readable from one shallow render each, with no timer and no second
+      // mount. The live page never passes either.
       const controlled = props.armed !== undefined;
       const armed = controlled ? props.armed : armedState;
       const setArmed = controlled ? () => {} : setArmedState;
-      const pickingControlled = props.placementPicking !== undefined;
-      const placementPicking = pickingControlled ? props.placementPicking : pickingState;
-      const setPlacementPicking = pickingControlled ? () => {} : setPickingState;
+      const menuControlled = props.menuOpen !== undefined;
+      const menuOpen = menuControlled ? props.menuOpen === true : menuState;
+      const setMenuOpen = menuControlled ? () => {} : setMenuState;
       useEffect(() => {
         if (controlled || armed === null) return undefined;
         // 3 seconds, then back to the original label: a control left saying 「确认…」 forever is
@@ -3905,28 +4059,26 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer);
       }, [armed, controlled]);
 
-      const records = row.records;
+      const narrow = narrowViewport();
+      const records = row.records === undefined ? [] : row.records;
       const template = row.template;
       const backend = template === undefined ? undefined : backendInfoOf(template);
       const hasBackend = backend !== undefined && backend.declared === true;
-      // `open` here means "this program has an interface on screen right now", which is what the
-      // interface button's two jobs key off.
       const open = records.length > 0;
-      const shown = records.find((record) => !recordHidden(record));
-      const hidden = open && shown === undefined;
-      // The one interface the hide control acts on: a visible one if there is any, otherwise the
-      // first record — a row whose every interface is put away still has something to bring back.
-      const hider = shown ?? records[0];
+      const visibleRecord = records.find((record) => !recordHidden(record));
+      const hidden = open && visibleRecord === undefined;
+      // The one interface the window menu acts on: a visible one if there is any, otherwise
+      // the first record — a program whose only surface is put away still has something to
+      // bring back, and one with no record at all is started again at a chosen position.
+      const hider = visibleRecord ?? records[0];
       const canHide = hider !== undefined && managerCanHide(hider);
       const title = managerTitleOf(template, records[0]);
-      const armedLabel =
-        armed === 'close-ui'
-          ? tr('managerConfirmCloseUi', 'Close it? Unsaved runtime state is lost')
-          : armed === 'close-backend'
-            ? tr('managerConfirmCloseBackend', 'End the process? Its interfaces close too')
-            : armed === 'close-session'
-              ? tr('managerConfirmCloseSession', 'Close it? This cannot be undone')
-              : null;
+      const status = managerStatusOf(row);
+      const current = visibleRecord !== undefined ? visibleRecord.placement : managerPlacementFor(template, records[0]);
+
+      const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen]);
+      const floating = useFloatingPanel(menuOpen, closeMenu);
+
       const confirmThen = (key, act) => () => {
         if (armed !== key) {
           setArmed(key);
@@ -3936,35 +4088,26 @@ window.__ModuleLoader__.load({
         act();
       };
 
-      /** Close every interface of this project: the record goes, the process (if any) does not. */
-      const closeUi = () => {
-        // Remembered, so the row survives the catalogue refresh that follows: the process is still
-        // loaded and 「重启UI界面」 is how the reader gets the interface back.
-        if (row.slug.length > 0) state.dismissedTemplates.add(row.slug);
-        for (const record of records) dismissRecord(record.uiId);
-      };
-      /** End the process *and* its interfaces: a window onto nothing is a window nobody can reach. */
-      const closeBackend = () => {
-        // The records go first, and deliberately **not** through `closeUi`: that one remembers the
-        // slug so the row survives a closed interface — which is exactly what must not happen here.
-        // A process that is gone has no row, and the row is how the reader knows it is gone. (The
-        // bug this replaced deleted the memory and then called `closeUi`, which put it straight back.)
+      /**
+       * End the program: its interfaces go, and so does its process.
+       *
+       * The old row offered two destructive actions side by side — close the interface and keep
+       * the process, or end the process and take the interfaces with it — and the reader had to
+       * know which one they wanted. 「最小化」 in the window menu is the way to keep a program
+       * alive while its interface is out of the way, so 「关闭」 can mean the one thing everyone
+       * expects: this program is over.
+       */
+      const endProgram = () => {
         for (const record of records) dismissRecord(record.uiId);
         if (row.slug.length > 0) state.dismissedTemplates.delete(row.slug);
         onStatus(null);
+        if (hasBackend !== true) return;
         stopBackend(row.slug).then((result) => {
           if (result !== null && result.message.length > 0) onStatus(result.message);
         });
       };
-      const openPicker = () => {
-        setPlacementPicking(true);
-        // 预选上次用的 placement: reopening a project the way it was is the whole point of a
-        // restart, and being asked again with nothing selected is a question with no default.
-        setPlacementPicked(managerPlacementFor(template, hider));
-      };
+
       const renderAgain = (chosen) => {
-        setPlacementPicking(false);
-        setPlacementPicked(chosen);
         // Close whatever is up first, so the chosen placement is the only copy. The render waits
         // for the host to tear the old records down: the host remembers one placement per project,
         // and a render that overtakes the close leaves the old surface drawn where it was.
@@ -3972,163 +4115,243 @@ window.__ModuleLoader__.load({
         setTimeout(() => {
           // `applyTemplateInto`, not `applyTemplate`: the render alone leaves a dock-right
           // surface collapsed and invisible. This path used to call the render by itself and
-          // nothing else, which is why choosing 右侧栏 here looked like nothing happening —
-          // see `revealDockRight`.
+          // nothing else, which is why choosing 右侧栏 here looked like nothing happening.
           applyTemplateInto(row.slug, sessionId, chosen).then((ok) => {
             onStatus(ok ? tr('managerRestoreUiDone', 'Interface restored.') : tr('managerRestoreUiFailed', 'Could not restore that interface.'));
           });
         }, 120);
       };
 
-      const controls = [];
-      if (canHide) {
-        // One button, two words: 最小化 while the surface is up, 最大化 once it is put away. Both
-        // write the state the surface's own control writes, so the two are never out of step.
-        controls.push(
-          h(
-            'button',
-            {
-              key: 'hide',
-              type: 'button',
-              style: rowButtonStyle,
-              title: hidden ? tr('managerUiHiddenHint', 'Hidden by the interface’s own hide control — this is the same state.') : undefined,
-              'aria-label': `${hidden ? tr('managerMaximize', 'Maximize') : tr('managerMinimize', 'Minimize')}: ${title}`,
-              onClick: () => toggleRecord(hider, props),
-            },
-            hidden ? tr('managerMaximize', 'Maximize') : tr('managerMinimize', 'Minimize'),
-          ),
-        );
-      }
-      if (hasBackend) {
-        // One position, two jobs: with an interface up it closes it; with none it brings one back.
-        // The confirm label only ever replaces 关闭UI界面 — 重启UI界面 is not destructive, so it
-        // goes straight to asking where.
-        const uiLabel = armed === 'close-ui' && open ? armedLabel : open ? tr('managerCloseUi', 'Close UI') : tr('managerRestartUi', 'Restart UI');
-        controls.push(
-          h(
-            'button',
-            {
-              key: 'ui',
-              type: 'button',
-              style: rowButtonStyle,
-              title: open
-                ? tr('managerCloseUiHint', 'Destroys this interface; anything it held in memory goes with it. The process keeps running.')
-                : tr('managerUiClosedHint', 'The backend is still loaded; restart the UI to get the interface back.'),
-              'aria-label': `${uiLabel}: ${title}`,
-              onClick: open ? confirmThen('close-ui', closeUi) : openPicker,
-            },
-            uiLabel,
-          ),
-        );
-        controls.push(
-          h(
-            'button',
-            {
-              key: 'backend',
-              type: 'button',
-              style: rowButtonStyle,
-              'aria-label': `${tr('managerCloseBackend', 'Close backend task')}: ${title}`,
-              onClick: confirmThen('close-backend', closeBackend),
-            },
-            armed === 'close-backend' ? armedLabel : tr('managerCloseBackend', 'Close backend task'),
-          ),
-        );
-      } else {
-        // No process to keep alive: closing the interface and closing the session record are one act.
-        controls.push(
-          h(
-            'button',
-            {
-              key: 'session',
-              type: 'button',
-              style: rowButtonStyle,
-              'aria-label': `${tr('managerCloseSession', 'Close session')}: ${title}`,
-              onClick: confirmThen('close-session', closeUi),
-            },
-            armed === 'close-session' ? armedLabel : tr('managerCloseSession', 'Close session'),
-          ),
-        );
-      }
+      /** What the window menu does: a position starts (or restarts) the interface there; 最小化 puts it away. */
+      const shift = (choice) => {
+        setMenuOpen(false);
+        if (choice === 'minimize') {
+          if (hider !== undefined) toggleRecord(hider, props);
+          return;
+        }
+        // Already drawn there and on screen: nothing to do, and nothing to reload.
+        if (visibleRecord !== undefined && visibleRecord.placement === choice) return;
+        renderAgain(choice);
+      };
+
+      const panel = menuOpen
+        ? portalToBody(
+            h(
+              'div',
+              {
+                ref: floating.panelRef,
+                role: 'menu',
+                'aria-label': tr('managerViewportTitle', 'Set the window again'),
+                'data-dsh-htmlui-window-menu': '',
+                style: {
+                  position: 'fixed',
+                  // Above every surface this plugin draws, including the one the menu is about.
+                  zIndex: SURFACE_Z.sheet.page + 10,
+                  left: floating.layout === null ? 0 : floating.layout.left,
+                  top: floating.layout === null ? 0 : floating.layout.top,
+                  visibility: floating.layout === null ? 'hidden' : 'visible',
+                  width: narrow ? '248px' : '236px',
+                  boxSizing: 'border-box',
+                  background: '#ffffff',
+                  color: BW.ink,
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '10px',
+                  boxShadow: '0 14px 32px rgba(0, 0, 0, 0.18)',
+                  overflow: 'hidden',
+                  pointerEvents: 'auto',
+                },
+              },
+              h(
+                'div',
+                {
+                  style: {
+                    background: BW.ink,
+                    color: '#ffffff',
+                    fontSize: '12.5px',
+                    fontWeight: 600,
+                    lineHeight: '18px',
+                    padding: '7px 12px',
+                  },
+                },
+                tr('managerViewportTitle', 'Set the window again'),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px' } },
+                h(
+                  'div',
+                  { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } },
+                  ...CREATE_PLACEMENTS.map((entry) =>
+                    h(
+                      'button',
+                      {
+                        key: entry.value,
+                        type: 'button',
+                        role: 'menuitemradio',
+                        'aria-checked': entry.value === current,
+                        'data-placement': entry.value,
+                        onClick: () => shift(entry.value),
+                        style: {
+                          font: 'inherit',
+                          fontSize: '11.5px',
+                          lineHeight: '16px',
+                          padding: '6px 6px',
+                          borderRadius: '6px',
+                          border: `1px solid ${entry.value === current ? PROGRAM_BACKGROUND : '#dfe1e5'}`,
+                          background: '#ffffff',
+                          color: entry.value === current ? PROGRAM_BACKGROUND : BW.ink,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        },
+                      },
+                      tr(entry.key, entry.fallback),
+                    ),
+                  ),
+                ),
+                canHide === true
+                  ? h(
+                      'button',
+                      {
+                        type: 'button',
+                        role: 'menuitem',
+                        onClick: () => shift('minimize'),
+                        style: {
+                          font: 'inherit',
+                          fontSize: '12px',
+                          lineHeight: '18px',
+                          padding: '1px 2px',
+                          border: 'none',
+                          background: 'transparent',
+                          color: BW.ink,
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        },
+                      },
+                      hidden ? tr('managerViewportRestore', 'Show it again') : tr('managerViewportMinimize', 'Minimize'),
+                    )
+                  : null,
+                // Said where the choice is made: this build restarts the interface at the chosen
+                // position, so a page that held something in memory loses it. Moving the same
+                // interface without reloading is the next step, and until then the menu says so.
+                h(
+                  'div',
+                  { style: { fontSize: '10.5px', lineHeight: '14px', color: '#8a8a8a' } },
+                  tr('managerViewportReloadNote', 'Choosing a position reloads the interface.'),
+                ),
+              ),
+            ),
+          )
+        : null;
 
       return h(
         'div',
         {
+          'data-program-row': row.key,
           style: {
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            // 手机优先 / 手机: a little more air per program, and a light rule under it so rows that
-            // wrap to three lines do not read as one block.
-            padding: '10px 12px',
+            display: 'grid',
+            gridTemplateColumns: narrow ? 'minmax(0, 1fr) auto' : MANAGER_COLUMNS,
+            alignItems: 'center',
+            gap: narrow ? '10px' : '14px',
+            padding: narrow ? '12px 4px' : '12px 8px',
             borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
+            minWidth: '0',
           },
         },
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
-          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto', minWidth: '0' }) }, title),
-          // The state marks: what this program is (带后台 and its residency), what the process is
-          // doing (已加载/未加载), and whether an interface is open at all. All of them come from
-          // the catalogue's `backend` field — nothing here invents a state of its own.
-          hasBackend ? chip(tr('backendBadge', 'Backend'), 'badge') : null,
-          hasBackend ? chip(tr('backendAllowed', 'Allowed'), 'allowed') : null,
-          ...(backend === undefined ? [] : backendChips(backend, false)),
-          open
-            ? null
-            : h(
-                'span',
-                {
-                  key: 'closed',
-                  style: chipStyle,
-                  title: tr('managerUiClosedHint', 'The backend is still loaded; restart the UI to get the interface back.'),
+          { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: '0' } },
+          programGlyph(row, narrow ? 34 : 38),
+          h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '0' } },
+            h(
+              'span',
+              {
+                style: {
+                  fontSize: narrow ? '14px' : '14.5px',
+                  fontWeight: 500,
+                  lineHeight: '20px',
+                  color: status.colour,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 },
-                tr('managerUiClosed', 'UI closed'),
-              ),
-          records.length > 1 ? chip(`×${records.length}`, 'count') : null,
+              },
+              title,
+            ),
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+              // On a phone the status joins the marks: there is no second column to put it in.
+              narrow ? h('span', { style: { fontSize: '12px', color: status.colour, whiteSpace: 'nowrap' } }, status.label) : null,
+              hasBackend ? chip(tr('backendBadge', 'Backend'), 'badge') : null,
+              hasBackend ? chip(tr('backendAllowed', 'Allowed'), 'allowed') : null,
+              ...(backend === undefined ? [] : backendChips(backend, false)),
+            ),
+          ),
         ),
+        narrow
+          ? null
+          : h('span', { style: { fontSize: '13px', color: status.colour, whiteSpace: 'nowrap' } }, status.label),
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', minWidth: '0' } },
+          { style: { display: 'flex', alignItems: 'center', gap: '6px', flex: '0 0 auto', justifySelf: 'end' } },
           h(
-            'span',
-            { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
-            open ? records.map((record) => record.placement).join(' · ') : '—',
+            'button',
+            {
+              ref: floating.anchorRef,
+              type: 'button',
+              'aria-haspopup': 'menu',
+              'aria-expanded': menuOpen === true,
+              'aria-label': `${tr('managerViewportTitle', 'Set the window again')}: ${title}`,
+              title: tr('managerViewportTitle', 'Set the window again'),
+              onClick: () => setMenuOpen(true),
+              style: {
+                width: narrow ? MOBILE.iconButton : '30px',
+                height: narrow ? MOBILE.iconButton : '30px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '8px',
+                border: 'none',
+                background: menuOpen === true ? 'var(--dsw-alias-bg-layer-2, rgba(127, 127, 127, 0.12))' : 'transparent',
+                color: 'var(--dsw-alias-label-secondary, #666)',
+                cursor: 'pointer',
+                flex: '0 0 auto',
+                padding: '0',
+              },
+            },
+            gearGlyph(narrow ? 18 : 16),
           ),
           h(
-            'span',
-            { style: { flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } },
-            hidden ? tr('managerHidden', 'hidden') : '',
+            'button',
+            {
+              type: 'button',
+              'data-program-close': row.key,
+              'aria-label': armed === 'end' ? tr('managerConfirmEnd', 'Confirm?') : tr('managerEndProgram', 'Close'),
+              title: armed === 'end' ? tr('managerConfirmEndHint', 'Click again to end the program; this cannot be undone.') : tr('managerEndProgramHint', 'Ends this program: its interfaces close and its backend process stops.'),
+              onClick: confirmThen('end', endProgram),
+              style: {
+                font: 'inherit',
+                fontSize: narrow ? '13px' : '12.5px',
+                lineHeight: '1',
+                height: narrow ? '32px' : '30px',
+                padding: narrow ? '0 16px' : '0 18px',
+                borderRadius: '999px',
+                border: `1px solid ${armed === 'end' ? '#b9382c' : BW.ink}`,
+                background: armed === 'end' ? '#b9382c' : BW.ink,
+                color: '#ffffff',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto',
+              },
+            },
+            armed === 'end' ? tr('managerConfirmEnd', 'Confirm?') : tr('managerEndProgram', 'Close'),
           ),
-          h('span', { style: { flex: '1 1 auto' } }),
-          ...controls,
         ),
-        // 重启UI界面 asks where before it re-renders: the same choices, and the same words, the
-        // create dialog offers — a reader who picked 全屏 once should not have to learn a second
-        // vocabulary to get it back.
-        placementPicking
-          ? h(
-              'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' } },
-              h('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)' } }, tr('managerPlacementTitle', 'Show it again as')),
-              h(
-                'div',
-                { style: { display: 'flex', flexWrap: 'wrap', gap: '4px' } },
-                ...CREATE_PLACEMENTS.map((entry) =>
-                  h(
-                    'button',
-                    {
-                      key: entry.value,
-                      type: 'button',
-                      style: Object.assign({}, rowButtonStyle, entry.value === (placementPicked ?? managerPlacementFor(template, hider)) ? rowButtonActiveStyle : null),
-                      onClick: () => renderAgain(entry.value),
-                    },
-                    tr(entry.key, entry.fallback),
-                  ),
-                ),
-                h('button', { key: 'cancel', type: 'button', style: rowButtonStyle, onClick: () => setPlacementPicking(false) }, tr('cancel', 'Cancel')),
-              ),
-            )
-          : null,
+        panel,
       );
     }
 
@@ -4145,11 +4368,11 @@ window.__ModuleLoader__.load({
     /**
      * The session's HTML programs, listed where the reader already is.
      *
-     * One row per program — interface open or not — because the process behind it is what outlives
-     * every panel, and the row is the only place left that can end it. `background` is
-     * click-through by design and `inline` is seamless, so without this page a user has no way to
-     * remove what a model attached; `conversation.view` is the shipped seat for a session-scoped
-     * page like this one, and its label is the row it appears in.
+     * The page is the design's task manager: a title, two cards that switch between the two
+     * kinds of program, and one table under them. One row per program — interface open or not —
+     * because the process behind it is what outlives every panel, and the row is the only place
+     * left that can end it. `background` is click-through by design and `inline` is seamless, so
+     * without this page a user has no way to remove what a model attached.
      */
     function HtmlUiManager(props) {
       useStore();
@@ -4158,12 +4381,17 @@ window.__ModuleLoader__.load({
       // Stopping a backend answers here, not in the drawer: this page is where the reader
       // pressed the button, and a message anywhere else reads as nothing having happened.
       const [status, setStatus] = useState(null);
+      const [tabState, setTabState] = useState('local');
+      const narrow = narrowViewport();
+      // A card is a tab, not decoration: the design has two kinds of program, and showing both
+      // lists at once is what the two group headings used to do. The live page keeps the choice
+      // in its own state; a test may pin it with `tab`.
+      const tab = props.tab === 'cross' || props.tab === 'local' ? props.tab : tabState;
       // A project with a resident backend keeps running after its panel is gone, so this page is the
       // only place left that can end it — and "is it loaded" is a fact only the host has. The
       // catalogue is therefore re-read while this page is open, not once per mount: a panel that
       // started a second ago loaded its backend without telling anyone here, and a control disabled
-      // by a stale reading is worse than no control at all. A hidden page asks for nothing: nobody
-      // is reading the answer.
+      // by a stale reading is worse than no control at all. A hidden page asks for nothing.
       useEffect(() => {
         if (backendCatalogueStale()) loadTemplates();
         const timer = setInterval(() => {
@@ -4177,8 +4405,8 @@ window.__ModuleLoader__.load({
       // ticket. This page *replaces* the transcript (`conversation.view` renders one view at a
       // time), so a card the model has just written is not rendered here and cannot publish
       // itself: the interface the reader is watching for was simply missing until the view was
-      // left and entered again — "切到别的会话再切回来才出现，或者干脆等一段时间". The page
-      // polls while it is on screen, and a hidden tab asks for nothing.
+      // left and entered again. The page polls while it is on screen, and a hidden tab asks for
+      // nothing.
       useEffect(() => {
         if (sessionId === undefined) return undefined;
         const refresh = () => {
@@ -4190,40 +4418,102 @@ window.__ModuleLoader__.load({
         const timer = setInterval(refresh, MANAGER_RECORD_POLL_MS);
         return () => clearInterval(timer);
       }, [sessionId]);
-      // Two groups, one partition: 跨会话的后台程序 first, 本会话的界面 second. A project appears in
-      // exactly one of them (see `managerRowIsCrossSession`), so nothing is listed twice.
+      // Two groups, one partition: cross-session backend programs first, this session's
+      // interfaces second. A program appears in exactly one of them (see
+      // `managerRowIsCrossSession`), so nothing is listed twice.
       const groups = managerGroupsFor(sessionId);
       const rows = groups.rows;
-      // A section is drawn only when it has something in it: an empty group with a heading and a
-      // sentence under it is noise, and the header still counts everything on the page.
-      const section = (title, hint, list) =>
-        list.length === 0
-          ? null
-          : h(
-              'div',
-              { style: { display: 'flex', flexDirection: 'column', minWidth: '0' } },
-              h(
-                'div',
-                { style: { display: 'flex', flexDirection: 'column', gap: '1px', padding: '2px 2px 6px' } },
-                h('span', { style: Object.assign({}, titleStyle, { whiteSpace: 'normal' }) }, `${title} (${list.length})`),
-                h('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', lineHeight: '15px' } }, hint),
-              ),
-              ...list.map((row) => h(HtmlUiManagerRow, { key: row.key, row, sessionId, props, onStatus: setStatus })),
-            );
+      const active = tab === 'cross' ? groups.cross : groups.local;
+      const emptyText =
+        tab === 'cross'
+          ? tr('managerCrossEmpty', 'No backend program running elsewhere.')
+          : tr('managerGroupSessionEmpty', 'This session has no interface open.');
+
+      /** One card, which is also that group's tab. */
+      const card = (id, label, hint, count, mark) => {
+        const on = tab === id;
+        return h(
+          'button',
+          {
+            key: id,
+            type: 'button',
+            'aria-pressed': on,
+            'data-manager-tab': id,
+            onClick: () => setTabState(id),
+            style: {
+              flex: narrow ? '1 1 auto' : '1 1 0',
+              minWidth: '0',
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              padding: narrow ? '9px 11px' : '11px 14px',
+              borderRadius: '10px',
+              border: `1.5px solid ${on ? PROGRAM_BACKGROUND : 'var(--dsw-alias-border-l1, #e3e3e3)'}`,
+              background: on ? 'var(--dsw-alias-bg-layer-2, rgba(36, 123, 191, 0.06))' : 'var(--dsw-alias-bg-layer-1, #ffffff)',
+              cursor: 'pointer',
+              font: 'inherit',
+              color: 'inherit',
+              boxShadow: on ? '0 1px 0 rgba(36, 123, 191, 0.08)' : 'none',
+            },
+          },
+          h(
+            'span',
+            { style: { display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: '0' } },
+            h('span', { style: { fontSize: narrow ? '13px' : '13.5px', fontWeight: 600, whiteSpace: 'nowrap' } }, label),
+            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `(${count})`),
+          ),
+          h(
+            'span',
+            { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' } },
+            h('span', { style: { color: PROGRAM_BACKGROUND, display: 'inline-flex', flex: '0 0 auto' } }, mark),
+            h(
+              'span',
+              {
+                style: {
+                  fontSize: narrow ? '11.5px' : '12px',
+                  color: 'var(--dsw-alias-label-secondary, #888)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                },
+              },
+              hint,
+            ),
+          ),
+        );
+      };
+
+      const headerCell = { fontSize: '12px', lineHeight: '16px', color: 'var(--dsw-alias-label-secondary, #888)', whiteSpace: 'nowrap' };
+
       return h(
         'div',
-        { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', padding: '10px 12px' } },
+        {
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            minHeight: '0',
+            gap: narrow ? '10px' : '12px',
+            padding: narrow ? '10px 10px 0' : '14px 16px 0',
+          },
+        },
+        // The title carries the page's own mark, and the create entry lives here: the design has
+        // no place for it in the table, and it is still the way in.
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' } },
-          h('span', { style: Object.assign({}, titleStyle, { flex: '1 1 auto' }) }, `${tr('managerTitle', 'HTML programs')} (${rows.length})`),
-          // The same create flow the composer control opens. A reader who cannot find a
-          // small control beside the composer should not have to hunt for the way in.
+          { style: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 0 auto' } },
+          h('span', { style: { color: 'var(--dsw-alias-label-primary, #111)', display: 'inline-flex' } }, managerGlyph(narrow ? 18 : 20)),
+          h(
+            'span',
+            { style: { fontSize: narrow ? '16px' : '18px', fontWeight: 650, color: 'var(--dsw-alias-label-primary, #111)', whiteSpace: 'nowrap' } },
+            tr('managerTitle', 'Web task manager'),
+          ),
+          h('span', { style: { flex: '1 1 auto' } }),
           h(
             'button',
             {
               type: 'button',
-              style: Object.assign({}, buttonStyle, { borderColor: 'transparent', background: 'var(--dsw-alias-bg-accent, #247bbf)', color: '#fff' }),
               onClick: () => {
                 state.create.open = true;
                 state.create.busy = false;
@@ -4235,8 +4525,22 @@ window.__ModuleLoader__.load({
                 bump();
                 loadTemplates();
               },
+              style: {
+                font: 'inherit',
+                fontSize: narrow ? '12px' : '12.5px',
+                lineHeight: '1',
+                height: narrow ? '30px' : '30px',
+                padding: narrow ? '0 10px' : '0 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--dsw-alias-border-l1, #d9d9d9)',
+                background: 'transparent',
+                color: 'var(--dsw-alias-label-primary, #111)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto',
+              },
             },
-            tr('managerNew', 'New HTML project'),
+            `+ ${tr('managerNew', 'New HTML project')}`,
           ),
         ),
         // Said in the header, not on a row: a stop that worked needs no sentence (the row
@@ -4244,34 +4548,46 @@ window.__ModuleLoader__.load({
         // nothing was running, or the stop failed — have to speak up somewhere the reader looks.
         status === null
           ? null
-          : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginBottom: '6px' } }, String(status)),
+          : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', flex: '0 0 auto' } }, String(status)),
+        h(
+          'div',
+          { style: { display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: '10px', flex: '0 0 auto' } },
+          card('local', tr('managerGroupSession', 'Interfaces in this session'), tr('managerCardLocalHint', 'Plain front-end pages (nothing crosses sessions)'), groups.local.length, cardGlyph('local', 14)),
+          card('cross', tr('managerCardCross', 'With a backend'), tr('managerCardCrossHint', 'Backend programs from other sessions appear here'), groups.cross.length, cardGlyph('cross', 14)),
+        ),
         rows.length === 0
           ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML program.'))
           : h(
               'div',
-              { style: { display: 'flex', flexDirection: 'column', minHeight: '0', overflowY: 'auto' } },
-              section(
-                tr('managerGroupCross', 'Backend programs (cross-session)'),
-                tr('managerGroupCrossHint', 'Their process runs inside the DSH host, not in a conversation: it stays up after this session closes, which is why a program you never opened here can be listed.'),
-                groups.cross,
-              ),
-              // 本会话这一区为空、但后台区不为空时要说一句：否则读者只会看到一页「别的会话的程序」，
-              // 却不知道本会话为什么什么都没有。
-              groups.cross.length > 0 && groups.local.length === 0
-                ? h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', padding: '2px 2px 6px' } }, tr('managerGroupSessionEmpty', 'This session has no interface open.'))
-                : null,
-              section(
-                tr('managerGroupSession', 'Interfaces in this session'),
-                tr('managerGroupSessionHint', 'Every interface recorded in this session: plain front-end pages, and projects whose backend is running with an interface open.'),
-                groups.local,
-              ),
-            ),
-        groups.interfaces === 0
-          ? null
-          : h(
-              'div',
-              { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', marginTop: '8px' } },
-              `${tr('managerMinimize', 'Minimize')} / ${tr('managerMaximize', 'Maximize')} ${tr('managerHintHide', 'is the same hide the interface’s own control does.')} ${tr('managerHintRest', 'Closing the interface throws it away and keeps its process; ending the process takes the interfaces with it.')}`,
+              { style: { flex: '1 1 auto', minHeight: '0', overflowY: 'auto', display: 'flex', flexDirection: 'column' } },
+              // The table's own heading, on the columns the rows are drawn on. A phone has no
+              // room for a second column, so it is dropped there and the status joins the marks.
+              narrow
+                ? null
+                : h(
+                    'div',
+                    {
+                      style: {
+                        display: 'grid',
+                        gridTemplateColumns: MANAGER_COLUMNS,
+                        alignItems: 'center',
+                        gap: '14px',
+                        padding: '8px 8px 6px',
+                        borderBottom: '1px solid var(--dsw-alias-border-l1, #eee)',
+                        flex: '0 0 auto',
+                      },
+                    },
+                    h('span', { style: headerCell }, tr('managerColumnName', 'Program (AID)')),
+                    h('span', { style: headerCell }, tr('managerColumnStatus', 'Status')),
+                    h('span', { style: headerCell }, ''),
+                  ),
+              active.length === 0
+                ? h(
+                    'div',
+                    { style: { padding: '22px 8px', fontSize: '12.5px', color: 'var(--dsw-alias-label-secondary, #888)' } },
+                    emptyText,
+                  )
+                : active.map((row) => h(HtmlUiManagerRow, { key: row.key, row, sessionId, props, onStatus: setStatus })),
             ),
       );
     }
@@ -7375,6 +7691,9 @@ window.__ModuleLoader__.load({
         managerRowIsCrossSession,
         managerTitleOf,
         managerPlacementFor,
+        // The two words this page puts on a program, and the state behind them: a test asserts
+        // the pair (foreground/background) without rendering a row for each combination.
+        managerStatusOf,
         recordHidden,
         toggleRecord,
         HtmlUiTemplateButton,

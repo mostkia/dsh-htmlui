@@ -882,14 +882,17 @@ test('one row per program: two interfaces of one project are one program', () =>
       undefined,
     ),
   ]);
-  const page = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  assert.ok(page.text.includes('计算器（calculator）'), 'the project name leads and the id it is addressed by follows');
-  assert.ok(page.text.includes('(2)'), 'the count is one per program, not one per interface');
+  // The page is two cards now, and a program lives under exactly one of them: the project with a
+  // live process is a 带后台 program, the hand-written page is this session's own.
+  const local = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  const cross = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
+  assert.ok(cross.text.includes('计算器（calculator）'), 'the project name leads and the id it is addressed by follows');
+  assert.ok(local.text.includes('(1)'), 'each card counts the programs under it');
   const rows = __internals.managerRowsFor('session-1');
   assert.equal(rows.length, 2, 'two projects, two rows');
   // A project with no catalogue row and no interface record of its own still reads by its
   // record's title: there is no name to borrow, and an empty title helps nobody.
-  assert.ok(page.text.includes('手写'), 'a program with no catalogue entry is still named');
+  assert.ok(local.text.includes('手写'), 'a program with no catalogue entry is still named');
   resetStore();
   state.templates.items = [];
 });
@@ -1202,40 +1205,48 @@ test('a long project id stays on one line, and the title gives way before it', (
   __internals.state.templates.items = [];
 });
 
-test('the session manager lists one row per program, with the controls that row owns', () => {
+test('the session manager lists one row per program, on the two cards the design gives it', () => {
   // A click-through background layer and a seamless inline one offer no control of
   // their own, so this page is the only way for a user to take them away.
   resetStore();
   const empty = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
   assert.match(empty.text, /no HTML program/u, 'an empty session says so');
+  assert.equal(
+    empty.elements.filter((element) => typeof element.props?.['data-manager-tab'] === 'string').length,
+    2,
+    'and still offers the two cards, which are the page’s tabs',
+  );
 
-  // One program with a backend, one without: the first gets three controls, the second two.
-  // Both projects are in the catalogue, because a row takes its marks and its controls from the
-  // catalogue entry its record names — a record whose project is not listed has no process.
+  // One program with a backend, one without: both projects are in the catalogue, because a row
+  // takes its marks and its controls from the catalogue entry its record names.
   setCatalogue([backendProject(), { slug: 'form', name: '表单', description: '', bytes: 1 }]);
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000001', sessionId: 'session-1', title: '看板', placement: 'background', template: 'heimiao', revision: 2, bytes: 5 }, undefined),
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-99000002', sessionId: 'session-1', title: '表单', placement: 'inline', template: 'form', revision: 1, bytes: 5 }, undefined),
   ]);
-  const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  assert.match(listed.text, /\(2\)/u, 'the count is the session count of programs');
-  // The rows below are read in the reader's own words; the harness defaults to English.
+  assert.equal(__internals.managerRowsFor('session-1').length, 2, 'two programs, two rows');
   withChinese(() => {
-    // Each row is named 名称（slug） — a name a reader recognises, then the id `template=` takes.
-    const chinese = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-    for (const text of ['黑喵（heimiao）', '表单（form）', 'background', 'inline', '关闭后台任务', '关闭会话']) {
-      assert.ok(chinese.text.includes(text), `the manager shows ${text}`);
+    // The page's own words: a title, the two cards and the table's two columns.
+    const local = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    const cross = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
+    for (const text of ['Web任务管理器', '本会话的界面 (1)', '纯前端程序(内容不会跨会话)', '带后台 (1)', '带后台的跨会话程序会显示在此']) {
+      assert.ok(`${local.text} ${cross.text}`.includes(text), `the page says ${text}`);
     }
-    // One program with a backend, one without: the first gets three controls, the second two.
-    assert.equal(buttonsLabelled(listed, 'Close backend task').length, 1, 'the process control is on the backend row');
-    assert.equal(buttonsLabelled(listed, 'Close session').length, 1, 'and the session control on the other');
-    // A background layer carries no hide control and an inline surface never hides, so neither
-    // row offers minimize — there is nothing a minimize could mean for them.
-    assert.equal(buttonsLabelled(listed, 'Minimize').length, 0, 'no hide control for the two forms that cannot hide');
-    // No second section, and never a second row for the same program: a project appears once,
-    // and 「后台进程」 as an independent list is exactly what this row model replaced.
-    assert.ok(!chinese.text.includes('后台进程'), 'there is no separate backend-process section');
-    assert.ok(!chinese.text.includes('停止后台'), 'and no stop-backend control of its own');
+    assert.ok(local.text.includes('程序名(AID)') && local.text.includes('程序状态'), 'and heads its table');
+    // A card is a tab: each program is listed under exactly one of them.
+    assert.ok(local.text.includes('表单（form）'), 'the session card lists its own interface');
+    assert.ok(!local.text.includes('黑喵（heimiao）'), 'and not the one whose process belongs to the host');
+    assert.ok(cross.text.includes('黑喵（heimiao）'), 'the backend card lists the program with a process');
+    assert.ok(!cross.text.includes('表单（form）'), 'and nothing from the other card');
+    // The row is one status and two controls. The old row carried four buttons — minimize/
+    // maximize, close UI, close backend, close session — and asked the reader to pick a
+    // destructive action; the design keeps the gear (window menu) and one dark pill.
+    assert.equal(buttonsLabelled(cross, '关闭').length, 1, 'the row ends with one close pill');
+    assert.equal(cross.elements.filter((element) => element.props?.['data-program-row'] === 'heimiao').length, 1, 'one row for the program');
+    assert.ok(cross.text.includes('前台运行'), 'an interface on screen reads 前台运行');
+    for (const gone of ['关闭后台任务', '关闭UI界面', '关闭会话', '重启UI界面']) {
+      assert.ok(!cross.text.includes(gone), `the old ${gone} button is gone`);
+    }
   });
   // A different session is not this session's business: the rows above belong to session-1, and
   // session-2 has no records at all. Its build is asserted in the backend-row test below.
@@ -1339,7 +1350,7 @@ test('a float remembers where it was left, and a touch brings it to the front', 
   resetStore();
 });
 
-test('the session page offers minimize for every form that has one, and none for the rest', () => {
+test('the window menu offers minimize for every form that has one, and none for the rest', () => {
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000001', sessionId: 'session-1', title: '背景', placement: 'background', revision: 1, bytes: 5 }, undefined),
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000002', sessionId: 'session-1', title: '浮窗', placement: 'float', revision: 1, bytes: 5 }, undefined),
@@ -1347,19 +1358,30 @@ test('the session page offers minimize for every form that has one, and none for
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000004', sessionId: 'session-1', title: '全屏', placement: 'fullscreen', revision: 1, bytes: 5 }, undefined),
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-77000005', sessionId: 'session-1', title: '内联', placement: 'inline', revision: 1, bytes: 5 }, undefined),
   ]);
-  const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  const rows = __internals.managerRowsFor('session-1');
+  const menuOf = (row) => render(__internals.HtmlUiManagerRow, { row, sessionId: 'session-1', onStatus: () => {}, menuOpen: true, props: {} });
+  const placementOf = (row) => row.records[0].placement;
   // A float and a fullscreen carry a hide control of their own. A dock-right record only has one
   // while the right column can actually open a tab — with no controller bound it falls back to
-  // the composer dock, which has no hide of its own, so there is nothing to mirror.
-  assert.equal(buttonsLabelled(listed, 'Minimize').length, 2, 'the two forms that can be put away offer it');
+  // the composer dock, which has no hide of its own, so there is nothing to mirror there.
+  assert.deepEqual(
+    rows.filter((row) => buttonsLabelled(menuOf(row), 'Minimize').length === 1).map(placementOf).sort(),
+    ['float', 'fullscreen'],
+    'only the two forms that can be put away offer it',
+  );
   // A background layer is always on screen and an inline surface lives in the conversation, so
-  // neither can be hidden and neither gets a control that could not do anything.
-  // Nothing is put away yet, so every one of those controls reads 最小化.
-  assert.equal(buttonsLabelled(listed, 'Maximize').length, 0, 'nothing is hidden to begin with');
-  // None of the five names a project, so every row is a program of its own — and each one can
-  // still be closed, which is now 「关闭会话」.
-  assert.equal(buttonsLabelled(listed, 'Close session').length, 5, 'every program can be closed');
-  assert.ok(!listed.text.includes('Close UI'), 'and no program here has a process, so no Close UI');
+  // neither can be hidden and neither gets an item that could not do anything.
+  for (const row of rows) {
+    // Every menu still offers the four positions: a program drawn nowhere is started again there.
+    for (const label of ['Right column', 'In the conversation', 'Fullscreen', 'Floating window']) {
+      assert.ok(buttonsLabelled(menuOf(row), label).length === 1, `every program can be drawn at ${label}`);
+    }
+  }
+  // Nothing is put away yet, so the item reads 最小化 everywhere it exists.
+  assert.equal(buttonsLabelled(menuOf(rows.find((row) => placementOf(row) === 'float')), 'Maximize').length, 0, 'nothing is hidden to begin with');
+  // Every program can also be ended, from the pill, whatever it is.
+  const listed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  assert.equal(buttonsLabelled(listed, 'Close').length, 5, 'every program can be ended');
   resetStore();
 });
 
@@ -1553,17 +1575,18 @@ test('the drawer keeps the project marks and only the drawer, and the manager ro
       __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000002', sessionId: 'session-1', title: '手写', placement: 'float', template: 'plain', revision: 1, bytes: 5 }, undefined),
       __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-be000003', sessionId: 'session-1', title: '空', placement: 'float', revision: 1, bytes: 5 }, undefined),
     ]);
-    const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    // A project with a live process is a 带后台 program, so it lives under that card.
+    const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
     assert.ok(manager.text.includes('带后台'), 'the row says the project has a backend');
     assert.ok(manager.text.includes('常驻') && manager.text.includes('已加载'), 'and what state that backend is in');
-    assert.equal(buttonsLabelled(manager, '关闭后台任务').length, 1, 'and exactly one control ends the process');
-    assert.equal(buttonsLabelled(manager, '最小化').length, 3, 'and every row offers the interface hide');
-    assert.equal(buttonsLabelled(manager, '关闭UI界面').length, 1, 'and the one with a backend can close its interface');
-    assert.equal(buttonsLabelled(manager, '关闭会话').length, 2, 'and the two without one close themselves');
-    // The permission mark is per project and reads as the catalogue answers it. A project that
-    // declares no backend carries no permission mark at all, and no residency mark either — an
-    // empty chip is a state nobody can act on.
     assert.ok(manager.text.includes('已授权'), 'the allowed backend says so on its row');
+    // The row is two controls, and the one that ends the program is the dark pill.
+    assert.equal(buttonsLabelled(manager, '关闭').length, 1, 'exactly one pill ends the program');
+    assert.equal(
+      manager.elements.filter((element) => typeof element.props?.['data-program-row'] === 'string').length,
+      1,
+      'one row for the one program on this card',
+    );
     for (const mark of ['未授权', '未加载', '跟随面板']) {
       assert.ok(!manager.text.includes(mark), `and a project with no declared backend shows no ${mark}`);
     }
@@ -1586,102 +1609,78 @@ test('the manager row is a two-button program or a three-button one, and its lab
   const [withBackend, withoutBackend] = __internals.managerRowsFor('session-1');
 
   withChinese(() => {
-    // 带后台: three controls — minimize/maximize, close/restart the interface, end the process.
+    // Every row has exactly two controls: the gear that opens the window menu, and the pill.
     const rich = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
-    assert.deepEqual(
-      rich.elements.filter((element) => element.type === 'button').map((element) => element.children[0]),
-      ['最小化', '关闭UI界面', '关闭后台任务'],
-      'three controls, in that order',
-    );
-    // 无后台: two — the same hide, and closing the session.
+    const richButtons = rich.elements.filter((element) => element.type === 'button');
+    assert.equal(richButtons.length, 2, 'a gear and a pill');
+    assert.equal(buttonsLabelled(rich, '关闭').length, 1, 'the pill says 关闭');
+    assert.ok(richButtons.some((element) => element.props?.['aria-haspopup'] === 'menu'), 'the other one opens the window menu');
+    // The same build whatever the program is: a process does not add a third control to the row.
     const lean = render(__internals.HtmlUiManagerRow, { row: withoutBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
-    assert.deepEqual(
-      lean.elements.filter((element) => element.type === 'button').map((element) => element.children[0]),
-      ['最小化', '关闭会话'],
-      'a program with no process has no process control',
-    );
+    assert.equal(lean.elements.filter((element) => element.type === 'button').length, 2, 'a program with no process is the same two controls');
 
-    // The hide label follows the state the interface's own control writes: hide it anywhere and
-    // this row says 最大化, with no second copy of the state to fall out of step.
+    // The window menu: the four positions the create dialog offers, in its words, the one the
+    // interface is drawn in marked, and 最小化 for the forms that can be put away.
+    const menu = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, menuOpen: true, props: {} });
+    for (const label of ['右侧折叠栏', '上下文对话内', '全屏覆盖会话', '浮动拖拽窗口', '最小化']) {
+      assert.ok(buttonsLabelled(menu, label).length === 1, `the menu offers ${label}`);
+    }
+    const marked = menu.elements.find((element) => element.props?.['data-placement'] === 'float');
+    assert.equal(marked.props['aria-checked'], true, 'the placement it is drawn in is the marked one');
+    assert.ok(menu.text.includes('切换位置会重新加载界面'), 'and the menu says a position reloads the interface');
+
+    // The hide item follows the state the interface's own control writes: hide it anywhere and
+    // the same item says 恢复显示, with no second copy of the state to fall out of step.
     const hiddenId = 'ui-m1000001';
     assert.equal(__internals.recordHidden(__internals.recordsFor('session-1')[0]), false, 'a fresh interface is up');
     __internals.state.hidden.add(hiddenId);
     assert.equal(__internals.recordHidden(__internals.recordsFor('session-1')[0]), true, 'and a minimized float reads as hidden');
-    const minimized = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
-    assert.equal(buttonsLabelled(minimized, '最大化').length, 1, 'the same button now says 最大化');
+    const minimized = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, menuOpen: true, props: {} });
+    assert.equal(buttonsLabelled(minimized, '恢复显示').length, 1, 'the item now offers to bring it back');
     assert.equal(buttonsLabelled(minimized, '最小化').length, 0, 'and no longer says 最小化');
     // Pressing it is the interface's own hide/unhide, so the state really is shared.
-    __internals.toggleRecord(__internals.recordsFor('session-1')[0], {});
-    assert.equal(__internals.state.hidden.has(hiddenId), false, 'maximize brings the float back');
+    buttonsLabelled(minimized, '恢复显示')[0].props.onClick();
+    assert.equal(__internals.state.hidden.has(hiddenId), false, 'restoring brings the float back');
 
-    // Close UI: the first press only asks, and the question says what is lost. The action itself
-    // is not run — nothing is dismissed and no stop request is sent from a first press.
+    // One page, two words: 前台运行 while an interface is on screen, 后台运行 once it is away.
+    const upPage = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
+    assert.ok(upPage.text.includes('前台运行'), 'an interface on screen reads 前台运行');
+    __internals.state.hidden.add(hiddenId);
+    const awayPage = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
+    assert.ok(awayPage.text.includes('后台运行'), 'and one put away reads 后台运行');
+    __internals.state.hidden.delete(hiddenId);
+
+    // The pill asks first, and the question names the whole program. Nothing is ended by one press.
     const safe = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
-    const closeUi = buttonsLabelled(safe, '关闭UI界面')[0];
-    closeUi.props.onClick();
-    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press closes nothing');
-    const asking = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'close-ui', props: {} });
-    assert.equal(buttonsLabelled(asking, '确认关闭界面？未保存的运行信息会丢').length, 1, 'and the button becomes the question');
-    assert.equal(buttonsLabelled(asking, '关闭UI界面').length, 0, 'so it is readable as a confirmation, not as the label again');
-
-    // Close backend task: same two steps, and the question says the interfaces go with it.
-    const stopRow = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
-    buttonsLabelled(stopRow, '关闭后台任务')[0].props.onClick();
-    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press ends nothing either');
-    const stopping = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'close-backend', props: {} });
-    assert.equal(buttonsLabelled(stopping, '确认结束进程？界面一起消失').length, 1, 'and this question names the interfaces');
-
-    // A program with no backend asks before closing its session, and says it cannot be undone.
-    const sessionRow = render(__internals.HtmlUiManagerRow, { row: withoutBackend, sessionId: 'session-1', onStatus: () => {}, props: {} });
-    buttonsLabelled(sessionRow, '关闭会话')[0].props.onClick();
-    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press closes nothing here either');
-    const closing = render(__internals.HtmlUiManagerRow, { row: withoutBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'close-session', props: {} });
-    assert.equal(buttonsLabelled(closing, '确认关闭？无法恢复').length, 1, 'and this one asks in its own words');
-
-    // Close UI leaves the row behind: the process is still loaded, so the interface can come back.
-    // The control that brings it back is 重启UI界面, in the same position 关闭UI界面 was.
-    for (const record of [...__internals.recordsFor('session-1')]) __internals.dismissRecord(record.uiId);
-    const closed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-    assert.match(closed.text, /界面已关闭/u, 'the row says the interface is gone');
-    assert.equal(buttonsLabelled(closed, '重启UI界面').length, 1, 'and offers to bring it back');
-    assert.equal(buttonsLabelled(closed, '关闭UI界面').length, 0, 'instead of offering to close it again');
-    assert.ok(closed.text.includes('带后台'), 'the process is still named, so the row is still the process row');
-    // 无后台的项目只来自界面记录: with its interface gone nothing is left to list, while the
-    // program whose process is still loaded keeps its row — that is the whole difference.
-    assert.deepEqual(
-      __internals.managerRowsFor('session-1').map((row) => row.key),
-      ['heimiao'],
-      'the closed program keeps its row and the record-only one does not',
-    );
+    buttonsLabelled(safe, '关闭')[0].props.onClick();
+    assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press ends nothing');
+    const asking = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'end', props: {} });
+    assert.equal(buttonsLabelled(asking, '确认关闭？').length, 1, 'and the pill becomes the question');
+    assert.equal(buttonsLabelled(asking, '关闭').length, 0, 'so it is readable as a confirmation, not as the label again');
+    // The second press really ends it — the interfaces go, and the process is asked to stop.
+    const realFetch = globalThis.fetch;
+    let stopped = 0;
+    globalThis.fetch = (url) => {
+      if (String(url).endsWith('/templates/backend/stop')) stopped += 1;
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, message: '' }) });
+    };
+    try {
+      buttonsLabelled(asking, '确认关闭？')[0].props.onClick();
+      assert.deepEqual(
+        __internals.recordsFor('session-1').map((record) => record.uiId),
+        ['ui-m2000001'],
+        'the second press dismisses that program’s interfaces and only those',
+      );
+      assert.equal(stopped, 1, 'and asks the host to stop its process');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
-  // 重启UI界面 asks where first, on the same placement words the create dialog uses — no second
-  // vocabulary to learn — and the question can be declined.
-  const restartRow = __internals.managerRowsFor('session-1')[0];
-  const picker = render(__internals.HtmlUiManagerRow, {
-    row: restartRow,
-    sessionId: 'session-1',
-    onStatus: () => {},
-    placementPicking: true,
-    props: {},
-  });
-  assert.match(picker.text, /Show it again as/u, 'the restart asks where');
-  const placementChoices = picker.elements
-    .filter((element) => element.type === 'button')
-    .map((element) => element.children[0])
-    .filter((label) => typeof label === 'string' && !['Minimize', 'Maximize', 'Restart UI', 'Close backend task', 'Cancel'].includes(label));
-  assert.deepEqual(placementChoices, ['Right column', 'In the conversation', 'Fullscreen', 'Floating window'], 'one choice per placement, in the create dialog’s order and words');
-  assert.equal(buttonsLabelled(picker, 'Cancel').length, 1, 'and the question can be declined');
-  assert.equal(
-    picker.elements.filter((element) => element.type === 'button').some((element) => element.props.style?.borderColor === 'var(--dsw-alias-bg-accent, #247bbf)'),
-    true,
-    'with the reader’s last placement preselected',
-  );
-
-  // 重启UI界面 asks where first, on the same placement words the create dialog uses. What it
-  // preselects is the reader's last word on this project — where the interface is now, else what
-  // the catalogue remembers, else the manifest — because "again" means the way it was.
-  const remembered = __internals.managerRowsFor('session-1')[0].template;
+  // The window menu asks where on the same placement words the create dialog uses — no second
+  // vocabulary to learn — and what it preselects is the reader's last word on this project:
+  // where the interface is now, else what the catalogue remembers, else the manifest.
+  const remembered = backendProject();
   assert.equal(__internals.managerPlacementFor(remembered, { placement: 'float' }), 'float', 'the live placement wins while the interface is up');
   assert.equal(__internals.managerPlacementFor({ placementLast: 'fullscreen', placement: 'inline' }, undefined), 'fullscreen', 'then what the project was last opened with');
   assert.equal(__internals.managerPlacementFor({ placement: 'inline' }, undefined), 'inline', 'then what its manifest declares');
@@ -1708,21 +1707,27 @@ test('a program whose process is loaded keeps its row after its interface is clo
   resetStore([
     __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-bo000001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
   ]);
-  const shown = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-  assert.equal(buttonsLabelled(shown, 'Close UI').length, 1, 'the interface is up, so the button closes it');
+  const shown = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
+  assert.equal(buttonsLabelled(shown, 'Close').length, 1, 'the program ends from one pill');
+  assert.ok(shown.text.includes('Running in front'), 'and its interface is on screen');
   withChinese(() => {
-    assert.ok(render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text.includes('已加载'), 'and the row says the process is loaded');
+    assert.ok(render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' }).text.includes('已加载'), 'and the row says the process is loaded');
   });
 
-  // Its interface gone — whether closed from here or from anywhere else — the row stays, and the
-  // same button is now the way back in.
+  // Its interface gone — whether closed from here or from anywhere else — the row stays: the
+  // process outlives the panel, so its row (the only place left that can end it) has to as well.
   for (const record of [...__internals.recordsFor('session-1')]) __internals.dismissRecord(record.uiId);
-  const closed = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+  const closed = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
   assert.equal(__internals.recordsFor('session-1').length, 0, 'no interface is left');
-  assert.equal(buttonsLabelled(closed, 'Restart UI').length, 1, 'and the row still offers to render it again');
-  assert.equal(buttonsLabelled(closed, 'Close backend task').length, 1, 'and to end the process it still stands for');
+  assert.equal(buttonsLabelled(closed, 'Close').length, 1, 'and the row still ends the program');
   withChinese(() => {
-    assert.ok(render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text.includes('界面已关闭'), 'the row says plainly why it is still here');
+    const text = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' }).text;
+    assert.ok(text.includes('后台运行'), 'the row says the program is running in the background');
+    // The way back in is the window menu: choosing a position starts the interface again there.
+    const row = __internals.managerRowsFor('session-1')[0];
+    const menu = render(__internals.HtmlUiManagerRow, { row, sessionId: 'session-1', onStatus: () => {}, menuOpen: true, props: {} });
+    assert.equal(buttonsLabelled(menu, '右侧折叠栏').length, 1, 'the menu offers a position to start it again');
+    assert.equal(buttonsLabelled(menu, '最小化').length, 0, 'and there is nothing to minimize');
   });
   // Another session sees it too: "loaded" is the one session-independent fact the host reports
   // about a process, and a reader looking for the way to end it is looking at this page.
@@ -2015,26 +2020,32 @@ test('the manager splits cross-session processes from this session’s interface
   assert.ok(!groups.rows.some((row) => row.key === 'idle'), 'a declared backend that is not loaded is not a row');
 
   withChinese(() => {
-    const manager = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
-    assert.ok(manager.text.includes('跨会话的后台程序 (2)'), 'the cross-session group says what it is, and how many');
-    assert.ok(manager.text.includes('跑在 DSH 宿主进程里'), 'and explains that it belongs to no session');
-    assert.ok(manager.text.includes('本会话的界面 (1)'), 'the session group is named and counted too');
-    // One row per program in the rendering as well, not only in the partition: heimiao is drawn
-    // once, under the cross-session heading.
-    assert.equal(buttonsLabelled(manager, '关闭后台任务').length, 2, 'one process control per process row');
-    assert.equal(buttonsLabelled(manager, '关闭会话').length, 1, 'and the plain page closes itself');
-    // Its interface is still operable from there: the group moved the row, not its controls.
-    assert.equal(buttonsLabelled(manager, '关闭UI界面').length, 1, 'a process row keeps its interface control');
+    const local = render(__internals.HtmlUiManager, { sessionId: 'session-1' });
+    const cross = render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' });
+    // The two cards are the groups, and they carry their counts.
+    assert.ok(local.text.includes('本会话的界面 (1)'), 'the session card is named and counted');
+    assert.ok(cross.text.includes('带后台 (2)'), 'the backend card is, too');
+    assert.ok(local.text.includes('纯前端程序(内容不会跨会话)'), 'the session card says what belongs there');
+    assert.ok(cross.text.includes('带后台的跨会话程序会显示在此'), 'and the backend card says what it is for');
+    // A card is a tab: heimiao is drawn once, under the backend card, even though this session
+    // has its interface open — what that row stands for is a process in the host.
+    assert.equal(
+      cross.elements.filter((element) => typeof element.props?.['data-program-row'] === 'string').length,
+      2,
+      'one row per live process',
+    );
+    assert.equal(buttonsLabelled(cross, '关闭').length, 2, 'and one pill per row');
+    assert.ok(local.text.includes('纯页面'), 'the plain page is on the session card');
+    assert.ok(!local.text.includes('看板'), 'and the process rows are not');
   });
 
-  // A session with nothing of its own shows the cross-session group and says why the other half is
+  // A session with nothing of its own still shows the backend card and says why the other one is
   // empty, instead of leaving the reader to guess whether the page is broken.
-  assert.equal(render(__internals.HtmlUiManager, { sessionId: 'session-2' }).text.includes('Backend programs (cross-session)'), true, 'the English fallback names the group too');
   withChinese(() => {
-    const text = render(__internals.HtmlUiManager, { sessionId: 'session-2' }).text;
-    assert.ok(text.includes('跨会话的后台程序'), 'another session sees the live processes');
-    assert.ok(!text.includes('本会话的界面 ('), 'and no session group, because it has none');
-    assert.ok(text.includes('本会话没有开着的界面'), 'with a line saying so');
+    const other = render(__internals.HtmlUiManager, { sessionId: 'session-2' });
+    assert.ok(other.text.includes('本会话没有开着的界面'), 'the empty session card says so');
+    assert.ok(other.text.includes('带后台 (2)'), 'while the backend card counts the live processes');
+    assert.equal(render(__internals.HtmlUiManager, { sessionId: 'session-2', tab: 'cross' }).elements.filter((element) => typeof element.props?.['data-program-row'] === 'string').length, 2, 'and its tab lists them');
   });
 
   // When the process is gone there is nothing cross-session left, so that heading goes with it.
@@ -2045,8 +2056,9 @@ test('the manager splits cross-session processes from this session’s interface
   assert.deepEqual(__internals.managerGroupsFor('session-1').cross, [], 'nothing loaded, nothing cross-session');
   withChinese(() => {
     const only = render(__internals.HtmlUiManager, { sessionId: 'session-1' }).text;
-    assert.ok(only.includes('本会话的界面 (1)'), 'only the session group is drawn');
-    assert.ok(!only.includes('跨会话的后台程序'), 'and the empty group leaves no heading behind');
+    assert.ok(only.includes('本会话的界面 (1)'), 'the session card still counts its program');
+    assert.ok(only.includes('带后台 (0)'), 'and the backend card counts none');
+    assert.ok(render(__internals.HtmlUiManager, { sessionId: 'session-1', tab: 'cross' }).text.includes('没有跨会话的后台程序'), 'its tab says there is nothing there');
   });
   resetStore();
   state.templates.items = [];
@@ -2083,15 +2095,15 @@ test('restarting a project into the right column opens the column, exactly as th
   try {
     const row = __internals.managerRowsFor('session-1')[0];
     assert.ok(row !== undefined, 'the project whose process is loaded has a row');
-    const picking = render(__internals.HtmlUiManagerRow, {
+    const menu = render(__internals.HtmlUiManagerRow, {
       row,
       sessionId: 'session-1',
       onStatus: (text) => statuses.push(text),
-      placementPicking: true,
+      menuOpen: true,
       props: {},
     });
-    const chooseRight = buttonsLabelled(picking, 'Right column')[0];
-    assert.ok(chooseRight !== undefined, 'the restart picker offers the right column');
+    const chooseRight = buttonsLabelled(menu, 'Right column')[0];
+    assert.ok(chooseRight !== undefined, 'the window menu offers the right column');
     chooseRight.props.onClick();
     // The render waits 120ms for the host to tear the old records down, so the assertion waits
     // for the step the live page waits for rather than for an arbitrary moment.

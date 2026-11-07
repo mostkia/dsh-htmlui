@@ -39,6 +39,21 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   every 2.5 s while it is on screen, and a hidden tab asks for nothing — the same reason its project
   catalogue was already polled every 5 s. Additions and removals both land without leaving the view.
 
+### Changed
+
+- The HTML manager is the design's **Web task manager**. The page is a title, two cards that are also
+  its tabs — `本会话的界面 (n)` (plain front-end pages) and `带后台 (n)` (programs whose process lives
+  in the host) — and one table under them headed `程序名(AID)` / `程序状态`. A row carries the
+  project's tile, its `名称（slug）` and chips, a single status — `前台运行` (green) while an interface
+  is on screen, `后台运行` (blue) once it is away or gone — and exactly two controls: a gear and a dark
+  `关闭` pill. The gear opens `重新设置视窗状态`: the four positions the create dialog offers (the one
+  it is drawn in marked) plus `最小化`/`恢复显示` for the forms that can hide. That replaces the row's
+  four buttons (minimize/maximize, close UI, restart UI, close backend task, close session), and
+  `关闭` now means one thing — the program ends, its interfaces close and its process stops — after a
+  second press, instead of asking the reader to tell two destructive actions apart. On a phone the
+  cards stack, the table heading is dropped, the status joins the chips under the name and the tap
+  targets grow.
+
 ## 0.1.5
 
 ### Added
