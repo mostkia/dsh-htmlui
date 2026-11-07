@@ -1721,7 +1721,7 @@ test('the manager row is a two-button program or a three-button one, and its lab
     buttonsLabelled(safe, '关闭')[0].props.onClick();
     assert.equal(__internals.recordsFor('session-1').length, 2, 'a first press ends nothing');
     const asking = render(__internals.HtmlUiManagerRow, { row: withBackend, sessionId: 'session-1', onStatus: () => {}, armed: 'end', props: {} });
-    assert.equal(buttonsLabelled(asking, '确认关闭？').length, 1, 'and the pill becomes the question');
+    assert.equal(buttonsLabelled(asking, '确认？').length, 1, 'and the pill becomes the question');
     assert.equal(buttonsLabelled(asking, '关闭').length, 0, 'so it is readable as a confirmation, not as the label again');
     // The second press really ends it — the interfaces go, and the process is asked to stop.
     const realFetch = globalThis.fetch;
@@ -1731,7 +1731,7 @@ test('the manager row is a two-button program or a three-button one, and its lab
       return Promise.resolve({ json: () => Promise.resolve({ ok: true, message: '' }) });
     };
     try {
-      buttonsLabelled(asking, '确认关闭？')[0].props.onClick();
+      buttonsLabelled(asking, '确认？')[0].props.onClick();
       assert.deepEqual(
         __internals.recordsFor('session-1').map((record) => record.uiId),
         ['ui-m2000001'],
@@ -2132,6 +2132,33 @@ test('the manager splits cross-session processes from this session’s interface
   resetStore();
   state.templates.items = [];
   resetCreate();
+});
+
+test('a program with a backend sits under 带后台 from its first frame', () => {
+  // A webapp the reader just created may take a moment to report its process as loaded, and the
+  // card it belongs under used to wait for that reading: the new program showed up under
+  // 本会话的界面 — while its own row already said 带后台 — until the catalogue caught up, and
+  // switching tabs at the wrong moment looked like the cure. The card's own words are the rule:
+  // 本会话的界面 is 纯前端程序, and everything that declares a backend is a 带后台 program.
+  setCatalogue([backendProject({ loaded: false, resident: false })]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-gr000001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+  ]);
+  assert.deepEqual(
+    __internals.managerGroupsFor('session-1').cross.map((row) => row.key),
+    ['heimiao'],
+    'a declared backend is a 带后台 program before its process reports loaded',
+  );
+  assert.deepEqual(__internals.managerGroupsFor('session-1').local, [], 'and it is not counted as a plain page');
+  // When the reading catches up the row does not move: the group is a property of the program.
+  setCatalogue([backendProject({ loaded: true })]);
+  assert.deepEqual(
+    __internals.managerGroupsFor('session-1').cross.map((row) => row.key),
+    ['heimiao'],
+    'the group does not change when the process starts reporting',
+  );
+  resetStore();
+  state.templates.items = [];
 });
 
 // ------------------------------------------- the restart path reveals what it rendered

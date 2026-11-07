@@ -54,11 +54,20 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   (minimize/maximize, close UI, restart UI, close backend task, close session), and `关闭` now means
   one thing — the program ends, its interfaces close and its process stops — after a second press,
   instead of asking the reader to tell two destructive actions apart. The two cards are capped at
-  320px rather than each taking half of a wide column. On a phone the cards stack, the table heading
-  is dropped, the status joins the chips under the name and the tap targets grow.
+  320px rather than each taking half of a wide column. On a phone the cards keep the two-across
+  layout (half the width each, with shorter hints and a smaller type rather than a clipped one),
+  the table heading is dropped, the status joins the chips under the name and the tap targets grow.
+  The close pill's confirmation reads `确认？` — it is the same button, and the long sentence lives
+  in its tooltip.
 
 ### Fixed
 
+- A program that declares a backend sits under `带后台` from its first frame. The card was chosen by
+  whether the host currently reported the process as loaded, so a webapp created a moment ago sat
+  under `本会话的界面` — while its own row already wore the 带后台 chips — until the next catalogue
+  reading (up to five seconds) caught up, and switching tabs in between looked like the cure. A
+  project with a backend is a 带后台 program by its own declaration; the group no longer waits for
+  the process to report, and does not change when it does.
 - A pure front-end program keeps its own tile and name in the manager. The catalogue entry a row
   reads its icon (and remembered position) from was attached only to projects that declare a
   backend, so every interface of a plain page fell through to the "no project" placeholder — a 📄

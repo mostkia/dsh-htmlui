@@ -1029,8 +1029,10 @@ window.__ModuleLoader__.load({
         managerGroupSessionHint: 'Every interface recorded in this session: plain front-end pages, and projects whose backend is running with an interface open.',
         managerGroupSessionEmpty: 'This session has no interface open.',
         managerCardLocalHint: 'Plain front-end pages (nothing crosses sessions)',
+        managerCardLocalHintShort: 'Plain pages',
         managerCardCross: 'With a backend',
         managerCardCrossHint: 'Backend programs from other sessions appear here',
+        managerCardCrossHintShort: 'Cross-session',
         managerCrossEmpty: 'No backend program running elsewhere.',
         managerColumnName: 'Program (AID)',
         managerColumnStatus: 'Status',
@@ -1209,8 +1211,10 @@ window.__ModuleLoader__.load({
         managerGroupSessionHint: '本会话里记录着的每一个界面：无后台的纯前端页，以及后台在跑、界面也开着的项目。',
         managerGroupSessionEmpty: '本会话没有开着的界面。',
         managerCardLocalHint: '纯前端程序(内容不会跨会话)',
+        managerCardLocalHintShort: '纯前端程序',
         managerCardCross: '带后台',
         managerCardCrossHint: '带后台的跨会话程序会显示在此',
+        managerCardCrossHintShort: '跨会话后台程序',
         managerCrossEmpty: '没有跨会话的后台程序。',
         managerColumnName: '程序名(AID)',
         managerColumnStatus: '程序状态',
@@ -1222,7 +1226,7 @@ window.__ModuleLoader__.load({
         managerViewportNoHide: '这个形态不能最小化',
         managerViewportReloadNote: '切换位置会重新加载界面。',
         managerEndProgram: '关闭',
-        managerConfirmEnd: '确认关闭？',
+        managerConfirmEnd: '确认？',
         managerEndProgramHint: '结束这个程序：界面关闭，后台进程停止。',
         managerConfirmEndHint: '再点一次结束整个程序，无法恢复。',
         // 界面自身的关闭按钮：和管理器行一样的两步确认。第一次点击只把按钮换成这句话，
@@ -3831,25 +3835,24 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Whether one row belongs to the 「跨会话的后台程序」 group rather than 「本会话的界面」.
+     * Whether one row belongs to the 「带后台」 card rather than 「本会话的界面」.
      *
-     * The host reports one session-independent fact about a process — `backend.loaded`, with no
-     * sessionId — while an interface record always carries the session it was opened in. A project
-     * whose process is loaded therefore *has* to be listable in a session that never opened it: that
-     * is the whole meaning of a backend that outlives its panel, and it is where 「关闭后台任务」
-     * lives for whoever wants to end it. A live process is the stronger fact, so a project that has
-     * one belongs to the cross-session group **even when this session also has its interface open**:
-     * it is one row, and the group it is under says what that row really is — a host process first,
-     * this session's panel second. That is also what keeps the two groups disjoint by construction.
+     * A project that *declares* a backend is a 带后台 program from the moment it appears, which is
+     * what its own chips already say. Grouping on `backend.loaded` alone made a freshly created
+     * webapp sit under 本会话的界面 until the next catalogue reading (up to five seconds) said its
+     * process was up — the two cards disagreed with the row's chips in the meantime, and switching
+     * tabs seemed to "fix" it. The card's own words are the rule: 本会话的界面 is 纯前端程序, and
+     * everything with a backend belongs under 带后台.
      *
-     * The `records.length` fallback covers the other half of the same fact: a row with no interface
-     * left exists only because the process is (or was a moment ago) alive, so it is a process row
-     * too. Without it a row the manager itself just closed would vanish from the page for one stale
-     * catalogue reading while still being counted in the header.
+     * The `records.length` fallback covers the other half: a row with no interface left exists only
+     * because a process is (or was a moment ago) alive, so it is a process row too. Without it a row
+     * the manager itself just closed would vanish from the page for one stale catalogue reading
+     * while still being counted in the header.
      */
     function managerRowIsCrossSession(row) {
       const template = row === undefined ? undefined : row.template;
-      if (managerBackendLive(template === undefined ? undefined : backendInfoOf(template))) return true;
+      const backend = template === undefined ? undefined : backendInfoOf(template);
+      if (backend !== undefined && backend.declared === true) return true;
       return Array.isArray(row?.records) && row.records.length === 0;
     }
 
@@ -4479,16 +4482,18 @@ window.__ModuleLoader__.load({
             'data-manager-tab': id,
             onClick: () => setTabState(id),
             style: {
-              flex: narrow ? '1 1 auto' : '1 1 0',
+              flex: '1 1 0',
               // Two cards share the width on a wide screen, and 50% each made a 300px card in a
               // 600px column — wide enough to read as a banner. The design's cards are compact.
+              // A phone keeps the two-across layout (the reader asked for it) and gets there by
+              // tightening the type and letting the hint wrap, never by clipping it.
               maxWidth: narrow ? undefined : '320px',
               minWidth: '0',
               textAlign: 'left',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
-              padding: narrow ? '9px 11px' : '11px 14px',
+              gap: narrow ? '5px' : '6px',
+              padding: narrow ? '8px 9px' : '11px 14px',
               borderRadius: '10px',
               border: `1.5px solid ${on ? PROGRAM_BACKGROUND : 'var(--dsw-alias-border-l1, #e3e3e3)'}`,
               background: on ? 'var(--dsw-alias-bg-layer-2, rgba(36, 123, 191, 0.06))' : 'var(--dsw-alias-bg-layer-1, #ffffff)',
@@ -4500,23 +4505,45 @@ window.__ModuleLoader__.load({
           },
           h(
             'span',
-            { style: { display: 'flex', alignItems: 'baseline', gap: '6px', minWidth: '0' } },
-            h('span', { style: { fontSize: narrow ? '13px' : '13.5px', fontWeight: 600, whiteSpace: 'nowrap' } }, label),
-            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #888)' } }, `(${count})`),
-          ),
-          h(
-            'span',
-            { style: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0' } },
-            h('span', { style: { color: PROGRAM_BACKGROUND, display: 'inline-flex', flex: '0 0 auto' } }, mark),
+            { style: { display: 'flex', alignItems: 'baseline', gap: '4px', minWidth: '0' } },
             h(
               'span',
               {
                 style: {
-                  fontSize: narrow ? '11.5px' : '12px',
-                  color: 'var(--dsw-alias-label-secondary, #888)',
+                  fontSize: narrow ? '12px' : '13.5px',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  minWidth: '0',
+                },
+              },
+              label,
+            ),
+            h('span', { style: { fontSize: narrow ? '11px' : '12px', color: 'var(--dsw-alias-label-secondary, #888)', flex: '0 0 auto' } }, `(${count})`),
+          ),
+          h(
+            'span',
+            { style: { display: 'flex', alignItems: narrow ? 'flex-start' : 'center', gap: '5px', minWidth: '0' } },
+            h(
+              'span',
+              { style: { color: PROGRAM_BACKGROUND, display: 'inline-flex', flex: '0 0 auto', marginTop: narrow ? '2px' : undefined } },
+              mark,
+            ),
+            h(
+              'span',
+              {
+                style: {
+                  fontSize: narrow ? '10.5px' : '12px',
+                  lineHeight: narrow ? '1.3' : '18px',
+                  color: 'var(--dsw-alias-label-secondary, #888)',
+                  // A phone's card is ~150px wide: the hint wraps onto two lines rather than
+                  // being cut, because an ellipsis hides exactly the words that explain the card.
+                  whiteSpace: narrow ? 'normal' : 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  minWidth: '0',
+                  wordBreak: 'break-word',
                 },
               },
               hint,
@@ -4592,9 +4619,9 @@ window.__ModuleLoader__.load({
           : h('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #888)', flex: '0 0 auto' } }, String(status)),
         h(
           'div',
-          { style: { display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: '10px', flex: '0 0 auto' } },
-          card('local', tr('managerGroupSession', 'Interfaces in this session'), tr('managerCardLocalHint', 'Plain front-end pages (nothing crosses sessions)'), groups.local.length, cardGlyph('local', 14)),
-          card('cross', tr('managerCardCross', 'With a backend'), tr('managerCardCrossHint', 'Backend programs from other sessions appear here'), groups.cross.length, cardGlyph('cross', 14)),
+          { style: { display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: narrow ? '8px' : '10px', flex: '0 0 auto' } },
+          card('local', tr('managerGroupSession', 'Interfaces in this session'), narrow ? tr('managerCardLocalHintShort', 'Plain pages') : tr('managerCardLocalHint', 'Plain front-end pages (nothing crosses sessions)'), groups.local.length, cardGlyph('local', 14)),
+          card('cross', tr('managerCardCross', 'With a backend'), narrow ? tr('managerCardCrossHintShort', 'Cross-session') : tr('managerCardCrossHint', 'Backend programs from other sessions appear here'), groups.cross.length, cardGlyph('cross', 14)),
         ),
         rows.length === 0
           ? h('div', { style: emptyStyle }, tr('managerEmpty', 'This session has no HTML program.'))
