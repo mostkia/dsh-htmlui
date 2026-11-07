@@ -4133,6 +4133,16 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * How often the manager re-reads its session's records while the page is on screen.
+     *
+     * The page is the only place that shows an interface created in a turn nobody was watching
+     * (see the effect below), and the host has no push channel for records. Two and a half
+     * seconds is short enough to read as "it appeared" and long enough that the request is
+     * noise next to a conversation; the catalogue keeps its own slower five-second rhythm.
+     */
+    const MANAGER_RECORD_POLL_MS = 2500;
+
+    /**
      * The session's HTML programs, listed where the reader already is.
      *
      * One row per program — interface open or not — because the process behind it is what outlives
@@ -4161,6 +4171,25 @@ window.__ModuleLoader__.load({
         }, 5000);
         return () => clearInterval(timer);
       }, []);
+      // The catalogue above is only half of this page. The other half is the record list — the
+      // interfaces themselves — and it has no live channel at all: records arrive from
+      // `/ui/list` when a seat mounts, from a tool card rendered in the transcript, or from a
+      // ticket. This page *replaces* the transcript (`conversation.view` renders one view at a
+      // time), so a card the model has just written is not rendered here and cannot publish
+      // itself: the interface the reader is watching for was simply missing until the view was
+      // left and entered again — "切到别的会话再切回来才出现，或者干脆等一段时间". The page
+      // polls while it is on screen, and a hidden tab asks for nothing.
+      useEffect(() => {
+        if (sessionId === undefined) return undefined;
+        const refresh = () => {
+          if (document.hidden === true) return;
+          // `force` skips the 2s share, which exists for seats mounting together, not for a
+          // page that stayed open.
+          syncSession(sessionId, { force: true });
+        };
+        const timer = setInterval(refresh, MANAGER_RECORD_POLL_MS);
+        return () => clearInterval(timer);
+      }, [sessionId]);
       // Two groups, one partition: 跨会话的后台程序 first, 本会话的界面 second. A project appears in
       // exactly one of them (see `managerRowIsCrossSession`), so nothing is listed twice.
       const groups = managerGroupsFor(sessionId);

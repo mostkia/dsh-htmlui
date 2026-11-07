@@ -28,6 +28,16 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   it again hung the layer over the sidebar instead. The seat's own box is watched now, so the layer
   follows the layout in both directions, and a right column opening or closing moves it the same
   way.
+- The HTML manager shows an interface as soon as it is created. The row list is the page's own
+  record store, and that store only hears about records from a tool card rendered in the
+  transcript, from `/ui/list` when a seat mounts, or from a ticket — there is no push channel.
+  The manager replaces the transcript (the shell renders one `conversation.view` at a time), so a
+  card the model had just written was never rendered there and could not publish itself: the page
+  kept saying 「本会话没有开着的界面」 until the reader switched to another view or session and
+  came back (measured: a record created while the manager was open was still missing after 7 s; the
+  page showed it the moment the view was re-entered). The manager now re-reads its session's records
+  every 2.5 s while it is on screen, and a hidden tab asks for nothing — the same reason its project
+  catalogue was already polled every 5 s. Additions and removals both land without leaving the view.
 
 ## 0.1.5
 

@@ -64,9 +64,13 @@ Two constraints of the host layout, worth knowing before judging a failure:
   `dock-right` record has no seat and is simply not visible.
 - A record created or closed *somewhere else* — another tab, or the model updating
   an interface whose card is scrolled out of the virtualized transcript — is picked
-  up when the page loads its records (`/ui/list`), not live: the page keeps no
+  up when the page asks for its records (`/ui/list`), not pushed: the page keeps no
   session-level event stream. Inside a document, the model's output still streams
-  live over that document's own SSE channel.
+  live over that document's own SSE channel. Every seat asks once when it mounts; the
+  **HTML manager**, which replaces the transcript and therefore never sees a tool card
+  publish, also re-asks every 2.5 s while it is on screen (0.1.6's third fix). Watch it
+  with the manager open and a page created from elsewhere — it must appear within a few
+  seconds, without leaving the view.
 - The measurement to expect from a document is its own `innerWidth`/`innerHeight`.
   A first reading of `0×0` with `visibility: hidden` happens while a seat is still
   activating; the next reading settles. Do not judge a seat on one sample.
