@@ -41,6 +41,12 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Changed
 
+- The manager page listens to the host instead of only asking it. A new page-scoped stream —
+  `GET …/watch?sessionId=…`, the shell's counterpart of the document's `/events` — carries a record
+  opening, changing or closing, and a project's process starting or stopping. The page applies each
+  event as it arrives, so a program built from another tab, or reaped by the host after ten idle
+  minutes, is reflected at once; the 2.5 s record poll and the 5 s catalogue poll stay as the
+  fallback for a page whose stream cannot connect.
 - The HTML manager is the design's **Web task manager**. The page is a title, two cards that are also
   its tabs — `本会话的界面 (n)` (plain front-end pages) and `带后台 (n)` (programs whose process lives
   in the host) — and one table under them headed `程序名(AID)` / `程序状态`. A row carries the
@@ -62,6 +68,13 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- A closed program's row ends when its process is gone. Closing a backend program's panel keeps its
+  row (that is the state the row exists for), but the bookmark that kept it had no end: once the
+  host reaped the process — ten idle minutes, or a stop from anywhere — the manager still listed the
+  program as `后台运行` until the page was reloaded, and the page had no third word to say it was
+  not running. A catalogue reading *asked for after* the close now retires the bookmark when it
+  reports the process gone; a reading asked for before the close cannot judge it, which is exactly
+  the stale answer the bookmark exists to survive.
 - Closing a backend program's panel — its own ✕, a closed right-column tab, any way that is not the
   manager's `关闭` — keeps its row on the manager page. The row used to survive only because the host
   happened to report the process as loaded, and that reading is up to five seconds old, so a program

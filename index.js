@@ -1483,7 +1483,16 @@ function createStore(root) {
  * purged for that directory first. That purge is also why the entry is CommonJS: an ES module
  * graph cannot be invalidated, so only the entry file would ever reload.
  */
-function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS, idleMs = APP_IDLE_MS, residentFor }) {
+function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS, idleMs = APP_IDLE_MS, residentFor, onChange }) {
+  /** Tell the pages watching what changed. A page that cannot hear it polls; this only makes it fast. */
+  function notice(payload) {
+    if (typeof onChange !== 'function') return;
+    try {
+      onChange(payload);
+    } catch (error) {
+      logger?.warn?.(`dsh-htmlui: backend listener failed: ${error?.message ?? error}`);
+    }
+  }
   const require = createRequire(import.meta.url);
   /** slug -> the loaded backend: its module, its call counters, and its idle timer. */
   const loaded = new Map();
@@ -1555,6 +1564,7 @@ function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS, idleMs = AP
     if (entry.idle !== undefined) clearTimeout(entry.idle);
     purge(entry.dir);
     stop(entry, reason);
+    notice({ slug, loaded: false, reason });
     return true;
   }
 
@@ -1593,6 +1603,7 @@ function createBackends({ store, logger, timeoutMs = APP_TIMEOUT_MS, idleMs = AP
     // already sees a warm backend instead of racing it.
     if (entry.started !== undefined) await entry.started({ slug: target.slug, dir: target.dir, pluginVersion: PLUGIN_VERSION });
     loaded.set(target.slug, entry);
+    notice({ slug: target.slug, loaded: true, resident: entry.resident === true });
     return entry;
   }
 
@@ -1769,6 +1780,25 @@ function createHub(logger) {
       for (const client of [...clients]) {
         if (typeof isDeclared === 'function' && !isDeclared(client.uiId)) continue;
         if (!write(client, 'store', payload)) {
+          clients.delete(client);
+          try {
+            client.res.end();
+          } catch {
+            /* already closed */
+          }
+        }
+      }
+    },
+    /**
+     * Push one event to the pages that are watching — the manager view — not to the documents.
+     *
+     * A project's process starting or stopping is not a fact about one interface: it belongs to
+     * the page that lists programs, and that page is not a document.
+     */
+    pushShells(event, payload) {
+      for (const client of [...clients]) {
+        if (client.shell !== true) continue;
+        if (!write(client, event, payload)) {
           clients.delete(client);
           try {
             client.res.end();
@@ -1978,7 +2008,17 @@ export function apply(ctx, config) {
   const hub = createHub(ctx.logger);
   const logger = ctx.logger;
   /** The project backends this activation has loaded; see `createBackends`. */
-  const backends = createBackends({ store, logger, timeoutMs: appTimeoutMs, idleMs: backendIdleMs, residentFor: store.residentFor });
+  const backends = createBackends({
+    store,
+    logger,
+    timeoutMs: appTimeoutMs,
+    idleMs: backendIdleMs,
+    residentFor: store.residentFor,
+    // A process starting or stopping is the one fact the page cannot see by itself: `/templates`
+    // reports it, but only when asked. Push it to the pages watching so the manager's list is the
+    // host's truth rather than the last reading's.
+    onChange: (payload) => hub.pushShells('backend', payload),
+  });
   /** The slugs whose backend module is loaded right now (the map is small; this stays cheap). */
   function loadedSlugs() {
     return new Set(backends.status().map((entry) => entry.slug));
@@ -3347,6 +3387,49 @@ export function apply(ctx, config) {
     res.end(source);
   }
 
+  /**
+   * The page's own event stream: what the manager listens to.
+   *
+   * `/events` belongs to one document and is authenticated by its capability token; the manager is
+   * not a document, it is the shell, so this stream is a plain GET like `/ui/list` and the page's
+   * origin is the whole guard. What it carries is no more than the list already returns — which
+   * record opened, changed or closed in *this* session, and which project's process started or
+   * stopped — so a manager that stays open is never showing a reading it has outgrown.
+   */
+  function handleWatch(req, res, url) {
+    const sessionId = url.searchParams.get('sessionId') ?? '';
+    if (sessionId.length === 0) {
+      sendText(res, 400, 'sessionId is required');
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-store, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+      ...corsHeaders(),
+    });
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    const client = { res, uiId: undefined, sessionId, shell: true, timer: undefined };
+    client.timer = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        hub.remove(client);
+        clearInterval(client.timer);
+      }
+    }, SSE_HEARTBEAT_MS);
+    if (typeof client.timer.unref === 'function') client.timer.unref();
+    const cleanup = () => {
+      clearInterval(client.timer);
+      hub.remove(client);
+    };
+    req.on('close', cleanup);
+    req.on('error', cleanup);
+    res.on('close', cleanup);
+    hub.add(client);
+  }
+
   function handleEvents(req, res, url) {
     const uiId = url.searchParams.get('uiId') ?? '';
     const token = url.searchParams.get('t') ?? '';
@@ -3777,6 +3860,10 @@ export function apply(ctx, config) {
       if (path === `${ROUTE_PREFIX}/assets/${BRIDGE_FILE}`) {
         if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
         return handleAsset(req, res, url);
+      }
+      if (path === `${ROUTE_PREFIX}/watch`) {
+        if (method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method not allowed' });
+        return handleWatch(req, res, url);
       }
       if (path === `${ROUTE_PREFIX}/events`) {
         if (method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method not allowed' });

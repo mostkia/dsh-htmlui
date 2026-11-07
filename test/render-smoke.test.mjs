@@ -2163,6 +2163,39 @@ test('a program with a backend sits under 带后台 from its first frame', () =>
 
 // ------------------------------------------- a closed panel is not a closed program
 
+test('the row a close leaves behind ends when the host says the process is gone', () => {
+  // The bookmark exists for one window: the seconds between closing a running program's panel and
+  // the catalogue saying its process is still up. Once a reading *asked for after the close* says
+  // the process is gone, the row is a claim about nothing — and leaving it there made a stopped
+  // program look like a running one until the page was reloaded.
+  setCatalogue([backendProject({ loaded: false, resident: false })]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-gone0001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+  ]);
+  __internals.dismissRecord('ui-gone0001');
+  assert.deepEqual(__internals.managerRowsFor('session-1').map((row) => row.key), ['heimiao'], 'the close leaves a row');
+
+  const closedAt = __internals.state.dismissedSince.get('heimiao');
+  assert.equal(typeof closedAt, 'number', 'the close is stamped');
+  // An answer asked for *before* the close cannot judge it: that is the stale reading this whole
+  // bookmark exists to survive.
+  __internals.settleDismissedTemplates(closedAt - 1);
+  assert.deepEqual(__internals.managerRowsFor('session-1').map((row) => row.key), ['heimiao'], 'a stale reading leaves it alone');
+
+  // Still loaded when the host is asked: the row is the truth, and stays.
+  setCatalogue([backendProject({ loaded: true })]);
+  __internals.settleDismissedTemplates(closedAt + 1);
+  assert.deepEqual(__internals.managerRowsFor('session-1').map((row) => row.key), ['heimiao'], 'a running process keeps its row');
+
+  // The process stops (idle, or stopped elsewhere): the next reading retires the row.
+  setCatalogue([backendProject({ loaded: false, resident: false })]);
+  __internals.settleDismissedTemplates(closedAt + 2);
+  assert.deepEqual(__internals.managerRowsFor('session-1'), [], 'a stopped process takes its row with it');
+  assert.equal(__internals.state.dismissedTemplates.has('heimiao'), false, 'and the bookmark is over');
+  resetStore();
+  state.templates.items = [];
+});
+
 test('a backend program keeps its row after its own interface is closed', () => {
   // Closing the panel is not ending the program: the process is still up, and its row is the only
   // place that can end it or start the interface again. The row used to survive only because the

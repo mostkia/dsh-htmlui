@@ -325,11 +325,17 @@ window.__ModuleLoader__.load({
       /**
        * Projects whose interface the reader closed while the process stayed up.
        *
-       * The manager keeps a row per program, and a program with no interface is the state
-       * 「关闭UI界面」 leaves behind: the process is still loaded, so the row — and the 「重启UI界面」
-       * control on it — has to survive the catalogue refresh that follows the close.
+       * The manager keeps a row per program, and a program with no interface is the state the old
+       * 「关闭UI界面」 left behind: the process is still loaded, so the row has to survive the close.
+       *
+       * It is a bookmark, not a fact: `dismissedSince` records when the close happened, and a
+       * catalogue reading *asked for after* that moment which says the process is gone retires the
+       * bookmark. Without that end a closed program kept its row for good — a row that looked
+       * running long after the host had reaped the process, until the page was reloaded.
        */
       dismissedTemplates: new Set(),
+      /** slug -> when its interface was closed here, so only a newer reading can judge it. */
+      dismissedSince: new Map(),
       /** Right-sidebar availability: the native split needs the column's tab service. */
       rightPane: { available: false, controller: undefined, opened: new Set() },
       /** The template drawer: what the catalogue holds and whether it is showing. */
@@ -563,6 +569,30 @@ window.__ModuleLoader__.load({
     /** Forget a dismissal once the host no longer lists the record at all. */
     function forgetDismissal(uiId) {
       state.dismissed.delete(uiId);
+    }
+
+    /**
+     * One event from the page's own stream (`/watch`), applied to the store.
+     *
+     * The host is the authority on what exists: a record it says opened is published, one it says
+     * closed is retired — and its dismissal is forgotten, because the host is already done with
+     * that id. Nothing here decides anything on its own: a page that cannot hear the stream keeps
+     * using the polls, which stay in place for exactly that reason.
+     */
+    function applyHostEvent(payload) {
+      if (payload === null || typeof payload !== 'object') return false;
+      const ui = payload.ui;
+      if (ui === null || typeof ui !== 'object') return false;
+      const uiId = String(ui.uiId ?? '');
+      if (uiId.length === 0) return false;
+      if (payload.action === 'close') {
+        retire(uiId, typeof ui.sessionId === 'string' && ui.sessionId.length > 0 ? ui.sessionId : undefined);
+        forgetDismissal(uiId);
+        bump();
+        return true;
+      }
+      publish(ui, { fromHost: true });
+      return true;
     }
 
     /**
@@ -1454,9 +1484,13 @@ window.__ModuleLoader__.load({
 
     /** Load the catalogue the host keeps, so the drawer can offer it. */
     function loadTemplates() {
+      // Stamped before the request: an answer is only allowed to judge a close that happened
+      // *before* it was asked for (see `settleDismissedTemplates`).
+      const requestedAt = Date.now();
       return postJson('/templates', {}).then((value) => {
         if (value !== null && value.ok === true && Array.isArray(value.templates)) {
           state.templates.items = value.templates;
+          settleDismissedTemplates(requestedAt);
           state.templates.candidates = Array.isArray(value.candidates) ? value.candidates : [];
           state.templates.error = null;
           // The directory travels with the catalogue: the page shows where the list came
@@ -1522,22 +1556,45 @@ window.__ModuleLoader__.load({
       return undefined;
     }
 
-    /** The age past which the catalogue in hand is not trusted about a running process. */
-    const BACKEND_CATALOGUE_FRESH_MS = 30000;
+    /** Remember that this project's interface was closed here, and when. */
+    function rememberDismissedTemplate(slug) {
+      if (typeof slug !== 'string' || slug.length === 0) return;
+      state.dismissedTemplates.add(slug);
+      state.dismissedSince.set(slug, Date.now());
+    }
+
+    /** The bookmark is over: the manager stops keeping a row for this project. */
+    function forgetDismissedTemplate(slug) {
+      state.dismissedTemplates.delete(slug);
+      state.dismissedSince.delete(slug);
+    }
 
     /**
-     * Whether the catalogue in hand can answer the backend questions on the manager page.
+     * End the bookmarks the host has answered about.
      *
-     * Two ways it cannot: a host that answered before the field existed, and a reading old
-     * enough that a backend stopped since then would still be drawn as running. The result is
-     * asked for once per mount — a request per render would ask the host on every keystroke.
+     * A closed project keeps its row only while its process is still loaded — that is the state
+     * the row exists for. Once a catalogue reading that was asked for *after* the close reports
+     * the process gone, there is nothing left to show, and keeping the row made a stopped program
+     * look like a running one until the page was reloaded (the manager's status has no third word
+     * for "not running", so the row's own presence is the claim). The `requestedAt` guard keeps a
+     * stale answer — asked for before the close, answered after — from dropping the row in the
+     * second the process is still up.
      */
-    function backendCatalogueStale() {
-      if (state.templates.loaded !== true) return true;
-      const at = state.templates.loadedAt;
-      if (typeof at !== 'number' || !Number.isFinite(at) || Date.now() - at > BACKEND_CATALOGUE_FRESH_MS) return true;
+    function settleDismissedTemplates(requestedAt) {
+      if (state.dismissedSince.size === 0) return;
+      const bySlug = new Map();
       const items = Array.isArray(state.templates.items) ? state.templates.items : [];
-      return items.length > 0 && !items.some((item) => item !== null && item !== undefined && item.backend !== undefined);
+      for (const item of items) {
+        if (item !== null && item !== undefined && typeof item.slug === 'string') bySlug.set(item.slug, item);
+      }
+      for (const slug of [...state.dismissedTemplates]) {
+        const since = state.dismissedSince.get(slug);
+        if (typeof since !== 'number' || !Number.isFinite(since) || !(since < requestedAt)) continue;
+        const template = bySlug.get(slug);
+        const backend = template === undefined ? undefined : backendInfoOf(template);
+        // No catalogue entry at all: the project was deleted, so the bookmark points at nothing.
+        if (backend === undefined || backend.loaded !== true) forgetDismissedTemplate(slug);
+      }
     }
 
     /**
@@ -4119,7 +4176,7 @@ window.__ModuleLoader__.load({
        */
       const endProgram = () => {
         for (const record of records) dismissRecord(record.uiId);
-        if (row.slug.length > 0) state.dismissedTemplates.delete(row.slug);
+        if (row.slug.length > 0) forgetDismissedTemplate(row.slug);
         onStatus(null);
         if (hasBackend !== true) return;
         stopBackend(row.slug).then((result) => {
@@ -4446,7 +4503,10 @@ window.__ModuleLoader__.load({
       // started a second ago loaded its backend without telling anyone here, and a control disabled
       // by a stale reading is worse than no control at all. A hidden page asks for nothing.
       useEffect(() => {
-        if (backendCatalogueStale()) loadTemplates();
+        // Always read once on mount: the catalogue is this page's record of *processes*, and the
+        // bookmark that keeps a closed program's row is retired by a reading asked for after the
+        // close. A shared reading from two seconds ago is exactly what cannot judge it.
+        loadTemplates();
         const timer = setInterval(() => {
           if (document.hidden !== true) loadTemplates();
         }, 5000);
@@ -4474,6 +4534,45 @@ window.__ModuleLoader__.load({
         };
         const timer = setInterval(refresh, MANAGER_RECORD_POLL_MS);
         return () => clearInterval(timer);
+      }, [sessionId]);
+      // The page's own stream: the host pushes what changed — a record opened, changed or closed
+      // in this session, and a project's process starting or stopping — so this list is the
+      // host's truth rather than the last reading's. The polls stay as the fallback for a page
+      // whose stream cannot connect, and cost nothing while it can.
+      useEffect(() => {
+        if (sessionId === undefined) return undefined;
+        if (typeof EventSource !== 'function') return undefined;
+        let source;
+        try {
+          source = new EventSource(`${ROUTE_BASE}/watch?sessionId=${encodeURIComponent(sessionId)}`);
+        } catch {
+          return undefined;
+        }
+        let pending = null;
+        const onUi = (event) => {
+          try {
+            applyHostEvent(JSON.parse(event.data));
+          } catch {
+            // A frame this page cannot read is one poll away from being repaired.
+          }
+        };
+        // A process starting and stopping is reported per project, and several can land at once
+        // (a page opening three panels): one catalogue read answers all of them.
+        const onBackend = () => {
+          if (pending !== null) clearTimeout(pending);
+          pending = setTimeout(() => {
+            pending = null;
+            loadTemplates();
+          }, 120);
+        };
+        source.addEventListener('ui', onUi);
+        source.addEventListener('backend', onBackend);
+        return () => {
+          if (pending !== null) clearTimeout(pending);
+          source.removeEventListener('ui', onUi);
+          source.removeEventListener('backend', onBackend);
+          source.close();
+        };
       }, [sessionId]);
       // Two groups, one partition: cross-session backend programs first, this session's
       // interfaces second. A program appears in exactly one of them (see
@@ -4883,7 +4982,7 @@ window.__ModuleLoader__.load({
       if (closedSlug.length > 0) {
         const template = templateBySlug(closedSlug);
         const backend = template === undefined ? undefined : backendInfoOf(template);
-        if (backend !== undefined && backend.declared === true) state.dismissedTemplates.add(closedSlug);
+        if (backend !== undefined && backend.declared === true) rememberDismissedTemplate(closedSlug);
       }
       const confirm = (ok) => {
         if (ok) return;
@@ -7758,7 +7857,9 @@ window.__ModuleLoader__.load({
         deleteArmedInfo,
         stopBackend,
         backendInfoOf,
-        backendCatalogueStale,
+        settleDismissedTemplates,
+        rememberDismissedTemplate,
+        applyHostEvent,
         markTemplatesAsked,
         toggleTemplates,
         applyTemplate,

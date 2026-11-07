@@ -1008,6 +1008,29 @@ test('a transcript card cannot republish what the host has dropped', () => {
   assert.equal(__internals.recordsFor(sessionId).length, 2, 'a new interface appears immediately');
 });
 
+test('the page’s stream applies the host’s record events', () => {
+  // The manager subscribes to `/watch`; these are the two events it acts on. The host is the
+  // authority: what it says opened is published, what it says closed is retired — and a close also
+  // ends the local dismissal, because the host is already done with that id.
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  __internals.state.dismissed.clear();
+  __internals.state.hostListed.clear();
+  __internals.state.hostSynced.clear();
+  __internals.state.hostSyncedAt.clear();
+  const sessionId = 'session-stream';
+  const ui = { uiId: 'ui-sse00001', sessionId, title: '流', placement: 'float', revision: 1, bytes: 5, sizeText: '', createdAt: Date.now() };
+  assert.equal(__internals.applyHostEvent({ action: 'open', ui }), true, 'an open event is applied');
+  assert.equal(__internals.recordsFor(sessionId).length, 1, 'and the record exists');
+  __internals.state.dismissed.add('ui-sse00001');
+  assert.equal(__internals.applyHostEvent({ action: 'close', ui }), true, 'a close event is applied');
+  assert.equal(__internals.recordsFor(sessionId).length, 0, 'and the record is gone');
+  assert.equal(__internals.state.dismissed.has('ui-sse00001'), false, 'a closed id is no longer dismissed');
+  // Frames this page cannot read change nothing — one poll would repair them anyway.
+  assert.equal(__internals.applyHostEvent(null), false);
+  assert.equal(__internals.applyHostEvent({ action: 'open', ui: { uiId: '' } }), false);
+});
+
 test('a list answer cannot retire a record created after it was asked for', () => {
   // The answer a seat shares is cached for two seconds, so it can be older than the render that
   // published a program. Retiring that program made it vanish from the manager until the next
