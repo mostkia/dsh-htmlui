@@ -48,7 +48,9 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
   is on screen, `后台运行` (blue) once it is away or gone — and exactly two controls: a gear and a dark
   `关闭` pill. The gear opens `重新设置视窗`: the four positions the create dialog offers (the one
   it is drawn in marked), with `最小化`/`恢复显示` in that panel's title bar for the forms that can
-  hide; pressing the gear a second time closes the panel. That replaces the row's four buttons
+  hide; that control is always drawn — dimmed with a reason on hover and on press when the form has
+  no minimized state — because a button that quietly disappears reads as a change that never landed.
+  Pressing the gear a second time closes the panel. That replaces the row's four buttons
   (minimize/maximize, close UI, restart UI, close backend task, close session), and `关闭` now means
   one thing — the program ends, its interfaces close and its process stops — after a second press,
   instead of asking the reader to tell two destructive actions apart. The two cards are capped at

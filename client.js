@@ -1039,6 +1039,7 @@ window.__ModuleLoader__.load({
         managerViewportTitle: 'Set the window',
         managerViewportMinimize: 'Minimize',
         managerViewportRestore: 'Show it again',
+        managerViewportNoHide: 'This form has no minimized state',
         managerViewportReloadNote: 'Choosing a position reloads the interface.',
         managerEndProgram: 'Close',
         managerConfirmEnd: 'Confirm?',
@@ -1218,6 +1219,7 @@ window.__ModuleLoader__.load({
         managerViewportTitle: '重新设置视窗',
         managerViewportMinimize: '最小化',
         managerViewportRestore: '恢复显示',
+        managerViewportNoHide: '这个形态不能最小化',
         managerViewportReloadNote: '切换位置会重新加载界面。',
         managerEndProgram: '关闭',
         managerConfirmEnd: '确认关闭？',
@@ -4193,31 +4195,42 @@ window.__ModuleLoader__.load({
                   tr('managerViewportTitle', 'Set the window'),
                 ),
                 // 最小化 lives in the title bar, where the design puts it: it is a property of
-                // the window this menu is about, not a fifth position to pick.
-                canHide === true
-                  ? h(
-                      'button',
-                      {
-                        type: 'button',
-                        onClick: () => shift('minimize'),
-                        'data-window-minimize': '',
-                        style: {
-                          font: 'inherit',
-                          fontSize: '11.5px',
-                          lineHeight: '1',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          border: '1px solid rgba(255, 255, 255, 0.4)',
-                          background: 'transparent',
-                          color: '#ffffff',
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap',
-                          flex: '0 0 auto',
-                        },
-                      },
-                      hidden ? tr('managerViewportRestore', 'Show it again') : tr('managerViewportMinimize', 'Minimize'),
-                    )
-                  : null,
+                // the window this menu is about, not a fifth position to pick. It is always drawn,
+                // because a control that quietly disappears reads as a change that did not land —
+                // the forms with no minimized state (an inline surface, a background layer, a
+                // program whose interface is closed) wear it dimmed, and pressing it says why.
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    'data-window-minimize': '',
+                    'aria-disabled': canHide === true ? undefined : 'true',
+                    title: canHide === true ? undefined : tr('managerViewportNoHide', 'This form has no minimized state'),
+                    onClick: () => {
+                      if (canHide === true) {
+                        shift('minimize');
+                        return;
+                      }
+                      setMenuOpen(false);
+                      onStatus(tr('managerViewportNoHide', 'This form has no minimized state'));
+                    },
+                    style: {
+                      font: 'inherit',
+                      fontSize: '11.5px',
+                      lineHeight: '1',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 255, 255, 0.4)',
+                      background: 'transparent',
+                      color: '#ffffff',
+                      cursor: canHide === true ? 'pointer' : 'not-allowed',
+                      opacity: canHide === true ? 1 : 0.45,
+                      whiteSpace: 'nowrap',
+                      flex: '0 0 auto',
+                    },
+                  },
+                  hidden ? tr('managerViewportRestore', 'Show it again') : tr('managerViewportMinimize', 'Minimize'),
+                ),
               ),
               h(
                 'div',

@@ -1361,14 +1361,28 @@ test('the window menu offers minimize for every form that has one, and none for 
   const rows = __internals.managerRowsFor('session-1');
   const menuOf = (row) => render(__internals.HtmlUiManagerRow, { row, sessionId: 'session-1', onStatus: () => {}, menuOpen: true, props: {} });
   const placementOf = (row) => row.records[0].placement;
-  // A float and a fullscreen carry a hide control of their own. A dock-right record only has one
-  // while the right column can actually open a tab — with no controller bound it falls back to
-  // the composer dock, which has no hide of its own, so there is nothing to mirror there.
+  const minimizeOf = (row) => menuOf(row).elements.find((element) => element.type === 'button' && element.props?.['data-window-minimize'] !== undefined);
+  // Every menu carries the control, in the title bar: a control that quietly disappears reads as
+  // a change that did not land. A float and a fullscreen carry a hide state of their own; a
+  // dock-right record only has one while the right column can open a tab (with no controller
+  // bound it falls back to the composer dock, which has no hide), and a background layer or an
+  // inline surface has nothing a "minimize" could mean. Those wear it dimmed and say so.
+  for (const row of rows) {
+    assert.ok(minimizeOf(row) !== undefined, `every program keeps the slot (${placementOf(row)})`);
+  }
   assert.deepEqual(
-    rows.filter((row) => buttonsLabelled(menuOf(row), 'Minimize').length === 1).map(placementOf).sort(),
+    rows.filter((row) => minimizeOf(row).props['aria-disabled'] !== 'true').map(placementOf).sort(),
     ['float', 'fullscreen'],
-    'only the two forms that can be put away offer it',
+    'only the two forms that can be put away take the press',
   );
+  const blocked = rows.find((row) => placementOf(row) === 'inline');
+  assert.equal(minimizeOf(blocked).props['aria-disabled'], 'true', 'an inline surface cannot be put away');
+  assert.equal(minimizeOf(blocked).props.title, 'This form has no minimized state', 'and its tooltip says why');
+  // Pressing it is not silent: the panel closes and the page says the same sentence.
+  const statuses = [];
+  const telling = render(__internals.HtmlUiManagerRow, { row: blocked, sessionId: 'session-1', onStatus: (text) => statuses.push(text), menuOpen: true, props: {} });
+  telling.elements.find((element) => element.props?.['data-window-minimize'] !== undefined).props.onClick();
+  assert.deepEqual(statuses, ['This form has no minimized state'], 'the press explains itself');
   // A background layer is always on screen and an inline surface lives in the conversation, so
   // neither can be hidden and neither gets an item that could not do anything.
   for (const row of rows) {
@@ -1779,7 +1793,10 @@ test('a program whose process is loaded keeps its row after its interface is clo
     const row = __internals.managerRowsFor('session-1')[0];
     const menu = render(__internals.HtmlUiManagerRow, { row, sessionId: 'session-1', onStatus: () => {}, menuOpen: true, props: {} });
     assert.equal(buttonsLabelled(menu, '右侧折叠栏').length, 1, 'the menu offers a position to start it again');
-    assert.equal(buttonsLabelled(menu, '最小化').length, 0, 'and there is nothing to minimize');
+    // The minimize slot is still drawn — it is the same panel — but there is no interface to put
+    // away, so it is dimmed rather than pretending.
+    const minimize = menu.elements.find((element) => element.props?.['data-window-minimize'] !== undefined);
+    assert.equal(minimize.props['aria-disabled'], 'true', 'and the minimize slot has nothing to act on');
   });
   // Another session sees it too: "loaded" is the one session-independent fact the host reports
   // about a process, and a reader looking for the way to end it is looking at this page.
