@@ -2161,6 +2161,32 @@ test('a program with a backend sits under 带后台 from its first frame', () =>
   state.templates.items = [];
 });
 
+// ------------------------------------------- a closed panel is not a closed program
+
+test('a backend program keeps its row after its own interface is closed', () => {
+  // Closing the panel is not ending the program: the process is still up, and its row is the only
+  // place that can end it or start the interface again. The row used to survive only because the
+  // host happened to report the process as loaded — a reading up to five seconds old — so a
+  // program whose interface was just closed could be missing from the manager for that long.
+  setCatalogue([backendProject({ loaded: false, resident: false }), { slug: 'calm', name: '平静', description: '', bytes: 1 }]);
+  resetStore([
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-keep0001', sessionId: 'session-1', title: '看板', placement: 'float', template: 'heimiao', revision: 1, bytes: 5 }, undefined),
+    __internals.recordFromMeta({ htmlui: true, op: 'render', uiId: 'ui-keep0002', sessionId: 'session-1', title: '平静', placement: 'float', template: 'calm', revision: 1, bytes: 5 }, undefined),
+  ]);
+  assert.deepEqual(
+    __internals.managerRowsFor('session-1').map((row) => row.key).sort(),
+    ['calm', 'heimiao'],
+    'both programs start with a row',
+  );
+  __internals.dismissRecord('ui-keep0001');
+  __internals.dismissRecord('ui-keep0002');
+  const rows = __internals.managerRowsFor('session-1');
+  assert.deepEqual(rows.map((row) => row.key), ['heimiao'], 'the backend program keeps a row with no interface');
+  assert.equal(rows[0].records.length, 0, 'which is a process row');
+  resetStore();
+  state.templates.items = [];
+});
+
 // ------------------------------------------- the restart path reveals what it rendered
 
 test('restarting a project into the right column opens the column, exactly as the create dialog does', async () => {

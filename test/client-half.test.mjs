@@ -1008,6 +1008,35 @@ test('a transcript card cannot republish what the host has dropped', () => {
   assert.equal(__internals.recordsFor(sessionId).length, 2, 'a new interface appears immediately');
 });
 
+test('a list answer cannot retire a record created after it was asked for', () => {
+  // The answer a seat shares is cached for two seconds, so it can be older than the render that
+  // published a program. Retiring that program made it vanish from the manager until the next
+  // poll — an empty list for no reason the reader could see.
+  __internals.state.byId.clear();
+  __internals.state.bySession.clear();
+  __internals.state.dismissed.clear();
+  __internals.state.hostListed.clear();
+  __internals.state.hostSynced.clear();
+  __internals.state.hostSyncedAt.clear();
+  const sessionId = 'session-old-answer';
+  __internals.publish(
+    __internals.recordFromMeta(
+      { htmlui: true, op: 'render', uiId: 'ui-race0001', sessionId, title: '新程序', placement: 'float', revision: 1, bytes: 5, createdAt: 2_000 },
+      undefined,
+    ),
+  );
+  assert.equal(__internals.recordsFor(sessionId).length, 1);
+
+  // The answer was asked for before the record existed: it cannot know about it, so it decides
+  // nothing about it.
+  __internals.convergeSession(sessionId, [], 1_000);
+  assert.equal(__internals.recordsFor(sessionId).length, 1, 'a stale answer leaves a newer record alone');
+
+  // An answer asked for afterwards is authoritative, and drops it as it always did.
+  __internals.convergeSession(sessionId, [], 3_000);
+  assert.equal(__internals.recordsFor(sessionId).length, 0, 'a later answer still decides');
+});
+
 test('one message key means one thing everywhere it is used', () => {
   // `unavailable` was once used for both "the catalogue is unavailable" and "this
   // document failed to load", so a broken frame said the template catalogue was

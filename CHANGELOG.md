@@ -62,6 +62,18 @@ All notable changes to this package. Versions follow [Semantic Versioning](https
 
 ### Fixed
 
+- Closing a backend program's panel — its own ✕, a closed right-column tab, any way that is not the
+  manager's `关闭` — keeps its row on the manager page. The row used to survive only because the host
+  happened to report the process as loaded, and that reading is up to five seconds old, so a program
+  whose panel was closed right after it was built was missing from the page until the next reading:
+  an empty `带后台` list, then the program appeared by itself. Every close path now remembers the
+  project as "interface closed, process may still be up", and the manager's own `关闭` clears it
+  again because that ends the process too.
+- The manager page asks the host for the current list instead of sharing a seat's two-second-old
+  copy, which could predate the program the reader had just closed or built. A list answer that was
+  asked for *before* a program existed can no longer retire it either: the answer is authoritative
+  about what it was asked, and a record published after that moment is left alone until the next
+  poll.
 - A program that declares a backend sits under `带后台` from its first frame. The card was chosen by
   whether the host currently reported the process as loaded, so a webapp created a moment ago sat
   under `本会话的界面` — while its own row already wore the 带后台 chips — until the next catalogue

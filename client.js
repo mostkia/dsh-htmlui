@@ -460,14 +460,20 @@ window.__ModuleLoader__.load({
     /**
      * Settle what the cards announced: the host's list decides, exactly as it does for a
      * card that arrives after a sync. Asked once per record, and never twice.
+     *
+     * A card written *after* the answer was asked for is the one exception: the host stores a
+     * tool's record before it returns, so the answer simply cannot know it — and dropping it
+     * there is how a freshly built program disappeared until the next poll.
      */
-    function settleHeld(sessionId) {
+    function settleHeld(sessionId, startedAt) {
       const held = heldRecords.get(sessionId);
       if (held === undefined) return;
       heldRecords.delete(sessionId);
       const listed = state.hostListed.get(sessionId);
       for (const [uiId, record] of held) {
-        if (listed !== undefined && listed.has(uiId)) publish(record, { fromHost: true });
+        const listedNow = listed !== undefined && listed.has(uiId);
+        const newer = Number.isFinite(startedAt) && Number.isFinite(record.createdAt) && record.createdAt > startedAt;
+        if (listedNow || newer) publish(record, { fromHost: true });
       }
     }
 
@@ -597,7 +603,7 @@ window.__ModuleLoader__.load({
      * reports, and drop local records it no longer knows about (closed from
      * another page, or removed by the model).
      */
-    function convergeSession(sessionId, uis) {
+    function convergeSession(sessionId, uis, startedAt) {
       if (typeof sessionId !== 'string' || sessionId.length === 0 || !Array.isArray(uis)) return;
       const seen = new Set();
       for (const record of uis) {
@@ -611,9 +617,15 @@ window.__ModuleLoader__.load({
       state.hostSyncedAt.set(sessionId, Date.now());
       // Whatever cards announced while this answer was in flight is settled now: the
       // list above is the only thing that can bring a record back.
-      settleHeld(sessionId);
+      settleHeld(sessionId, startedAt);
       for (const known of recordsFor(sessionId)) {
-        if (!seen.has(known.uiId)) retire(known.uiId, sessionId);
+        if (seen.has(known.uiId)) continue;
+        // A record created after this answer was *asked for* cannot be in it. The list a seat
+        // shares can be older than the render that published a program (the answer is cached for
+        // two seconds and every seat reuses it), and retiring that program made it vanish from
+        // the manager until the next poll — an empty list for no reason the reader could see.
+        if (Number.isFinite(startedAt) && Number.isFinite(known.createdAt) && known.createdAt > startedAt) continue;
+        retire(known.uiId, sessionId);
       }
       // A dismissal ends when the host stops listing the id: from then on a record
       // with that id is a new interface the user has not closed.
@@ -643,7 +655,7 @@ window.__ModuleLoader__.load({
       state.hostSyncing.add(sessionId);
       const promise = postJson('/ui/list', { sessionId })
         .then((value) => {
-          if (value !== null && value.ok === true) convergeSession(sessionId, value.uis);
+          if (value !== null && value.ok === true) convergeSession(sessionId, value.uis, now);
           return value;
         })
         .finally(() => {
@@ -4450,6 +4462,10 @@ window.__ModuleLoader__.load({
       // nothing.
       useEffect(() => {
         if (sessionId === undefined) return undefined;
+        // This page is about to show a list, so it shares nothing: the 2s answer another seat
+        // asked for can predate the program the reader just closed or built, and "empty until the
+        // next poll" is the one thing a task manager must never say. Ask for the truth now.
+        syncSession(sessionId, { force: true });
         const refresh = () => {
           if (document.hidden === true) return;
           // `force` skips the 2s share, which exists for seats mounting together, not for a
@@ -4857,6 +4873,18 @@ window.__ModuleLoader__.load({
       // mark that outlived a refusal is how an interface came back on the next load while
       // the page insisted it was gone.
       state.dismissed.add(uiId);
+      // A backend project keeps its row after its interface is gone: the process is still up, and
+      // that row is the only place that can end it or start the interface again. Remembering the
+      // project here covers every way an interface closes — the surface's own ✕, a closed right
+      // column tab, the manager's 关闭 — instead of the one button that used to set this flag.
+      // The manager's own 关闭 removes it again right after, because that ends the process too.
+      const closedRecord = state.byId.get(uiId);
+      const closedSlug = closedRecord !== undefined && typeof closedRecord.template === 'string' ? closedRecord.template : '';
+      if (closedSlug.length > 0) {
+        const template = templateBySlug(closedSlug);
+        const backend = template === undefined ? undefined : backendInfoOf(template);
+        if (backend !== undefined && backend.declared === true) state.dismissedTemplates.add(closedSlug);
+      }
       const confirm = (ok) => {
         if (ok) return;
         state.dismissed.delete(uiId);
